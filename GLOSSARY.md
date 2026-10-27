@@ -139,3 +139,13 @@ _Avoid_: 힌트, 강제 대사, 스크립트
 **내부 상태 패널(Internal State Panel)**:
 레버리지 누적·오개념 진행·마지막 트리거를 보여 주는 패널. 대화 테스트에서만 표시한다.
 _Avoid_: 디버그 패널, 사이드바
+
+### 데이터 접근
+
+**RLS 2차 방어(RLS Second Line)**:
+anon/authenticated 역할(Data API 직접 접근)을 모든 테이블에서 전면 거부하는 설정. 서버 경로(service role)에는 걸리지 않으므로 서버의 접근 제어는 API 검사가 유일하다.
+_Avoid_: 서버 측 2차 방어, 사용자 단위 RLS
+
+**공개 시나리오 뷰(scenarios_public)**:
+`scenarios`에서 내부 설정과 컴파일된 프롬프트를 뺀 `security_invoker` 뷰. 예비교사용 시나리오 읽기는 이 뷰와 `teacher_scenarios(user_id)` 함수만 거친다.
+_Avoid_: 시나리오 테이블(예비교사 경로를 가리킬 때)
