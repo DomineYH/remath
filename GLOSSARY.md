@@ -149,3 +149,13 @@ _Avoid_: 서버 측 2차 방어, 사용자 단위 RLS
 **공개 시나리오 뷰(scenarios_public)**:
 `scenarios`에서 내부 설정과 컴파일된 프롬프트를 빼고 활성 챗봇 언어판의 공개 대사(이름·설명·문제·특징·인사·빠른 질문)를 붙인 `security_invoker` 뷰. 학생·멘토 대사(aha·트리거 텍스트·혼란·오개념)는 담지 않는다. 예비교사용 시나리오 읽기는 이 뷰와 `teacher_scenarios(user_id)` 함수만 거친다.
 _Avoid_: 시나리오 테이블(예비교사 경로를 가리킬 때)
+
+### AI 연동
+
+**공급자 어댑터(Provider Adapter)**:
+서버 턴 파이프라인이 보는 유일한 LLM 경계. `complete({system, messages, model, effort?, signal?, context?})`로 텍스트 델타 스트림과 완료 신호를 돌려주고, 오류는 재시도 없이 그대로 올린다. OpenAI·Anthropic·Gemini 실 어댑터와 MOCK_LLM 어댑터가 같은 인터페이스를 구현한다.
+_Avoid_: 클라이언트(공급자 SDK를 뜻할 때), 커넥터, 드라이버
+
+**MOCK_LLM**:
+키 없이 동작하는 어댑터. LLM 대신 `context`(판정 결과·시나리오 대사)와 목업의 대사 규칙으로 답하며, 교정·도달·트리거 판정은 하지 않는다(그것은 서버 규칙 엔진). 1단계 목 모드와 E2E 테스트가 쓴다.
+_Avoid_: 가짜 LLM, 스텁 봇, 규칙 엔진(판정 주체를 뜻할 때)
