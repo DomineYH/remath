@@ -127,4 +127,25 @@
 
 문제 없음(확인): `.cards{minmax(310px)}`·`.pick{minmax(260px)}`(400−32=368px), `.modal{width:min(580px,100%)}`, `.row2`·`.ai-grid` 1열 전환, `.msg{max-width:86%}`, `.compose`, `.chips` 5개 wrap, `pre.prompt{pre-wrap}`.
 
-축약 **규칙**(무엇을 숨기고 무엇을 남기는가)은 이 티켓이 정하지 않는다 → 지도 "Not yet specified"의 400px 항목을 grilling 티켓으로 올린다.
+축약 **규칙**은 [400px 폭 대화 화면·상단 바·표의 축약 규칙 결정](https://github.com/DomineYH/remath/issues/17)이 정했다. 아래 4.1이 그 결과이며 1단계 티켓의 수용 기준으로 옮긴다.
+
+### 4.1 축약 규칙(결정, 티켓 17)
+
+원칙: **숨기지 않고 접는다.** 새 브레이크포인트는 만들지 않고 목업의 **640px(모바일)**·**900px(1열)** 두 개만 쓴다. 문서(viewport) 수준 가로 스크롤은 어느 폭에서도 없다(PRD 11절).
+
+| # | 대상 | 규칙(1줄) |
+|---|---|---|
+| 1 | `ChatHeader` 도구 3개(분류 토글·세션 종료·다른 학생) | ≤640px: 도구 3개를 ⋯ 메뉴 버튼 하나로 접는다. 메뉴 안 순서·문구는 그대로, 분류 토글은 체크 항목. 아바타·이름·소개는 남기고 헤더는 1줄 |
+| 2 | `InternalStatePanel` (관리자 대화 테스트) | ≤900px: 대화 **위**에 접힌 상태로 둔다(`<details>` 하나, 요약 = "내부 상태 · 마지막 트리거: …"). 펼치면 5개 박스 그대로. 오버레이 드로어는 쓰지 않는다 |
+| 3 | `AccountMenu` | ≤640px: 닉네임 버튼 하나 + 드롭다운(비밀번호 변경·로그아웃). 상단 바는 **모든 폭에서 1줄**이어야 하며, 그래서 sticky 높이가 고정되어 `.steps{top:84px}`·`.chat{max-height:calc(100vh - 140px)}`는 바꾸지 않는다. `.brand .sub`는 목업대로 ≤640px 숨김 |
+| 4 | 표 3종 | `UsersTable`·관리자 `SessionsTable`(7열)은 목업 `.tbl-wrap{overflow-x:auto}` + `min-width:860px` 유지(카드 행 없음). 내 기록 `SessionsTable`(PRD 3절: 시작·시나리오·발화 수·도달 여부·보기 5열)은 `min-width` 없이 400px에 맞춘다 |
+| 5 | 위자드 `.steps` | ≤640px: 번호 원 7개만(현재 단계 강조, 각 버튼 `aria-label`=단계 이름). 단계 이름은 패널 `h3`가 이미 보여 준다. 가로 스크롤 없음 |
+| 6 | 위자드 `PageHead` actions | ≤640px: 챗봇 언어 `SegmentedToggle`의 앞 캡션 숨김(`aria-label` 유지), "예시로 채우기"·"목록으로"는 `btn sm` |
+| 7 | 워크플로 띠 `.flow` | ≤640px: 숨긴다(`display:none`). 설명용 카드라 기능 손실 없음 |
+| 8 | 분류 행 `.clsrow` | 세 입력 칸의 `placeholder`를 머리행 문구(분류명·어떤 경우에 해당하는지·예시 발문)로 **항상** 둔다. ≤700px 머리행 숨김은 목업대로 |
+| 9 | AI 설정 `KeyBox .mono` | `overflow-wrap:anywhere` 한 줄 |
+| 10 | 인디고 배너 `.band` | ≤640px: 패딩 24px |
+
+메뉴·드롭다운(1·3) 구현은 1단계가 고른다(`<details>` 또는 Popover API). 요구는 키보드 조작·ESC/바깥 클릭 닫힘·열린 상태 `aria-expanded`뿐이다.
+
+가정: PRD 11절 "400px 폭에서 가로 스크롤 없음"은 **문서 수준**을 뜻하고 컨테이너 내부 `overflow-x:auto`(목업 `.tbl-wrap` 그대로)는 허용한다. 이 해석이 뒤집히면 4번만 카드 행으로 바뀐다.
