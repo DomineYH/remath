@@ -177,3 +177,7 @@ _Avoid_: 클라이언트(공급자 SDK를 뜻할 때), 커넥터, 드라이버
 **MOCK_LLM**:
 키 없이 동작하는 어댑터. LLM 대신 `context`(판정 결과·시나리오 대사)와 목업의 대사 규칙으로 답하며, 교정·도달·트리거 판정은 하지 않는다(그것은 서버 규칙 엔진). 1단계 목 모드와 E2E 테스트가 쓴다.
 _Avoid_: 가짜 LLM, 스텁 봇, 규칙 엔진(판정 주체를 뜻할 때)
+
+**공급자 목록(providers.json)**:
+공급자 3사별 표시 이름·effort 파라미터 이름·공급자 전체 effort 허용 집합·모델 목록(ID, 모델별 effort 허용값, 기본 effort, 추천 여부)을 담은 정적 JSON 파일 하나(`shared/providers.json`, zod `ProvidersFile`). 서버는 기동 시 한 번 읽어 AI 설정 저장을 검증하고(불허 effort는 400 `invalid_effort`), 관리자 AI 설정 화면은 `GET /api/admin/ai/providers`로 파일을 그대로 받는다. 목록에 없는 모델은 직접 입력하며 공급자 전체 집합으로 검증한다. 갱신은 파일 교체 + 재기동이며 어댑터는 값을 조정하지 않는다.
+_Avoid_: 모델 카탈로그, 공급자 설정(AI 설정과 혼동), PROV(목업 변수명)
