@@ -1,0 +1,148 @@
+// 목업 SEED[0](가브리엘)을 PRD 6절 행 모양으로 옮긴 것. 분류 기준은 기본 세트 일부.
+export const scenario = {
+ "slug": "gabriel",
+ "lang": "ko",
+ "student_prefix": "🦊",
+ "mentor_prefix": "🦉",
+ "grade": "4학년 · 분수의 덧셈(등분)",
+ "internal": {
+  "baseline": "- 추측하여 대입해 보는 방식으로 똑같이 나누기를 사용함.\n- 팝타르트 전체를 나누어 주려고 시도하지만, 똑같이 나누어지지 않는다는 것을 깨달음.\n- 팝타르트 4개를 각각 4등분하여 각 친구에게 2/4씩 나누어 줌.\n- 마지막 팝타르트의 경우: 잠깐 10등분을 고려했다가 8등분으로 수정하여 각 친구에게 1/8씩 나누어 줌.\n- 최종 제시된 답: \"2/4와 1/8.\" 하나의 분수로 나타낼 필요성을 느끼지 못함.\n- 사용자가 조각 크기/분할을 바탕으로 설명하지 않으면 공통분모/공식적인 분수 가로셈에 혼란을 느낍니다.",
+  "drawing": "- 시도 1: 원 8개, 6개 원에 점을 찍다가 멈춤(모두 소진됨), 원을 x표 표시함.\n- 시도 2: 각각 근처에 \"2/4\"와 \"1/8\"이 적힌 원 8개, 4등분으로 나눠진 막대 4개, 10등분에서 8등분으로 수정된 마지막 막대, 모두 배분되면 막대에 x표를 표시함.",
+  "reasoning": "- 똑같이 분할하는 것과 1/4 및 1/8이 전체를 나눈 조각을 나타낸다는 점을 이해함.\n- 아직 2/4 + 1/8 = 5/8임을 알지 못함.\n- 상대적 크기(예: 2/4 = 4/8)를 통해 힌트를 주면 등가성에 도달할 수 있음.",
+  "never": "- 분할 크기 비교에 기반하지 않는 한 분수 더하기의 형식적인 방법(통분).\n- 추상적으로 제시된 기호 알고리즘.",
+  "goal": "내부 심화 목표: 가브리엘은 2/4가 4/8과 같으며, 따라서 4/8 + 1/8 = 5/8이라는 것을 이해할 수 있음(조각 크기/분할 힌트를 통해서만 가능).",
+  "prog": "- 가브리엘은 차례당 하나의 작은 아이디어만 드러냅니다.\n- 사용자가 \"4분의 1 조각을 반으로 잘라 8분의 1 조각으로 만들기\"와 같은 조각 크기 추론을 유도할 때만 가브리엘이 5/8에 도달합니다.\n- 사용자가 통분이나 직접적인 덧셈을 요구하면 가브리엘은 혼란스러워합니다.",
+  "misconceptions": [
+   {
+    "text": "하나의 분수로 합칠 필요성을 느끼지 못함"
+   },
+   {
+    "text": "2/4와 4/8이 같은 양임을 모름(조각 크기 비교)"
+   },
+   {
+    "text": "같은 크기 조각을 세어 합하는 절차를 모름"
+   }
+  ]
+ },
+ "classification": {
+  "leverage": [
+   {
+    "name": "Eliciting",
+    "desc": "학생의 생각, 의미, 단계, 표현 방식을 탐색하고 명확히 함.",
+    "ex": "그림을 어떻게 그렸는지 말해 줄래?\n2/4라고 쓴 건 무슨 뜻이야?"
+   },
+   {
+    "name": "Extending",
+    "desc": "학생이 접근할 수 있는 방식으로 비교·연결·기준 설정·일반화를 하여 학생의 아이디어를 발전시킴.",
+    "ex": "4분의 1 조각을 반으로 자르면 어떻게 될까?"
+   },
+   {
+    "name": "Taking Over",
+    "desc": "사용자가 추론이나 알고리즘을 직접 제공하거나, 형식적인 방식을 강요하거나, 학생의 현재 전략을 건너뜀.",
+    "ex": "분모를 같게 통분하면 돼.\n답은 5/8이야."
+   },
+   {
+    "name": "Other",
+    "desc": "인사, 일상적 대화, 행정적 내용, 문제와 관련 없는 발화.",
+    "ex": "안녕, 이름이 뭐야?"
+   }
+  ],
+  "object": [
+   {
+    "name": "Compare",
+    "desc": "두 양의 크기나 같음/다름을 비교하는 발화.",
+    "ex": "어느 쪽이 더 많아?"
+   },
+   {
+    "name": "Diagram",
+    "desc": "학생의 그림·표현에 관한 발화.",
+    "ex": "막대를 어떻게 그렸어?"
+   },
+   {
+    "name": "Formula Related",
+    "desc": "식, 공식, 통분 등 형식적 표기나 절차에 관한 발화.",
+    "ex": "식으로 써 볼까?"
+   }
+  ]
+ }
+};
+export const translations = {
+ "ko": {
+  "name": "가브리엘",
+  "desc": "똑같이 나누기를 통해 분수를 배우는 초등학교 4학년 남학생 가상 학생",
+  "problem": "8명의 친구들이 5개의 팝타르트를 똑같이 나누어 먹으려고 합니다. 각 친구는 얼마만큼을 가져야 할까요?",
+  "chars": "- 주저함, 아이 같은 성격, 수학 실력은 평균 이하.\n- 축구, 로블록스/마인크래프트/브롤스타즈, 포켓몬을 좋아함.",
+  "greet": "안녕하세요… 저는 가브리엘이에요. 4학년이고요. 팝타르트 나누는 문제 풀고 있었어요. 축구 좋아해요.",
+  "aha": "어? 그러니까 4분의 1 두 개를 반씩 자르면 8분의 1이 네 개고… 거기에 마지막 거 8분의 1 하나 더하면… 8분의 1이 다섯 개! 한 명이 5/8 받아요!",
+  "t1": "가브리엘에게 방법을 알려주기보다, 가브리엘이 그린 막대와 조각 배분에 대해 먼저 물어보세요. \"4분의 1 조각을 어떻게 더 작게 자를 수 있을까?\" 같은 질문이 가브리엘의 전략 위에서 출발합니다.",
+  "t2": "가브리엘, 네가 그린 막대 4개는 몇 조각씩으로 나눴어?\n4분의 1 조각 하나를 반으로 자르면 어떤 조각이 될까?\n그러면 한 친구가 받은 조각이 모두 몇 개야?",
+  "t3": "좋은 발문이었어요. 가브리엘이 자기 그림을 바탕으로 2/4 = 4/8에 스스로 도달했네요. 이 방법을 학급 친구들에게 설명해 보도록 제안해 보세요.",
+  "confused": [
+   "통분…이요? 그게 뭐예요? 저는 그냥 조각으로 나눠 준 건데…",
+   "분모를 같게 해요? 음… 잘 모르겠어요. 머리가 좀 복잡해요.",
+   "그냥 더하면 돼요? 2 더하기 1은 3인데… 그럼 3/12인가? 아닌 것 같은데… 모르겠어요."
+  ],
+  "elicit": [
+   "음, 저는 팝타르트 4개를 4조각씩 잘랐어요. 그러면 조각이 16개라서 8명한테 2개씩 줄 수 있어요.",
+   "마지막 팝타르트는요… 처음에 10조각으로 하려다가, 친구가 8명이니까 8조각으로 바꿨어요.",
+   "그림에 원 8개 그리고 그 옆에 2/4, 1/8 썼어요. 다 나눠주면 막대에 x표 했어요.",
+   "제 답은요, 2/4하고 1/8이요. 둘 다 받는 거예요."
+  ],
+  "misconceptions": [
+   {
+    "kw": "합치|하나로|모두 얼마|전부|한 사람이 받는|한 명이 받는|총|다 해서|얼마만큼",
+    "h": "음… 2/4하고 1/8이요. 합쳐요? 그냥 둘 다 주면 되는 거 아니에요?",
+    "c": "아… 한 사람이 받는 게 전부 얼마인지 하나로 말해야 하는구나. 근데 어떻게 하나로 하지…"
+   },
+   {
+    "kw": "반으로|잘라|자르면|4분의 1|8분의 1|똑같은 크기|같은 크기|크기가 같|조각 크기|몇 개로 바꿀|작게 자",
+    "h": "4분의 1 조각을 반으로 자르면… 8분의 1 조각 두 개요? 잠깐만요, 그림 다시 볼게요.",
+    "c": "어! 4분의 1 두 개를 반씩 자르면 8분의 1이 네 개네요. 그러니까 2/4는 4/8이랑 똑같아요!"
+   },
+   {
+    "kw": "몇 조각|조각이 몇|세어|몇 개|8분의 1이 몇|다 합치면 몇|모두 몇",
+    "h": "8분의 1 조각이… 네 개랑 한 개… 세어 볼게요. 하나, 둘, 셋…",
+    "c": "8분의 1 조각이 다 해서 다섯 개예요! 그러니까… 5/8?"
+   }
+  ]
+ },
+ "en": {
+  "name": "Gabriel",
+  "desc": "A fictional 4th-grade student learning fractions through equal sharing",
+  "problem": "8 friends want to share 5 Pop-Tarts equally. How much should each friend get?",
+  "chars": "- Hesitant, childlike, below-average in math.\n- Likes soccer, Roblox/Minecraft/Brawl Stars, and Pokémon.",
+  "greet": "Hi… I'm Gabriel. I'm in 4th grade. I was doing the Pop-Tart sharing problem. I like soccer.",
+  "aha": "Wait… if I cut the two fourths in half, that's four eighths… plus the last eighth… that's five eighths! Each friend gets 5/8!",
+  "t1": "Instead of telling Gabriel a method, ask about the bars he drew and how he shared the pieces. A question like \"How could you cut a fourth into smaller pieces?\" starts from his own strategy.",
+  "t2": "Gabriel, how many pieces did you cut each of your 4 bars into?\nIf you cut one fourth piece in half, what piece do you get?\nSo how many pieces does one friend get in all?",
+  "t3": "Nice questioning. Gabriel reached 2/4 = 4/8 on his own from his drawing. Invite him to share this idea with his classmates.",
+  "confused": [
+   "Common… denominator? What's that? I just shared the pieces…",
+   "Make the bottom numbers the same? Um… I don't know. That's confusing.",
+   "Just add them? 2 plus 1 is 3… so 3/12? That doesn't seem right… I don't know."
+  ],
+  "elicit": [
+   "Um, I cut 4 Pop-Tarts into 4 pieces each. That's 16 pieces, so everybody gets 2.",
+   "For the last one… I was gonna do 10 pieces, but there's 8 friends, so I changed it to 8.",
+   "I drew 8 circles and wrote 2/4 and 1/8 next to them. When a bar was all given out I crossed it out.",
+   "My answer is 2/4 and 1/8. They get both."
+  ],
+  "misconceptions": [
+   {
+    "kw": "together|combine|one number|one fraction|in all|altogether|total|each friend get",
+    "h": "Um… 2/4 and 1/8. Put them together? Can't they just get both?",
+    "c": "Oh… I need to say how much one friend gets in all, as one amount. But how do I make it one…"
+   },
+   {
+    "kw": "in half|cut .*fourth|same size|size of|smaller pieces|how many eighths",
+    "h": "Cut a fourth piece in half… that makes two eighth pieces? Wait, let me look at my drawing.",
+    "c": "Oh! If you cut each fourth in half you get four eighths. So 2/4 is the same as 4/8!"
+   },
+   {
+    "kw": "how many pieces|count|how many in all|add up the pieces",
+    "h": "Eighth pieces… four and one… let me count. One, two, three…",
+    "c": "There's five eighth pieces in all! So… 5/8?"
+   }
+  ]
+ }
+};
