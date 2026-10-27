@@ -147,5 +147,5 @@ anon/authenticated 역할(Data API 직접 접근)을 모든 테이블에서 전�
 _Avoid_: 서버 측 2차 방어, 사용자 단위 RLS
 
 **공개 시나리오 뷰(scenarios_public)**:
-`scenarios`에서 내부 설정과 컴파일된 프롬프트를 뺀 `security_invoker` 뷰. 예비교사용 시나리오 읽기는 이 뷰와 `teacher_scenarios(user_id)` 함수만 거친다.
+`scenarios`에서 내부 설정과 컴파일된 프롬프트를 빼고 활성 챗봇 언어판의 공개 대사(이름·설명·문제·특징·인사·빠른 질문)를 붙인 `security_invoker` 뷰. 학생·멘토 대사(aha·트리거 텍스트·혼란·오개념)는 담지 않는다. 예비교사용 시나리오 읽기는 이 뷰와 `teacher_scenarios(user_id)` 함수만 거친다.
 _Avoid_: 시나리오 테이블(예비교사 경로를 가리킬 때)
