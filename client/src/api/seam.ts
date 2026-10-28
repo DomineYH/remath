@@ -9,8 +9,8 @@ import { memoryStorage, seedDb, Store } from './mock/store.ts';
 import type { Api, ClientRealm } from './types.ts';
 
 export const T0 = '2026-10-28T00:00:00.000Z';
-/** The admin password of the server under test: an HTTP server must start with it. */
-export const ADMIN_PW = 'Admin1234';
+/** The admin password of the target under test: the mock's, or the one useTarget injects for a server (a live binding). */
+export let ADMIN_PW = 'Admin1234';
 
 export type Factory = (realm: ClientRealm) => Api;
 /** One freshly seeded server. `api` = this browser (both realm cookies in one jar); `browser()` = another browser on the same server. */
@@ -24,8 +24,8 @@ export function mockTarget(o: Partial<MockOptions> = {}): Target & { store: Stor
 }
 
 let injected: (() => Target) | undefined;
-/** #46's HTTP setup file calls this before the suites load (and resets the server between tests). `undefined` = back to the mock. */
-export const useTarget = (make: (() => Target) | undefined) => { injected = make; };
+/** #46's HTTP setup file calls this before the suites load (and resets the server between tests), with that server's admin password. `undefined` = back to the mock. */
+export const useTarget = (make: (() => Target) | undefined, adminPassword = 'Admin1234') => { injected = make; ADMIN_PW = adminPassword; };
 /** The target of an HTTP group: the injected one, else the mock with this suite's mock options. */
 export const target = (mock?: Partial<MockOptions>): Target => injected?.() ?? mockTarget(mock);
 /** A group that only the mock can run: store reads, now·turnLimit·templates injection, A-8 audit, A-9 initial state. Skipped on an injected target. */
