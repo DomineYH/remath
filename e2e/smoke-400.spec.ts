@@ -9,17 +9,19 @@ const PW = 'abcd1234';
 const GREET = '안녕하세요… 저는 가브리엘이에요.';
 
 /** No document-level horizontal scroll (I-54), the top bar on one line (ticket 17 #3: all bar items share one centre line)
- *  and a label on every form control (I-55). */
+ *  a label on every form control (I-55) and no mockup-only demo element (I-41). */
 async function fits(page: Page, where: string) {
   await expect(page.locator('.top')).toBeVisible();
   const m = await page.evaluate(() => ({
     sw: document.documentElement.scrollWidth,
     mids: [...document.querySelectorAll('.top .in > *')].map(e => e.getBoundingClientRect()).filter(r => r.height > 0).map(r => r.top + r.height / 2),
+    demo: /\bdemo\b|데모/i.test(document.body.innerText),
     unlabelled: [...document.querySelectorAll<HTMLInputElement>('input, select, textarea')]
       .filter(e => !e.labels?.length && !e.getAttribute('aria-label') && !e.getAttribute('aria-labelledby')).map(e => e.outerHTML.slice(0, 80)),
   }));
   expect(m.sw, `${where}: scrollWidth`).toBeLessThanOrEqual(400);
   expect(Math.max(...m.mids) - Math.min(...m.mids), `${where}: top bar on one line`).toBeLessThan(4);
+  expect(m.demo, `${where}: mockup-only demo element (I-41)`).toBe(false);
   expect(m.unlabelled, `${where}: form controls without a label`).toEqual([]);
 }
 
