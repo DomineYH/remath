@@ -105,6 +105,15 @@ describe('db:new-project (H-29 1, O-4)', () => {
     expect(r.slept).toEqual([30_000, 45_000, 10_000, 10_000]);
   });
 
+  it('a sustained 429 on create gives up at the timeout: nothing was created, so no ref and no "left in place"', async () => {
+    const r = run({ 'POST /v1/projects': [{ status: 429, headers: { 'retry-after': '30' } }] }, { timeoutMs: 60_000 });
+    const err = await r.p.then(() => new Error('resolved'), (e: Error) => e);
+    expect(err.message).toMatch(/POST \/v1\/projects: HTTP 429 .*within 60s; no project was created/);
+    expect(err.message).not.toMatch(/left in place/);
+    expect(r.calls.map(c => c.method)).toEqual(['POST', 'POST', 'POST']);   // t = 0, 30, 60s
+    expect(r.slept).toEqual([30_000, 30_000]);
+  });
+
   it('a 401 while polling fails at once with the ref', async () => {
     const r = run(happy({ [`GET /v1/projects/${REF}`]: [{ status: 401, body: { message: 'Unauthorized' } }] }));
     await expect(r.p).rejects.toThrow(new RegExp(`${REF}.*HTTP 401.*left in place`));

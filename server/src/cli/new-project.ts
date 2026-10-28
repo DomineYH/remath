@@ -56,7 +56,9 @@ export async function newProject(o: Opts): Promise<Values> {
   for (;;) {
     try { created = await api('POST', '/v1/projects', body); break; } catch (err) {
       if (!(err instanceof HttpError && err.status === 429)) throw err;
-      await sleep(err.retryAfterMs || o.intervalMs);
+      const wait = err.retryAfterMs || o.intervalMs;
+      if (now() + wait > deadline) throw new Error(`${err.message}: still rate limited within ${o.timeoutMs / 1000}s; no project was created`);
+      await sleep(wait);
     }
   }
   const ref = created.ref;

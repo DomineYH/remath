@@ -13,8 +13,8 @@ const SCRIPT = join(ROOT, 'scripts/deploy.sh');
 // 가짜 도구는 받은 인자를 $LOG 에 남긴다. FAIL = 실패시킬 호출의 일부 문자열(예: db:smoke, "compose -f deploy/compose.yaml up").
 const STUBS: Record<string, string> = {
   node: 'exit 0', psql: 'exit 0',
-  // db:new-project 는 마지막 인자(deploy.sh 의 임시 env 파일)에 NEW_ENV 를 쓰고 경로를 $LOG.tmp 에 남긴다. 나머지 호출의 env 는 $LOG.env 로.
-  npm: 'echo "npm $* REMATH_ENV_FILE=$REMATH_ENV_FILE" >> "$LOG"; case "$*" in *db:new-project*) for a; do out="$a"; done; echo "$out" > "$LOG.tmp";'
+  // db:new-project 는 마지막 인자(deploy.sh 의 임시 env 파일)에 NEW_ENV 를 쓰고 경로를 $LOG.tmp, env 를 $LOG.newenv 에 남긴다. 나머지 호출의 env 는 $LOG.env 로.
+  npm: 'echo "npm $* REMATH_ENV_FILE=$REMATH_ENV_FILE" >> "$LOG"; case "$*" in *db:new-project*) for a; do out="$a"; done; echo "$out" > "$LOG.tmp"; env >> "$LOG.newenv";'
     + ' [ "$FAIL" = db:new-project ] && exit 1; printf "$NEW_ENV" > "$out"; exit 0 ;; esac; env >> "$LOG.env"; case "$*" in *"$FAIL"*) [ -n "$FAIL" ] && exit 1 ;; esac; exit 0',
   docker: 'echo "docker $*" >> "$LOG"; env >> "$LOG.env"; case "$*" in *"$FAIL"*) [ -n "$FAIL" ] && exit 1 ;; esac; exit 0',
   curl: 'for a; do url="$a"; done; echo "curl $url" >> "$LOG"; case "$url" in */healthz) printf 200 ;; */api/auth/me) printf "${ME_CODE:-401}" ;; esac',
@@ -35,7 +35,7 @@ function deploy(args: string[] = [], extra: Record<string, string> = {}) {
   });
   const calls = readFileSync(log, 'utf8').trim().split('\n').filter(Boolean);
   const read = (f: string) => existsSync(f) ? readFileSync(f, 'utf8') : '';
-  return { ...r, dir, calls, steps: calls.filter(c => !/^docker (info|compose version)|^curl/.test(c)), childEnv: read(`${log}.env`), tmp: read(`${log}.tmp`).trim() };
+  return { ...r, dir, calls, steps: calls.filter(c => !/^docker (info|compose version)|^curl/.test(c)), childEnv: read(`${log}.env`), newEnv: read(`${log}.newenv`), tmp: read(`${log}.tmp`).trim() };
 }
 
 describe('scripts/deploy.sh', () => {
@@ -133,6 +133,7 @@ describe('scripts/deploy.sh --new (H-29 1, O-4)', () => {
     expect(r.childEnv).toContain(`SUPABASE_URL=https://${REF}.supabase.co\n`);
     expect(r.childEnv).toContain('SUPABASE_DB_URL=postgresql://postgres.');
     expect(r.childEnv).not.toContain(TOKEN);   // docker·compose·다른 npm 단계 어디에도
+    expect(r.newEnv.split('\n').filter(l => l.includes(TOKEN))).toEqual([`SUPABASE_ACCESS_TOKEN=${TOKEN}`]);   // db:new-project 에만, 한 번
     expect(r.stdout + r.stderr).not.toContain(TOKEN);
     expect(r.tmp).not.toBe('');
     expect(existsSync(r.tmp)).toBe(false);   // EXIT trap 이 지웠다
