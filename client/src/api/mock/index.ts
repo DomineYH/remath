@@ -72,12 +72,19 @@ export function createMockApi(o: MockOptions): Api {
     db.auth_sessions = db.auth_sessions.filter(a => !(a.realm === realm && a.token_hash === jar[realm]));
     jar[realm] = null; save();
   };
+  const setPassword = async (u: UserRow, pw: string, t: string) => { u.password_hash = await hashPassword(pw); u.pw_updated_at = t; u.updated_at = t; };
   /** 현재 비밀번호 확인 → 해시 교체 → 이 토큰 말고 그 사용자의 로그인 모두 종료 → 감사 1행. */
+  /** 계정 만들기·사용자 추가: 닉네임은 대소문자 무시 유일(409). */
+  const addTeacher = async (b: z.infer<typeof S.Credentials>) => {
+    if (db.users.some(u => u.nickname.toLowerCase() === b.nickname.toLowerCase())) fail('nickname_taken');
+    const t = now(), u: UserRow = { id: uuid(), nickname: b.nickname, password_hash: null, role: 'teacher', pw_updated_at: t, created_at: t, updated_at: t };
+    await setPassword(u, b.password, t); db.users.push(u); return u;
+  };
   const changePw = async (realm: ClientRealm, b: z.infer<typeof S.PasswordChange>) => {
     const u = who(realm);
     if (!(await passwordOk(u, b.current))) fail('invalid_credentials', 'current password is incorrect');
     const t = now();
-    u.password_hash = await hashPassword(b.next); u.pw_updated_at = t; u.updated_at = t;
+    await setPassword(u, b.next, t);
     db.auth_sessions = db.auth_sessions.filter(a => a.user_id !== u.id || a.token_hash === jar[realm]);
     audit(db, t, { actor_id: u.id, action: 'auth.password_change', target: u.id, meta: { realm } });
     save();
@@ -91,10 +98,11 @@ export function createMockApi(o: MockOptions): Api {
   const scenario = (id: string) => db.scenarios.find(s => s.id === id) ?? fail('not_found');
   const toAdmin = ({ compiled_prompt: _, ...s }: ScenarioRow): z.infer<typeof S.ScenarioAdmin> => ({ ...s, groups: groupsOf(g => g.scenario_ids.includes(s.id)), session_count: sessionCount(s.id) });
   const toSummary = (s: ScenarioRow): z.infer<typeof S.ScenarioSummary> => ({ id: s.id, slug: s.slug, status: s.status, lang: s.lang, student_prefix: s.student_prefix, grade: s.grade, name: tr(s).name, problem: tr(s).problem, misconception_count: s.internal.misconceptions.length, classification_count: { leverage: s.classification.leverage.length, object: s.classification.object.length }, groups: groupsOf(g => g.scenario_ids.includes(s.id)), session_count: sessionCount(s.id), updated_at: s.updated_at });
+  const teacherCount = (ts: { speaker: string }[]) => ts.filter(t => t.speaker === 'teacher').length;
   /** turn_count = 예비교사 발화 수(END SESSION 은 기록되지 않으므로 자연히 제외, D-15). */
   const sessionRow = (s: SessionRow): z.infer<typeof S.SessionRow> => {
     const sc = db.scenarios.find(x => x.id === s.scenario_id)!, u = db.users.find(x => x.id === s.user_id)!;
-    return { id: s.id, scenario_id: s.scenario_id, scenario_name: sc.translations[s.lang].name, lang: s.lang, user_id: s.user_id, nickname: u.nickname, started_at: s.started_at, ended_at: s.ended_at, goal_reached: s.goal_reached, turn_count: db.turns.filter(t => t.session_id === s.id && t.speaker === 'teacher').length };
+    return { id: s.id, scenario_id: s.scenario_id, scenario_name: sc.translations[s.lang].name, lang: s.lang, user_id: s.user_id, nickname: u.nickname, started_at: s.started_at, ended_at: s.ended_at, goal_reached: s.goal_reached, turn_count: teacherCount(turnsOf(s.id)) };
   };
   /** C13: 1행 = 1발화, 모든 칸을 따옴표로. 앞의 BOM 은 엑셀이 UTF-8 로 열게 한다(Blob 바이트에 남는다). */
   const csv = (rows: SessionRow[]) => {
@@ -103,7 +111,7 @@ export function createMockApi(o: MockOptions): Api {
     return '\uFEFF' + ['session_id,started_at,nickname,scenario,lang,seq,speaker,text,leverage,object,trigger', ...body].join('\r\n');
   };
   const filtered = (q: z.infer<typeof S.SessionFilter>) => db.sessions.filter(s => (!q.user_id || s.user_id === q.user_id) && (!q.scenario_id || s.scenario_id === q.scenario_id)).sort((a, b) => b.started_at.localeCompare(a.started_at));
-  const userRow = (u: UserRow): z.infer<typeof S.UserRow> => { const gs = db.groups.filter(g => g.member_ids.includes(u.id)); return { id: u.id, nickname: u.nickname, groups: gs.map(g => ({ id: g.id, name: g.name })), scenario_count: new Set(gs.flatMap(g => g.scenario_ids)).size, session_count: db.sessions.filter(s => s.user_id === u.id).length, created_at: u.created_at, pw_updated_at: u.pw_updated_at }; };
+  const userRow = (u: UserRow): z.infer<typeof S.UserRow> => { const gs = db.groups.filter(g => g.member_ids.includes(u.id)); return { id: u.id, nickname: u.nickname, groups: groupsOf(g => gs.includes(g)), scenario_count: new Set(gs.flatMap(g => g.scenario_ids)).size, session_count: db.sessions.filter(s => s.user_id === u.id).length, created_at: u.created_at, pw_updated_at: u.pw_updated_at }; };
   const teacher = (id: string) => db.users.find(u => u.id === id && u.role === 'teacher') ?? fail('not_found');
   const group = (id: string) => db.groups.find(g => g.id === id) ?? fail('not_found');
   /** 없는 id·관리자를 구성원으로 넣으면 400(서버의 FK·역할 검사). 중복 id 는 하나로. */
@@ -147,7 +155,7 @@ export function createMockApi(o: MockOptions): Api {
   async function* turn(s: SessionRow, text: string): AsyncGenerator<AdminSseEvent> {
     if (s.ended_at) fail('session_ended');
     if (s.turn_started_at) fail('turn_in_progress', 'turn in progress', { turn_started_at: s.turn_started_at });
-    const history = turnsOf(s.id), turn_count = history.filter(t => t.speaker === 'teacher').length;
+    const history = turnsOf(s.id), turn_count = teacherCount(history);
     if (!END_SESSION_RE.test(text.trim()) && turn_count >= turnLimit) fail('turn_limit_reached', 'turn limit reached', { turn_count, turn_limit: turnLimit });   // END SESSION 은 상한 앞(D-15)
     const sc = scenario(s.scenario_id), t = sc.translations[s.lang], criteria = sc.classification.leverage.length ? sc.classification : null;
     const state: SessionState = { mis: s.progress.mis, counts: s.counts, goalReached: s.goal_reached, takeOverCount: history.filter(h => h.trigger === 1).length };
@@ -205,18 +213,14 @@ export function createMockApi(o: MockOptions): Api {
   };
 
   const impl: Api = {
-    signup: async b => {
-      if (db.users.some(u => u.nickname.toLowerCase() === b.nickname.toLowerCase())) fail('nickname_taken');
-      const t = now(), u: UserRow = { id: uuid(), nickname: b.nickname, password_hash: await hashPassword(b.password), role: 'teacher', pw_updated_at: t, created_at: t, updated_at: t };
-      db.users.push(u); issue('teacher', u); save(); return me(u);   // 계정 만들기 = 바로 로그인
-    },
+    signup: async b => { const u = await addTeacher(b); issue('teacher', u); save(); return me(u); },   // 계정 만들기 = 바로 로그인
     login: b => loginAs('teacher', b), logout: async () => logoutOf('teacher'), me: async () => me(who('teacher')), changePassword: b => changePw('teacher', b),
     adminLogin: b => loginAs('admin', b), adminLogout: async () => logoutOf('admin'), adminMe: async () => me(who('admin')), adminChangePassword: b => changePw('admin', b),
 
     getPractice: async () => {
       const u = who('teacher'), mine = db.groups.filter(g => g.member_ids.includes(u.id));
       const scenarios = db.scenarios.filter(s => s.status === 'published' && mine.some(g => g.scenario_ids.includes(s.id)));
-      return { groups: mine.map(g => ({ id: g.id, name: g.name })), scenarios: scenarios.map(s => ({ ...toPublic(s), group_ids: mine.filter(g => g.scenario_ids.includes(s.id)).map(g => g.id) })) };
+      return { groups: groupsOf(g => mine.includes(g)), scenarios: scenarios.map(s => ({ ...toPublic(s), group_ids: mine.filter(g => g.scenario_ids.includes(s.id)).map(g => g.id) })) };
     },
     listSessions: async () => { const u = who('teacher'); return filtered({ user_id: u.id }).map(sessionRow); },
     getCurrentSession: async () => { const s = current(who(o.realm)); return s ? detail(s) : null; },
@@ -270,17 +274,14 @@ export function createMockApi(o: MockOptions): Api {
 
     listUsers: async () => { return db.users.filter(u => u.role === 'teacher').map(userRow); },
     createUser: async b => {
-      const a = who('admin');
-      if (db.users.some(u => u.nickname.toLowerCase() === b.nickname.toLowerCase())) fail('nickname_taken');
-      const t = now(), u: UserRow = { id: uuid(), nickname: b.nickname, password_hash: await hashPassword(b.password), role: 'teacher', pw_updated_at: t, created_at: t, updated_at: t };
-      db.users.push(u);
-      audit(db, t, { actor_id: a.id, action: 'user.create', target: u.id, meta: { nickname: u.nickname } }); save();
+      const a = who('admin'), u = await addTeacher(b);
+      audit(db, u.created_at, { actor_id: a.id, action: 'user.create', target: u.id, meta: { nickname: u.nickname } }); save();
       return userRow(u);
     },
     /** 재설정 = 그 사용자의 로그인 모두 종료(G-34). */
     resetUserPassword: async (id, b) => {
       const a = who('admin'), u = teacher(id), t = now();
-      u.password_hash = await hashPassword(b.password); u.pw_updated_at = t; u.updated_at = t;
+      await setPassword(u, b.password, t);
       db.auth_sessions = db.auth_sessions.filter(s => s.user_id !== id);
       audit(db, t, { actor_id: a.id, action: 'user.password_reset', target: id, meta: { nickname: u.nickname } }); save();
     },

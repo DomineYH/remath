@@ -2,6 +2,7 @@
 // 판정(카운터·트리거·도움 요청)은 하지 않는다 — 그건 engine.ts(서버). 여기는 "지시를 받아 대사를 고르는" 역할만.
 import { AdapterError, type CompleteRequest, type Lang, type MockContext, type Provider, type ReportInput, type StreamEvent } from '../adapter.ts';
 import { renderClassification } from '../classification.ts';
+import { tally } from '../engine.ts';
 import { isGreeting, mockClassify, stdLeverage } from './classify.ts';
 
 /** 목업 TXT 의 챗봇 대사(화면 문구는 제외). */
@@ -43,7 +44,7 @@ function studentText(req: CompleteRequest, c: Extract<MockContext, { role: 'stud
 }
 
 function reportText(lang: Lang, r: ReportInput): string {
-  const T = TXT[lang], c = r.counts, good = (c.Eliciting ?? 0) + (c.Extending ?? 0), bad = c['Taking Over'] ?? 0;
+  const T = TXT[lang], c = r.counts, { good, bad } = tally(c);
   const fb = r.verdict === 'dist' ? T.dist(r.names, c) : r.verdict === 'none' ? T.none : r.verdict === 'clean' ? T.clean(c.Eliciting ?? 0, c.Extending ?? 0) : r.verdict === 'heavy' ? T.heavy(bad, good) : T.mixed(good, bad);
   return `${fb}\n${r.reached ? T.endReached : T.endNot}`;
 }

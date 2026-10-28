@@ -43,9 +43,12 @@ export function judgeTurn(text: string, lang: Lang, cls: Classification | null, 
   return { kind: 'turn', directive: { kind: 'correction', text: mi.c }, trigger: null, state };
 }
 
+/** 끌어내기·확장 발문(good)과 Taking Over(bad) 횟수. 판정과 MOCK 리포트 문장이 같은 셈을 쓴다. */
+export const tally = (c: Record<string, number>) => ({ good: (c.Eliciting ?? 0) + (c.Extending ?? 0), bad: c['Taking Over'] ?? 0 });
+
 /** 세션 종료 판정(목업 engineEnd). 리포트 전체 스키마는 티켓 14. 여기서는 분석 챗봇 입력에 필요한 부분만. */
 export function reportInput(names: string[], counts: Record<string, number>, reached: boolean): ReportInput {
-  const good = (counts.Eliciting ?? 0) + (counts.Extending ?? 0), bad = counts['Taking Over'] ?? 0;
+  const { good, bad } = tally(counts);
   const std = names.some(n => ['Eliciting', 'Extending', 'Taking Over'].includes(n));
   const verdict = !std ? 'dist' : good === 0 && bad === 0 ? 'none' : bad === 0 ? 'clean' : bad > good ? 'heavy' : 'mixed';
   return { names, counts, verdict, reached };
