@@ -238,7 +238,7 @@ export const dict = {
   stReady: { ko: '설정 완료', en: 'Ready' },
   stNeedKey: { ko: '키 필요', en: 'Key needed' },
   sharedFrom: { ko: r => `${r}의 키를 함께 사용`, en: r => `Sharing ${r}’s key` },
-  sharedLost: { ko: '함께 쓰던 키가 없습니다. 새 키를 등록하세요.', en: 'The shared key is gone. Register a new key.' },
+  sharedNoKey: { ko: r => `${r}에 아직 키가 없습니다. 그 봇에서 키를 등록하거나 자체 키를 선택하세요.`, en: r => `${r} has no key yet. Register a key there, or choose its own key.` },
   modelNote: { ko: '모델별 effort 지원값은 각 회사 API 문서(2026년 10월) 기준입니다. 목록에 없는 모델은 직접 입력하세요.', en: 'Effort values per model follow each company’s API docs (October 2026). Enter any model not listed as a custom ID.' },
   aiSaved: { ko: '설정을 저장했습니다.', en: 'Settings saved.' },
   // 대화 (I-50·I-51)
