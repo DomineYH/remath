@@ -9,7 +9,7 @@ import type { z } from 'zod';
 import { API_ROUTES, ApiError, type AdminSseEvent, type Api, type ClientRealm } from '../types.ts';
 import { audit } from './audit.ts';
 import { hashPassword, verifyPassword } from './crypto.ts';
-import { memoryStorage, seedDb, Store, type Db, type ScenarioRow, type SessionRow, type Storage, type TurnRow, type UserRow } from './store.ts';
+import { memoryStorage, seedDb, Store, type Db, type GroupRow, type ScenarioRow, type SessionRow, type Storage, type TurnRow, type UserRow } from './store.ts';
 
 /** 목 번들에만 있는 고정 문자열. check:bundle 이 프로덕션 산출물에 이것이 없음을 확인한다(A-4). */
 export const MOCK_MARKER = 'remath-mock-api::do-not-deploy';
@@ -95,6 +95,16 @@ export function createMockApi(o: MockOptions): Api {
   };
   const filtered = (q: z.infer<typeof S.SessionFilter>) => db.sessions.filter(s => (!q.user_id || s.user_id === q.user_id) && (!q.scenario_id || s.scenario_id === q.scenario_id)).sort((a, b) => b.started_at.localeCompare(a.started_at));
   const userRow = (u: UserRow): z.infer<typeof S.UserRow> => { const gs = db.groups.filter(g => g.member_ids.includes(u.id)); return { id: u.id, nickname: u.nickname, groups: gs.map(g => ({ id: g.id, name: g.name })), scenario_count: new Set(gs.flatMap(g => g.scenario_ids)).size, session_count: db.sessions.filter(s => s.user_id === u.id).length, created_at: u.created_at, pw_updated_at: u.pw_updated_at }; };
+  const teacher = (id: string) => db.users.find(u => u.id === id && u.role === 'teacher') ?? fail('not_found');
+  const group = (id: string) => db.groups.find(g => g.id === id) ?? fail('not_found');
+  /** 없는 id·관리자를 구성원으로 넣으면 400(서버의 FK·역할 검사). 중복 id 는 하나로. */
+  const groupInput = (b: z.infer<typeof S.GroupInput>) => {
+    const member_ids = [...new Set(b.member_ids)], scenario_ids = [...new Set(b.scenario_ids)];
+    if (!member_ids.every(id => db.users.some(u => u.id === id && u.role === 'teacher')) || !scenario_ids.every(id => db.scenarios.some(s => s.id === id))) fail('validation_failed', 'unknown member or scenario id');
+    return { name: b.name, member_ids, scenario_ids };
+  };
+  const groupAudit = (a: UserRow, action: 'group.create' | 'group.update' | 'group.delete', g: GroupRow) =>
+    audit(db, now(), { actor_id: a.id, action, target: g.id, meta: { name: g.name, member_count: g.member_ids.length, scenario_count: g.scenario_ids.length } });
   const groupOut = (g: Db['groups'][number]): z.infer<typeof S.Group> => ({ id: g.id, name: g.name, members: g.member_ids.map(id => ({ id, nickname: db.users.find(u => u.id === id)?.nickname ?? '?' })), scenarios: g.scenario_ids.flatMap(id => { const s = db.scenarios.find(x => x.id === id); return s ? [{ id, name: tr(s).name, lang: s.lang, status: s.status }] : []; }) });
 
   // ---- 연습 세션 (D-15·D-16·G-34) — 세션 경로는 이 인스턴스의 실(realm) 로그인으로 행동한다 ------------------
@@ -191,9 +201,44 @@ export function createMockApi(o: MockOptions): Api {
     getScenarioPrompt: async id => { who('admin'); const s = scenario(id); return s.compiled_prompt ?? compileScenario(s, tr(s), s.lang, TEMPLATES); },
 
     listUsers: async () => { who('admin'); return db.users.filter(u => u.role === 'teacher').map(userRow); },
-    createUser: todo('createUser', 25), resetUserPassword: todo('resetUserPassword', 25), deleteUser: todo('deleteUser', 25),
+    createUser: async b => {
+      const a = who('admin');
+      if (db.users.some(u => u.nickname.toLowerCase() === b.nickname.toLowerCase())) fail('nickname_taken');
+      const t = now(), u: UserRow = { id: uuid(), nickname: b.nickname, password_hash: await hashPassword(b.password), role: 'teacher', pw_updated_at: t, created_at: t, updated_at: t };
+      db.users.push(u);
+      audit(db, t, { actor_id: a.id, action: 'user.create', target: u.id, meta: { nickname: u.nickname } }); save();
+      return userRow(u);
+    },
+    /** 재설정 = 그 사용자의 로그인 모두 종료(G-34). */
+    resetUserPassword: async (id, b) => {
+      const a = who('admin'), u = teacher(id), t = now();
+      u.password_hash = await hashPassword(b.password); u.pw_updated_at = t; u.updated_at = t;
+      db.auth_sessions = db.auth_sessions.filter(s => s.user_id !== id);
+      audit(db, t, { actor_id: a.id, action: 'user.password_reset', target: id, meta: { nickname: u.nickname } }); save();
+    },
+    /** cascade: 연습 세션·발화·그룹 구성원·로그인(USR-1). */
+    deleteUser: async id => {
+      const a = who('admin'), u = teacher(id), sids = new Set(db.sessions.filter(s => s.user_id === id).map(s => s.id));
+      db.users = db.users.filter(x => x.id !== id);
+      db.sessions = db.sessions.filter(s => !sids.has(s.id)); db.turns = db.turns.filter(x => !sids.has(x.session_id));
+      db.auth_sessions = db.auth_sessions.filter(s => s.user_id !== id);
+      for (const g of db.groups) g.member_ids = g.member_ids.filter(m => m !== id);
+      audit(db, now(), { actor_id: a.id, action: 'user.delete', target: id, meta: { nickname: u.nickname, session_count: sids.size } }); save();
+    },
     listGroups: async () => { who('admin'); return db.groups.map(groupOut); },
-    createGroup: todo('createGroup', 25), updateGroup: todo('updateGroup', 25), deleteGroup: todo('deleteGroup', 25),
+    createGroup: async b => {
+      const a = who('admin'), t = now(), g: GroupRow = { id: uuid(), ...groupInput(b), created_at: t, updated_at: t };
+      db.groups.push(g); groupAudit(a, 'group.create', g); save(); return groupOut(g);
+    },
+    /** 구성원·시나리오 전체 치환(G-34). */
+    updateGroup: async (id, b) => {
+      const a = who('admin'), g = group(id);
+      Object.assign(g, groupInput(b), { updated_at: now() }); groupAudit(a, 'group.update', g); save(); return groupOut(g);
+    },
+    deleteGroup: async id => {
+      const a = who('admin'), g = group(id);
+      db.groups = db.groups.filter(x => x.id !== id); groupAudit(a, 'group.delete', g); save();
+    },
 
     listAdminSessions: async q => { who('admin'); return filtered(q).map(sessionRow); },
     getAdminSession: async id => { who('admin'); const s = db.sessions.find(x => x.id === id) ?? fail('not_found'); return { ...detail(s), state: adminState(s) }; }, downloadSessionsCsv: todo('downloadSessionsCsv', 27),

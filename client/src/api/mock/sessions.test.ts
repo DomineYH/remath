@@ -20,10 +20,10 @@ async function setup(extra: Partial<MockOptions> = {}) {
   return { store, admin, teacher, ids };
 }
 
-/** A teacher who can see `slug` through a group (built directly in the store: group CRUD is ticket 25). */
+/** A teacher who can see `slug` through a group. */
 async function teacherWith(env: Awaited<ReturnType<typeof setup>>, slug: string, nickname = 'Haneul') {
   const me = await env.teacher.signup({ nickname, password: 'abcd1234' });
-  env.store.db.groups.push({ id: crypto.randomUUID(), name: 'g', member_ids: [me.id], scenario_ids: [env.ids[slug]], created_at: T0, updated_at: T0 });
+  await env.admin.createGroup({ name: 'g', member_ids: [me.id], scenario_ids: [env.ids[slug]] });
   return me;
 }
 
@@ -63,6 +63,15 @@ describe('A-2 practice-session rules', () => {
     await rejects(env.teacher.startSession({ scenario_id: env.ids.gabriel }), 403, 'forbidden');
     expect((await env.admin.startSession({ scenario_id: env.ids.gabriel })).turns).toHaveLength(1);
     await rejects(env.admin.startSession({ scenario_id: '00000000-0000-4000-8000-0000000000ff' }), 404, 'not_found');
+  });
+  it('teachers: picking another student while a session is in progress → 409 session_active + details.session_id', async () => {
+    const env = await setup(), me = await teacherWith(env, 'gabriel');
+    await env.admin.createGroup({ name: 'h', member_ids: [me.id], scenario_ids: [env.ids.noah] });
+    const d = await env.teacher.startSession({ scenario_id: env.ids.gabriel });
+    const e = await rejects(env.teacher.startSession({ scenario_id: env.ids.noah }), 409, 'session_active');
+    expect(e.body.error.details).toEqual({ session_id: d.session.id });
+    await env.teacher.endSession(d.session.id);
+    expect((await env.teacher.startSession({ scenario_id: env.ids.noah })).session.scenario_id).toBe(env.ids.noah);
   });
   it("another user's session is 404 to getSession", async () => {
     const env = await setup();
