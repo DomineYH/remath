@@ -89,14 +89,16 @@ export async function withTurn<T>(o: TurnOpts, s: { id: string; ended_at: string
 type Recorded = { ok: true; turns?: z.infer<typeof S.Turn>[]; report?: z.infer<typeof S.SessionReport> | null } | { ok: false; message: string } | { ok: 'unknown' };
 
 /**
- * record_turn 한 번. 오류(결과 모름)면 먼저 release_turn(token) 으로 울타리를 친다 — 같은 행 잠금이라 진행 중인 record_turn 과 줄을 선다:
+ * record_turn 한 번(DB 가 기한도 본다, 0005). 오류(결과 모름)면 먼저 release_turn(token) 으로 울타리를 친다 — 같은 행 잠금이라 진행 중인 record_turn 과 줄을 선다:
  * true = 기록 안 됨(그 record 는 앞으로도 커밋 못 함) → 재시도 가능. false = 토큰이 이미 없다 → 이번 턴의 행만 읽어
  * seq0..seq0+n-1 이 다 있고 seq0 이 우리 예비교사 문장이면 기록됨(DB 값으로 done), 아니면 빼앗겨 커밋 못 함 → 재시도 가능.
  * release 나 그 읽기의 결과도 모르면 'unknown': 이벤트 없이 끝낸다(클라이언트가 GET 으로 맞춘다).
  */
 async function record(o: TurnOpts, id: string, token: string, args: Record<string, unknown>, seq0: number, n: number, text: string, ended: boolean): Promise<Recorded> {
-  const r = await settle<boolean>(o.db.rpc('record_turn', { p_session_id: id, p_token: token, ...args }));
-  if (!r.error) return r.data === true ? { ok: true } : { ok: false, message: 'turn expired' };   // 빼앗겼거나 이미 끝남
+  const r = await settle<boolean>(o.db.rpc('record_turn', { p_session_id: id, p_token: token, p_timeout_ms: o.timeoutMs, ...args }));
+  if (r.data === true) return { ok: true };
+  // false: 잡은 지 timeoutMs 를 넘겼거나(0005, 잡기는 아직 우리 것) 빼앗김·이미 끝남. 우리 것을 풀었으면 기한 초과 — 시간 초과 경로와 같은 오류.
+  if (!r.error) return { ok: false, message: await releaseTurn(o, id, token) ? 'turn timed out' : 'turn expired' };
   o.log.error({ err: r.error }, 'record_turn outcome unknown');
   const released = await releaseTurn(o, id, token);
   if (released === null) return { ok: 'unknown' };

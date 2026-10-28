@@ -29,7 +29,7 @@ npm run check:bundle  # production build has no mock storage key, mock marker or
 `npm test` also runs the stage 2 server and DB suites; neither needs a server or Supabase:
 
 - Server unit (T-1, `server/**/*.test.ts`): realm resolution, the login failure counter, the CSV generator byte-identical to the mock `csv()`, `TurnEvent` → SSE frame → `sse()` round trip, the backup column set (no `key_ciphertext`) and the restore FK order, plus the CLIs (migrate, seed, smoke, env swap, new project, deploy.sh) against fakes.
-- DB (T-3, PGlite, `db/migrations/*.test.ts`): applies 0001–0004 in an in-process Postgres, refuses a second apply, `teacher_scenarios`, anon/authenticated denied, service_role bypass, the one-active-session index, and the atomicity of the SQL functions (`claim_turn`, `record_turn`, password change, session start, admin writes).
+- DB (T-3, PGlite, `db/migrations/*.test.ts`): applies 0001–0005 in an in-process Postgres, refuses a second apply, `teacher_scenarios`, anon/authenticated denied, service_role bypass, the one-active-session index, and the atomicity of the SQL functions (`claim_turn`, `record_turn` incl. its turn deadline, password change, session start, admin writes).
 
 `npm run test:http -w server` (T-2) needs a running server and a Supabase project, so it is not in `npm test` or CI (O-11); see "HTTP run" below.
 
@@ -125,7 +125,7 @@ ENV_FILE=$HOME/.config/remath/dev.env SERVER_URL=http://127.0.0.1:3946 npm run t
 
 **`scripts/deploy.sh --new [--with-samples]`** — 새 서버(H-29, 사용자 스토리 19·21·22·25).
 1. Management API로 새 Supabase 프로젝트 생성 → `ACTIVE_HEALTHY` 대기 → 키·pooler 연결 문자열을 임시 env 파일(600, 종료 시 삭제)로 받는다.
-2. 미적용 마이그레이션 적용(새 프로젝트면 0001–0004 전부).
+2. 미적용 마이그레이션 적용(새 프로젝트면 0001–0005 전부).
 3. 시드: 관리자 `admin` 1(해시만), `ai_settings` 3, `--with-samples`면 샘플 시나리오 5(게시·컴파일본, 번역 10). 데모 계정·그룹·기록은 어떤 옵션에도 없다.
 4. 스모크: service key로 관리자 1·`ai_settings` 3(샘플 5·번역 10), anon 키로 `scenarios?select=internal` 거부(42501).
 5. 전환: 런타임 env 파일의 `SUPABASE_*` 4줄 교체 → 컨테이너 재생성 → `/healthz` 200 + 새 DB 응답 확인.

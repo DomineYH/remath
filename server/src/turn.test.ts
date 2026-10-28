@@ -86,9 +86,10 @@ function fakeDb(o: FakeOpts = {}) {
   };
   const auth = { realm: 'teacher', expires_at: '2999-01-01T00:00:00Z', user: { id: UID, nickname: 'kim', role: 'teacher', pw_updated_at: T0, password_hash: 'h' } };
   const lost = { data: null, error: { message: 'fetch failed' } };
-  /** 0003 record_turn: 토큰·종료를 행 잠금 아래에서 보고 쓴다. */
+  let claimedAt = 0;
+  /** 0005 record_turn: 토큰·종료·잡은 뒤 p_timeout_ms 이내인지를 행 잠금 아래에서 보고 쓴다(늦으면 잡기는 그대로). */
   const commit = (a: Record<string, unknown>) => {
-    if (row.turn_claim !== a.p_token || row.ended_at) return false;
+    if (row.turn_claim !== a.p_token || row.ended_at || Date.now() - claimedAt > (a.p_timeout_ms as number)) return false;
     turns.push(...(a.p_turns as Record<string, unknown>[]).map(t => ({ ...t, created_at: T1 })));
     Object.assign(row, { turn_claim: null, ended_at: a.p_ended_at, report: a.p_report });
     return true;
@@ -99,12 +100,12 @@ function fakeDb(o: FakeOpts = {}) {
     switch (label) {
       case 'claim_turn':
         if (o.claim === false) return { data: false, error: null };
-        row.turn_claim = a.p_token as string;
+        row.turn_claim = a.p_token as string; claimedAt = Date.now();
         return o.claimLost ? lost : { data: true, error: null };
       case 'record_turn': {
         if (o.record === 'before') return lost;
         if (o.record === 'inflight') { inflight = () => commit(a); return lost; }
-        if (o.record === 'fenced') return { data: false, error: null };
+        if (o.record === 'fenced') { row.turn_claim = 'taken-over'; return { data: false, error: null }; }
         const ok = commit(a);
         return o.record === 'after' ? lost : { data: ok, error: null };
       }
@@ -214,10 +215,24 @@ describe('withTurn: deadline from the claim, fenced record, unknown RPC outcomes
     await expect(withTurn({ ...opts(db), timeoutMs: 30 }, session, 'hi', collect)).rejects.toMatchObject({ code: 'provider_unavailable', message: 'turn timed out' });
     expect(labels(calls)).toEqual(['claim_turn', 'select sessions', 'release_turn']);
   });
-  it('a record fenced off by the DB (claim taken over or session ended): error, retryable; the claim is not ours to release', async () => {
+  it('a record fenced off by the DB (claim taken over or session ended): error, retryable; release by token finds no claim of ours', async () => {
     const { db, calls } = fakeDb({ record: 'fenced' });
-    expect(lastErr(await run(db, '그림을 설명해 줄래?'))).toMatchObject({ type: 'error', retryable: true });
-    expect(labels(calls).at(-1)).toBe('record_turn');
+    expect(lastErr(await run(db, '그림을 설명해 줄래?'))).toMatchObject({ type: 'error', retryable: true, message: 'turn expired' });
+    expect(labels(calls).slice(-2)).toEqual(['record_turn', 'release_turn']);
+  });
+  it('record_turn carries TURN_TIMEOUT_MS so the DB refuses a late write (0005)', async () => {
+    const { db, calls } = fakeDb();
+    await withTurn({ ...opts(db), timeoutMs: 4321 }, session, 'hi', collect);
+    expect(calls.find(c => c[0] === 'record_turn')![1]).toMatchObject({ p_timeout_ms: 4321 });
+  });
+  it('review probe: persistence (150 ms) outlives the deadline (100 ms) → the DB refuses, no teacher row, no done, same error as a timeout, released', async () => {
+    const f = fakeDb({ before: label => label === 'record_turn' ? new Promise(r => setTimeout(r, 150)) : undefined });
+    const evs = await withTurn({ ...opts(f.db), timeoutMs: 100 }, session, '그림을 설명해 줄래?', collect) as AdminSseEvent[];
+    expect(evs.map(e => e.type)).not.toContain('done');
+    expect(evs.at(-1)).toEqual({ type: 'error', code: 'provider_unavailable', message: 'turn timed out', retryable: true });
+    expect(f.turns.filter(t => t.speaker === 'teacher')).toEqual([]);
+    expect(labels(f.calls).slice(-2)).toEqual(['record_turn', 'release_turn']);
+    expect(f.row.turn_claim).toBeNull();
   });
   it('claim_turn committed but its response was lost: the row shows our token, so the turn goes on and records once', async () => {
     const { db, calls } = fakeDb({ claimLost: true });

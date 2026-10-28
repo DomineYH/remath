@@ -70,7 +70,7 @@ curl -s -w ' %{http_code}\n' "$B/healthz"
 D=$(dc exec -T server date +%Y%m%d); ls -l "backup/remath-$D.sqlite"
 ```
 
-- `schema_migrations` = `0001` `0002` `0003` `0004` **4행**(#35는 1행이라 적었지만 그 뒤 0002~0004가 더해졌다).
+- `schema_migrations` = `0001` `0002` `0003` `0004` `0005` **5행**(#35는 1행이라 적었지만 그 뒤 0002~0005가 더해졌다).
 - 행 수 = `1|3|5|10|1`(관리자 1, `ai_settings` 3, 시나리오 5, 번역 10, 사용자는 관리자뿐).
 - anon 요청 = 401(또는 403), 본문 `"code":"42501"`.
 - `/healthz` = `{"ok":true} 200`.
@@ -147,7 +147,7 @@ unset SUPABASE_URL SUPABASE_SERVICE_KEY SUPABASE_DB_URL SUPABASE_ANON_KEY       
 ```
 
 기대값:
-- `== 1/6`(새 프로젝트) 줄이 **없다**, `db:migrate ok applied before: [0001, 0002, 0003, 0004], ran now: []`, 스모크 모두 `ok`, `deploy.sh: ok`, **`exit 0`**.
+- `== 1/6`(새 프로젝트) 줄이 **없다**, `db:migrate ok applied before: [0001, 0002, 0003, 0004, 0005], ran now: []`, 스모크 모두 `ok`, `deploy.sh: ok`, **`exit 0`**.
 
 확인:
 
