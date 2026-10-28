@@ -38,9 +38,9 @@ function studentText(req: CompleteRequest, c: Extract<MockContext, { role: 'stud
     const like = (lines.find(x => /좋아|like|love/i.test(x)) ?? lines[0] ?? '').replace(/\.$/, '').replace(/좋아함$/, '좋아해요');
     return /이름|학년|안녕|반가|name|grade|\bhi\b|hello|nice to meet/i.test(c.teacherText) ? c.lines.greet.split(/(?<=[.!?…])\s+/).slice(0, 2).join(' ') : (c.lang === 'en' ? `Um… ${like}!` : `음… ${like}!`);
   }
-  // 목업: Eliciting/Extending 이면 elicit 회전, 그 외 idk. 분류 기준이 없는 시나리오는 목업처럼 내장 규칙으로 근사한다.
+  // 목업: Eliciting/Extending 이면 elicit 회전, 그 외(elicit 이 비었을 때 포함) idk. 분류 기준이 없는 시나리오는 목업처럼 내장 규칙으로 근사한다.
   const lev = c.leverage ?? stdLeverage(c.teacherText, c.lang);
-  if (lev === LEVERAGE.eliciting || lev === LEVERAGE.extending) return c.lines.elicit[rotation(req, c.lines.elicit) % c.lines.elicit.length];
+  if ((lev === LEVERAGE.eliciting || lev === LEVERAGE.extending) && c.lines.elicit.length) return c.lines.elicit[rotation(req, c.lines.elicit) % c.lines.elicit.length];
   return T.idk;
 }
 
