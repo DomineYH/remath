@@ -396,4 +396,3 @@ describe('unknown outcome over HTTP: the SSE ends with no terminal event (client
     expect(evs.map(e => e.type)).toEqual(['classification', 'student']);
   });
 });
-
