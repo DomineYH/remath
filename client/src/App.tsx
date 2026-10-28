@@ -24,6 +24,7 @@ export function App() {
           <Route path="/admin/groups" element={admin(<AdminPlaceholderScreen title="tabGroups" />)} />
           <Route path="/admin/logs" element={admin(<AdminPlaceholderScreen title="tabLogs" />)} />
           <Route path="/admin/ai" element={admin(<AdminPlaceholderScreen title="tabAI" />)} />
+          <Route path="/admin/*" element={<Navigate to="/admin" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>

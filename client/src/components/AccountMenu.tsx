@@ -49,8 +49,10 @@ export function AccountMenu({ kind, nickname }: { kind: 'teacher' | 'admin'; nic
 
 function ChangePasswordModal({ kind, open, onClose }: { kind: 'teacher' | 'admin'; open: boolean; onClose: () => void }) {
   const t = useT();
-  const [v, setV] = useState<PasswordValue>({ current: '', next: '', confirm: '' }), [err, setErr] = useState('');
-  const close = () => { setErr(''); onClose(); };
+  const empty: PasswordValue = { current: '', next: '', confirm: '' };
+  const [v, setV] = useState<PasswordValue>(empty), [err, setErr] = useState('');
+  // Modal unmounts PasswordFields on close, so its inputs reopen empty; reset the copy here too so a reopened form submits what it shows.
+  const close = () => { setV(empty); setErr(''); onClose(); };
   const save = async () => {
     if (!Password.safeParse(v.next).success) return setErr(t('errPw'));
     if (v.next !== v.confirm) return setErr(t('errPw2'));
