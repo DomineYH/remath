@@ -114,7 +114,8 @@ export function sessionHandlers({ db, config, now }: Deps): Handlers {
           if (ev.type === 'error') throw new ApiFail('provider_unavailable', ev.message);
           if (ev.type === 'done' && ev.ended) return ev.report;
         }
-        return null;
+        // 결과를 모른다(이벤트 없이 끝남): 리포트를 지어내지 않는다. 화면의 end() 는 오류를 보이고 finally 에서 GET 으로 맞춘다.
+        throw new ApiFail('provider_unavailable', 'turn outcome unknown: reload');
       });
     },
   };

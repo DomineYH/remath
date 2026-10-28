@@ -56,8 +56,12 @@ interface FakeOpts {
   claim?: boolean; teacherTurns?: number; startDup?: boolean; started?: boolean;
   /** claim_turn 이 커밋한 뒤 응답만 잃는다(결과 모름). */
   claimLost?: boolean;
-  /** record_turn: before = 쓰기 전 오류, after = 커밋 뒤 응답만 잃음, fenced = 울타리에 막혀 false. */
-  record?: 'before' | 'after' | 'fenced';
+  /** record_turn: before = 쓰기 전 오류, after = 커밋 뒤 응답만 잃음, fenced = 울타리에 막혀 false,
+   *  inflight = 응답은 잃었는데 트랜잭션이 아직 진행 중 — 행 잠금 순서(inflightOrder)대로 release_turn 앞이나 뒤에 커밋을 시도한다. */
+  record?: 'before' | 'after' | 'fenced' | 'inflight';
+  inflightOrder?: 'release-first' | 'record-first';
+  /** release_turn 의 결과를 모른다(쓰지 않고 응답 오류). */
+  releaseLost?: boolean;
   /** 결과를 맞추는 읽기(select turn_claim …)가 실패한다. */
   readFails?: boolean;
   /** 호출마다 한 번: 여기서 기다리면 그 Data API 호출이 멈춘다(끼어들기 재현). */
@@ -82,6 +86,14 @@ function fakeDb(o: FakeOpts = {}) {
   };
   const auth = { realm: 'teacher', expires_at: '2999-01-01T00:00:00Z', user: { id: UID, nickname: 'kim', role: 'teacher', pw_updated_at: T0, password_hash: 'h' } };
   const lost = { data: null, error: { message: 'fetch failed' } };
+  /** 0003 record_turn: 토큰·종료를 행 잠금 아래에서 보고 쓴다. */
+  const commit = (a: Record<string, unknown>) => {
+    if (row.turn_claim !== a.p_token || row.ended_at) return false;
+    turns.push(...(a.p_turns as Record<string, unknown>[]).map(t => ({ ...t, created_at: T1 })));
+    Object.assign(row, { turn_claim: null, ended_at: a.p_ended_at, report: a.p_report });
+    return true;
+  };
+  let inflight: (() => boolean) | null = null;
   const answer = (label: string, args: unknown) => {
     const a = args as Record<string, unknown>;
     switch (label) {
@@ -91,12 +103,18 @@ function fakeDb(o: FakeOpts = {}) {
         return o.claimLost ? lost : { data: true, error: null };
       case 'record_turn': {
         if (o.record === 'before') return lost;
-        if (o.record === 'fenced' || row.turn_claim !== a.p_token || row.ended_at) return { data: false, error: null };
-        turns.push(...(a.p_turns as Record<string, unknown>[]).map(t => ({ ...t, created_at: T1 })));
-        Object.assign(row, { turn_claim: null, ended_at: a.p_ended_at, report: a.p_report });
-        return o.record === 'after' ? lost : { data: true, error: null };
+        if (o.record === 'inflight') { inflight = () => commit(a); return lost; }
+        if (o.record === 'fenced') return { data: false, error: null };
+        const ok = commit(a);
+        return o.record === 'after' ? lost : { data: ok, error: null };
       }
-      case 'release_turn': if (row.turn_claim === a.p_token) row.turn_claim = null; return { data: null, error: null };
+      case 'release_turn': {
+        if (o.releaseLost) return lost;
+        if (inflight && o.inflightOrder === 'record-first') { inflight(); inflight = null; }   // release 가 잠금을 기다린 사이 커밋
+        const ok = row.turn_claim === a.p_token;
+        if (ok) row.turn_claim = null;
+        return { data: ok, error: null };
+      }
       case 'teacher_scenarios': return { data: [{ id: SC }], error: null };
       case 'start_session':
         if (o.startDup) return { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint "sessions_one_active"' } };
@@ -123,7 +141,9 @@ function fakeDb(o: FakeOpts = {}) {
     return b;
   };
   const db = { rpc: (name: string, args: unknown) => call(name, args), from: (table: string) => call(`select ${table}`, undefined) } as unknown as Db;
-  return { db, calls };
+  /** 진행 중이던 record_turn 이 나중에 커밋을 시도한다(release 가 먼저 잠금을 잡았으면 토큰이 없어 실패해야 한다). */
+  const lateCommit = () => { const ok = inflight?.() ?? null; inflight = null; return ok; };
+  return { db, calls, row, turns, lateCommit };
 }
 const log = { error: () => {} } as never;
 const opts = (db: Db, signal?: AbortSignal) => ({ db, log, maxTurns: 40, timeoutMs: 120_000, templates: TEMPLATES, now: () => new Date(T0), signal });
@@ -145,7 +165,7 @@ describe('withTurn: claim_turn → runTurn → record_turn once (F-22, F-24)', (
   });
 
   it('claim, record and release carry the same fresh token', async () => {
-    const { db, calls } = fakeDb({ record: 'fenced' });
+    const { db, calls } = fakeDb({ record: 'before' });
     await run(db, '그림을 설명해 줄래?');
     const tokens = calls.filter(c => ['claim_turn', 'record_turn', 'release_turn'].includes(c[0])).map(c => (c[1] as { p_token: string }).p_token);
     expect(tokens).toHaveLength(3);
@@ -194,10 +214,10 @@ describe('withTurn: deadline from the claim, fenced record, unknown RPC outcomes
     await expect(withTurn({ ...opts(db), timeoutMs: 30 }, session, 'hi', collect)).rejects.toMatchObject({ code: 'provider_unavailable', message: 'turn timed out' });
     expect(labels(calls)).toEqual(['claim_turn', 'select sessions', 'release_turn']);
   });
-  it('a record fenced off by the DB (claim taken over or session ended): error, retryable, released', async () => {
+  it('a record fenced off by the DB (claim taken over or session ended): error, retryable; the claim is not ours to release', async () => {
     const { db, calls } = fakeDb({ record: 'fenced' });
     expect(lastErr(await run(db, '그림을 설명해 줄래?'))).toMatchObject({ type: 'error', retryable: true });
-    expect(labels(calls).at(-1)).toBe('release_turn');
+    expect(labels(calls).at(-1)).toBe('record_turn');
   });
   it('claim_turn committed but its response was lost: the row shows our token, so the turn goes on and records once', async () => {
     const { db, calls } = fakeDb({ claimLost: true });
@@ -210,26 +230,61 @@ describe('withTurn: deadline from the claim, fenced record, unknown RPC outcomes
     await expect(run(db, 'hi')).rejects.toMatchObject({ message: 'fetch failed' });
     expect(labels(calls)).toEqual(['claim_turn', 'select sessions', 'release_turn']);
   });
-  it('record_turn committed but its response was lost: done with the stored rows, no error, no retry advice', async () => {
+  it('record_turn committed but its response was lost: release says the claim is gone, the exact rows are there → done with them', async () => {
     const { db, calls } = fakeDb({ record: 'after' });
     const evs = await run(db, '그림을 설명해 줄래?');
     expect(evs.at(-1)).toMatchObject({ type: 'done', ended: false, turns: [
       expect.objectContaining({ seq: 2, speaker: 'teacher', text: '그림을 설명해 줄래?', created_at: T1 }), expect.objectContaining({ seq: 3, speaker: 'student' })] });
-    expect(labels(calls)).toEqual(['claim_turn', 'select sessions', 'record_turn', 'select sessions']);
+    expect(labels(calls)).toEqual(['claim_turn', 'select sessions', 'record_turn', 'release_turn', 'select sessions']);
   });
   it('END SESSION committed but its response was lost: done ended with the stored report', async () => {
     const { db } = fakeDb({ record: 'after' });
     expect((await run(db, 'END SESSION')).at(-1)).toMatchObject({ type: 'done', ended: true, report: expect.objectContaining({ verdict: expect.any(String) }) });
   });
-  it('record_turn failed before writing: the row still holds our token, so retryable error and release', async () => {
+  it('record_turn failed before writing: release clears our claim (true) → retryable error, no read', async () => {
     const { db, calls } = fakeDb({ record: 'before' });
     expect(lastErr(await run(db, '그림을 설명해 줄래?'))).toMatchObject({ type: 'error', retryable: true });
-    expect(labels(calls)).toEqual(['claim_turn', 'select sessions', 'record_turn', 'select sessions', 'release_turn']);
+    expect(labels(calls)).toEqual(['claim_turn', 'select sessions', 'record_turn', 'release_turn']);
   });
-  it('record_turn outcome unknown and the reconcile read fails: error with retryable:false (a retry could duplicate), release by token', async () => {
-    const { db, calls } = fakeDb({ record: 'after', readFails: true });
-    expect(lastErr(await run(db, '그림을 설명해 줄래?'))).toMatchObject({ type: 'error', retryable: false });
-    expect(labels(calls).at(-1)).toBe('release_turn');
+
+  // ---- review REV 3 probes -----------------------------------------------------------------------
+  it('probe 1a: record still in flight, release wins the row lock → retryable error, and the late commit is fenced off', async () => {
+    const f = fakeDb({ record: 'inflight', inflightOrder: 'release-first' });
+    expect(lastErr(await run(f.db, '그림을 설명해 줄래?'))).toMatchObject({ type: 'error', retryable: true });
+    expect(f.lateCommit()).toBe(false);
+    expect(f.turns.filter(t => t.speaker === 'teacher')).toEqual([]);
+  });
+  it('probe 1b: record still in flight, it wins the row lock → release=false, the exact rows are read → done, nothing to retry', async () => {
+    const f = fakeDb({ record: 'inflight', inflightOrder: 'record-first' });
+    expect((await run(f.db, '그림을 설명해 줄래?')).at(-1)).toMatchObject({ type: 'done', ended: false, turns: [expect.objectContaining({ seq: 2, speaker: 'teacher' }), expect.objectContaining({ seq: 3 })] });
+    expect(f.turns.filter(t => t.speaker === 'teacher')).toHaveLength(1);
+  });
+  it('probe 2: record outcome unknown and release outcome unknown → no error and no done: the stream just ends', async () => {
+    const { db } = fakeDb({ record: 'before', releaseLost: true });
+    const evs = await run(db, '그림을 설명해 줄래?') as AdminSseEvent[];
+    expect(evs.map(e => e.type)).toEqual(['classification', 'student']);
+  });
+  it('probe 2 for the claim: claim outcome unknown, not confirmed by the read, release unknown → no events at all', async () => {
+    const { db, calls } = fakeDb({ claimLost: true, readFails: true, releaseLost: true });
+    expect(await run(db, 'hi')).toEqual([]);
+    expect(labels(calls)).toEqual(['claim_turn', 'select sessions', 'release_turn']);
+  });
+  it('probe 3: a later turn B lands before A reconciles → A\'s done holds only A\'s rows (seq0..seq0+n-1)', async () => {
+    const f = fakeDb({ record: 'after', before: label => {
+      if (label === 'release_turn') f.turns.push({ seq: 4, speaker: 'teacher', text: 'B', leverage: null, object: null, trigger: null, created_at: T1 }, { seq: 5, speaker: 'student', text: 'b', leverage: null, object: null, trigger: null, created_at: T1 });
+    } });
+    const done = (await run(f.db, '그림을 설명해 줄래?')).at(-1) as { type: string; turns: { seq: number }[] };
+    expect(done.type).toBe('done');
+    expect(done.turns.map(t => t.seq)).toEqual([2, 3]);
+  });
+  it('claim gone but the rows at seq0 are another holder\'s turn → not ours: retryable error', async () => {
+    const f = fakeDb({ record: 'before', before: label => {
+      if (label === 'release_turn') {
+        f.row.turn_claim = 'someone-else';
+        f.turns.push({ seq: 2, speaker: 'teacher', text: 'other tab', leverage: null, object: null, trigger: null, created_at: T1 }, { seq: 3, speaker: 'student', text: 's', leverage: null, object: null, trigger: null, created_at: T1 });
+      }
+    } });
+    expect(lastErr(await run(f.db, '그림을 설명해 줄래?'))).toMatchObject({ type: 'error', retryable: true });
   });
 });
 
@@ -323,6 +378,22 @@ describe('POST …/end goes through the same claim → record_turn(token) fence 
     const fenced = fakeDb({ record: 'fenced' }), app2 = await buildApp({ db: fenced.db, config });
     const f = await app2.inject({ method: 'POST', url: `/api/sessions/${SID}/end`, headers: { cookie: TEACHER.cookie, 'x-remath-realm': 'teacher' } });
     expect(f.statusCode).toBe(502);
-    expect(labels(fenced.calls).at(-1)).toBe('release_turn');
+
+    const unknown = fakeDb({ record: 'before', releaseLost: true }), app3 = await buildApp({ db: unknown.db, config });
+    const u = await app3.inject({ method: 'POST', url: `/api/sessions/${SID}/end`, headers: { cookie: TEACHER.cookie, 'x-remath-realm': 'teacher' } });
+    expect(u.statusCode).toBe(502);   // no invented report; the screen's end() refetches in finally
+    expect(u.json().error.message).toMatch(/unknown/);
   });
 });
+
+describe('unknown outcome over HTTP: the SSE ends with no terminal event (client then GETs the session, ChatScreen syncDropped)', () => {
+  it('200 text/event-stream; the client sse() sees the turn events but neither done nor error', async () => {
+    const f = fakeDb({ record: 'before', releaseLost: true }), app = await buildApp({ db: f.db, config });
+    const r = await app.inject({ method: 'POST', url: `/api/sessions/${SID}/turns`, headers: TEACHER, payload: { text: '그림을 설명해 줄래?' } });
+    expect(r.statusCode).toBe(200);
+    expect(r.headers['content-type']).toMatch(/^text\/event-stream/);
+    const evs = await collect(sse(Promise.resolve(new Response(r.body)), S.SseEvent)) as AdminSseEvent[];
+    expect(evs.map(e => e.type)).toEqual(['classification', 'student']);
+  });
+});
+
