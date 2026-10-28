@@ -14,7 +14,7 @@ import { errorText, useT, type T } from '../i18n/index.tsx';
 import { HOME } from '../session.tsx';
 
 /** 이메일·전화번호처럼 보이면(@, 숫자 7자리 연속) 개인정보 문구, 아니면 형식 문구. */
-const nickError = (t: T, v: string) => Nickname.safeParse(v).success ? '' : t(/@|\d{7}/.test(v) ? 'errNickPII' : 'errNick');
+export const nickError = (t: T, v: string) => Nickname.safeParse(v).success ? '' : t(/@|\d{7}/.test(v) ? 'errNickPII' : 'errNick');
 
 export function LoginScreen() {
   const t = useT(), navigate = useNavigate(), id = useId();

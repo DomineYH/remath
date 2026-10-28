@@ -1,5 +1,6 @@
 // 대화 화면(C-12, I-50·I-51). 관리자 대화 테스트(`/admin/scenarios/:id/test`)와 예비교사 대화가 같은 화면을 쓴다.
 // 진입: ?session= 이 있으면 그 세션(새로고침), 없으면 진행 중 세션 복구, 그것도 없으면 시작. 관리자는 그 직후 getAdminSession 1회로 패널을 채운다.
+// 예비교사가 진행 중 세션과 다른 학생을 고르면 종료 안내만 그린다(세션은 사용자당 하나, session_active).
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import type * as S from '@remath/shared';
@@ -9,8 +10,10 @@ import { adminApi, teacherApi } from '../apis.ts';
 import { AccountMenu } from '../components/AccountMenu.tsx';
 import { AppShell } from '../components/AppShell.tsx';
 import { ChatHeader, ClassificationBlock, Composer, Message, MessageLog, ProblemBox, QuickChips, SystemLine, type Speaker } from '../components/Chat.tsx';
+import { Button } from '../components/Button.tsx';
 import { ErrorLine } from '../components/ErrorLine.tsx';
 import { InternalPanel, triggerText } from '../components/InternalPanel.tsx';
+import { Notice } from '../components/Notice.tsx';
 import { SessionReport } from '../components/SessionReport.tsx';
 import { errorText, useT, type T } from '../i18n/index.tsx';
 import { useMe } from '../session.tsx';
@@ -40,6 +43,7 @@ export function ChatScreen({ isAdminTest }: { isAdminTest: boolean }) {
   const [detail, setDetail] = useState<Detail>(), [view, setView] = useState<View>(), [state, setState] = useState<AdminState>();
   const [live, setLive] = useState<Live | null>(null), [busy, setBusy] = useState(false), [draft, setDraft] = useState('');
   const [err, setErr] = useState<((t: T) => string) | null>(null), [loadErr, setLoadErr] = useState<unknown>(), [showCls, setShowCls] = useState(false);
+  const [activeElsewhere, setActiveElsewhere] = useState<string>();   // 진행 중 세션의 시나리오 id
   const inputRef = useRef<HTMLInputElement>(null), refocus = useRef(false);
 
   useEffect(() => {
@@ -51,6 +55,7 @@ export function ChatScreen({ isAdminTest }: { isAdminTest: boolean }) {
         throw e;
       });
       const d = sid0 ? await api.getSession(sid0) : (await api.getCurrentSession()) ?? await start();
+      if (!isAdminTest && !sid0 && d.session.scenario_id !== scenarioId) { if (alive) setActiveElsewhere(d.session.scenario_id); return; }
       const v = await loadView(isAdminTest, d.session.scenario_id, d.session.lang);
       const st = isAdminTest ? (await adminApi.getAdminSession(d.session.id)).state : undefined;
       if (!alive) return;
@@ -108,6 +113,15 @@ export function ChatScreen({ isAdminTest }: { isAdminTest: boolean }) {
   }
 
   const account = <AccountMenu kind={isAdminTest ? 'admin' : 'teacher'} nickname={me.nickname} />;
+  if (activeElsewhere) return (
+    <AppShell account={account}>
+      <Notice tone="warn">{t('err.session_active')} {t('endFirst')}</Notice>
+      <div className="head-tools">
+        <Button variant="primary" onClick={() => { setActiveElsewhere(undefined); navigate(`/practice/${activeElsewhere}`); }}>{t('toActive')}</Button>
+        <Button onClick={() => navigate('/practice')}>{t('otherStudent')}</Button>
+      </div>
+    </AppShell>
+  );
   if (!detail || !view) return <AppShell account={account}>{loadErr !== undefined && <ErrorLine message={errorText(t, loadErr)} />}</AppShell>;
 
   const ended = !!detail.session.ended_at, atLimit = !ended && detail.session.turn_count >= detail.turn_limit, locked = busy || ended || atLimit;
