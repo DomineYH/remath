@@ -18,7 +18,8 @@ test('scenario list cards and the prompt modal', async ({ page }) => {
   await expect(seoyeon).toContainText('5학년 · 소수 크기 비교');
   await expect(seoyeon).toContainText('0.7 m 리본과 0.65 m 리본이 있습니다. 어느 리본이 더 길까요?');
   for (const pill of ['Published', '한국어', '3 misconceptions', 'Classes 4·9']) await expect(seoyeon.getByText(pill, { exact: true })).toBeVisible();
-  for (const name of ['Edit', 'Chats CSV (0)']) await expect(seoyeon.getByRole('button', { name })).toBeDisabled();
+  await expect(seoyeon.getByRole('button', { name: 'Chats CSV (0)' })).toBeDisabled();
+  await expect(seoyeon.getByRole('button', { name: 'Edit' })).toBeEnabled();   // #26
   await expect(seoyeon.getByRole('button', { name: 'Test chat' })).toBeEnabled();   // #24
   await expect(cards.filter({ has: page.getByRole('heading', { name: '하준' }) }).getByText('No classification', { exact: true })).toBeVisible();
 

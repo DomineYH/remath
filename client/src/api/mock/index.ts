@@ -1,6 +1,6 @@
 // 목 구현 — 서버 핸들러를 브라우저 안에서 흉내 낸다. 1차(#22): 인증 9개·저장소·감사 helper와 빈 목록들. 나머지는 #23~#27 이 채운다.
 // 규칙(400 검증·409 중복·401 구분 없음·비밀번호 변경 = 다른 로그인 종료·세션 409/422)은 서버와 같다. 턴은 공유 runTurn + mockProvider 를 그대로 돌린다(#24). 서버가 생기면 이 폴더만 버린다.
-import { compileScenario, TEMPLATES } from '@remath/prompts';
+import { checkTemplates, compileScenario, TEMPLATES, type Templates } from '@remath/prompts';
 import { ERROR_STATUS, routes, type ErrorCode } from '@remath/shared';
 import providers from '@remath/shared/providers.json';
 import * as S from '@remath/shared';
@@ -22,6 +22,8 @@ export interface MockOptions {
   now?: () => string;
   /** 예비교사 발화 수 상한(D-15). 생략하면 40. 테스트가 작게 주입해 422 를 만든다. */
   turnLimit?: number;
+  /** 검수 c7·게시 컴파일에 쓸 템플릿. 생략하면 번들 TEMPLATES. 테스트가 두 판이 어긋난 템플릿을 넣어 c7 FAIL 을 만든다(서버는 디스크의 .md). */
+  templates?: Templates;
   /** 관리자 초기 비밀번호. 생략하면 VITE_MOCK_ADMIN_PASSWORD. 비었으면 관리자 로그인은 늘 401(G-33). */
   adminPassword?: string;
   /** 이 브라우저의 쿠키 상자. 생략하면 저장소의 login(이 브라우저). 테스트는 따로 넘겨 같은 서버의 다른 브라우저를 흉내 낸다. */
@@ -41,6 +43,9 @@ export function createMockApi(o: MockOptions): Api {
   const adminPassword = 'adminPassword' in o ? o.adminPassword : import.meta.env.VITE_MOCK_ADMIN_PASSWORD;
   const save = () => store.save();
   const turnLimit = o.turnLimit ?? 40;
+  const templates = o.templates ?? TEMPLATES;
+  const compile = (s: ScenarioRow) => compileScenario(s, tr(s), s.lang, templates);
+  const review = (s: ScenarioRow) => S.autoChecks(s, checkTemplates(templates).every(c => c.ok));
   const uuid = () => crypto.randomUUID();
 
   // ---- 로그인·접근 (쿠키 = 실별 토큰) ---------------------------------------------------
@@ -146,7 +151,7 @@ export function createMockApi(o: MockOptions): Api {
     s.turn_started_at = now(); save();
     // ponytail: TURN_TIMEOUT_MS·고아 turn_started_at 은 흉내 내지 않는다(D-15). finally 가 항상 지운다.
     try {
-      for await (const ev of runTurn({ bots, compiled: sc.compiled_prompt ?? compileScenario(sc, t, s.lang, TEMPLATES), criteria, tr: t, lang: s.lang, state, history, text })) {
+      for await (const ev of runTurn({ bots, compiled: sc.compiled_prompt ?? compile(sc), criteria, tr: t, lang: s.lang, state, history, text })) {
         if (ev.type === 'classification') { if (ev.cls) { Object.assign(pending[0], ev.cls); yield { type: 'classification', ...ev.cls }; } }
         else if (ev.type === 'student') { pending.push({ speaker: 'student', text: ev.text }); yield { type: 'student', text: ev.text, final: true }; }
         else if (ev.type === 'trigger') { pending.push({ speaker: 'mentor', text: '', trigger: ev.trigger }); yield ev; }
@@ -196,9 +201,40 @@ export function createMockApi(o: MockOptions): Api {
     endSession: async id => end(sessionOf(id)),
 
     listScenarios: async () => { who('admin'); return [...db.scenarios].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).map(toSummary); },
-    createScenario: todo('createScenario', 26), getScenario: async id => { who('admin'); return toAdmin(scenario(id)); }, updateScenario: todo('updateScenario', 26), deleteScenario: todo('deleteScenario', 26),
-    reviewScenario: todo('reviewScenario', 26), publishScenario: todo('publishScenario', 26), // 저장된 컴파일(게시본) 또는 초안을 활성 언어판으로 컴파일한 전문(F-31).
-    getScenarioPrompt: async id => { who('admin'); const s = scenario(id); return s.compiled_prompt ?? compileScenario(s, tr(s), s.lang, TEMPLATES); },
+    /** 새 시나리오는 초안, slug 는 서버가 만든다. */
+    createScenario: async b => {
+      const a = who('admin'), t = now(), id = uuid(), s: ScenarioRow = { ...b, id, slug: `scenario-${id.slice(0, 8)}`, status: 'draft', compiled_prompt: null, created_at: t, updated_at: t };
+      db.scenarios.push(s); audit(db, t, { actor_id: a.id, action: 'scenario.create', target: id, meta: { slug: s.slug } }); save();
+      return toAdmin(s);
+    },
+    getScenario: async id => { who('admin'); return toAdmin(scenario(id)); },
+    /** 초안 저장 = 항상 draft + compiled_prompt null: 게시본은 내려간다(G-34, 사용자 스토리 52). */
+    updateScenario: async (id, b) => {
+      const a = who('admin'), s = scenario(id);
+      Object.assign(s, b, { status: 'draft', compiled_prompt: null, updated_at: now() });
+      audit(db, now(), { actor_id: a.id, action: 'scenario.update', target: id, meta: { slug: s.slug } }); save();
+      return toAdmin(s);
+    },
+    /** 기록이 있으면 409(보관 상태 없음, 티켓 10·11). 그룹 할당은 함께 지운다(FK cascade). */
+    deleteScenario: async id => {
+      const a = who('admin'), s = scenario(id), session_count = sessionCount(id);
+      if (session_count) fail('scenario_has_sessions', 'scenario has sessions', { session_count });
+      db.scenarios = db.scenarios.filter(x => x.id !== id);
+      for (const g of db.groups) g.scenario_ids = g.scenario_ids.filter(x => x !== id);
+      audit(db, now(), { actor_id: a.id, action: 'scenario.delete', target: id, meta: { slug: s.slug } }); save();
+    },
+    reviewScenario: async id => { who('admin'); return review(scenario(id)); }, 
+    /** 자동 점검 fail 이 있거나 확인 m1~m4 가 다 없으면 422(details = ReviewResult). 통과하면 게시와 같은 compileScenario 로 컴파일해 저장(F-31). */
+    publishScenario: async (id, b) => {
+      const a = who('admin'), s = scenario(id), r = review(s);
+      if (!r.publishable || new Set(b.confirmed).size < 4) fail('review_failed', 'review failed', r);
+      const t = now();
+      Object.assign(s, { status: 'published', compiled_prompt: compile(s), updated_at: t });
+      audit(db, t, { actor_id: a.id, action: 'scenario.publish', target: id, meta: { slug: s.slug, lang: s.lang } }); save();
+      return toAdmin(s);
+    },
+    // 저장된 컴파일(게시본) 또는 초안을 활성 언어판으로 컴파일한 전문(F-31).
+    getScenarioPrompt: async id => { who('admin'); const s = scenario(id); return s.compiled_prompt ?? compile(s); },
 
     listUsers: async () => { who('admin'); return db.users.filter(u => u.role === 'teacher').map(userRow); },
     createUser: async b => {
