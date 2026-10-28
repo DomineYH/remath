@@ -3,8 +3,9 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
 import { Toast } from './components/Toast.tsx';
 import { LangProvider } from './i18n/index.tsx';
 import { AdminLoginScreen } from './screens/AdminLoginScreen.tsx';
+import { AdminAiScreen } from './screens/AdminAiScreen.tsx';
 import { AdminGroupsScreen } from './screens/AdminGroupsScreen.tsx';
-import { AdminPlaceholderScreen } from './screens/AdminPlaceholderScreen.tsx';
+import { AdminLogsScreen } from './screens/AdminLogsScreen.tsx';
 import { AdminScenariosScreen } from './screens/AdminScenariosScreen.tsx';
 import { AdminUsersScreen } from './screens/AdminUsersScreen.tsx';
 import { ChatScreen } from './screens/ChatScreen.tsx';
@@ -30,8 +31,8 @@ export function App() {
           <Route path="/admin/scenarios/:id/test" element={admin(<ChatScreen isAdminTest />)} />
           <Route path="/admin/users" element={admin(<AdminUsersScreen />)} />
           <Route path="/admin/groups" element={admin(<AdminGroupsScreen />)} />
-          <Route path="/admin/logs" element={admin(<AdminPlaceholderScreen title="tabLogs" />)} />
-          <Route path="/admin/ai" element={admin(<AdminPlaceholderScreen title="tabAI" />)} />
+          <Route path="/admin/logs" element={admin(<AdminLogsScreen />)} />
+          <Route path="/admin/ai" element={admin(<AdminAiScreen />)} />
           <Route path="/admin/*" element={<Navigate to="/admin" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
