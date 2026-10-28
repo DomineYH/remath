@@ -81,6 +81,8 @@ test('B-4: 400px smoke over every screen, menus by keyboard, dark mode, EN↔한
   await expect(page.getByRole('article')).toHaveCount(5);
   await fits(page, 'scenarios');
   await expect(page.locator('.flow')).toBeHidden();
+  // the admin label may be cut too, so its full text stays in the title
+  await expect(page.getByRole('button', { name: 'Account menu' })).toHaveAttribute('title', 'Admin');
   await menuByKeyboard(page, page.getByRole('button', { name: 'Account menu' }));
 
   // wizard: number circles only (each with an aria-label), every step fits; step 5 rows keep their placeholders
