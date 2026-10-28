@@ -4,9 +4,10 @@ import type { z } from 'zod';
 import { adminApi } from './apis.ts';
 import { toast } from './components/Toast.tsx';
 import { errorText, useT } from './i18n/index.tsx';
+import { localDate } from './time.ts';
 
-/** 파일 이름 = remath_<종류>_<대상>_<YYYYMMDD>.csv (목업과 같다). 파일 이름에 못 쓰는 글자는 _ 로. */
-const csvName = (kind: string, key: string) => `remath_${kind}_${key.replace(/[\\/:*?"<>|\s]+/g, '_')}_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.csv`;
+/** 파일 이름 = remath_<종류>_<대상>_<YYYYMMDD 로컬>.csv (목업과 같다). 파일 이름에 못 쓰는 글자는 _ 로. */
+export const csvName = (kind: string, key: string) => `remath_${kind}_${key.replace(/[\\/:*?"<>|\s]+/g, '_')}_${localDate(new Date().toISOString()).replace(/-/g, '')}.csv`;
 
 /** Blob 바이트 그대로 <a download> 로 저장한다(text() 를 거치면 BOM 이 벗겨진다). */
 function saveBlob(blob: Blob, name: string) {
