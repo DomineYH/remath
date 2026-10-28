@@ -3,6 +3,7 @@
 import { AdapterError, type CompleteRequest, type Lang, type MockContext, type Provider, type ReportInput, type StreamEvent } from '../adapter.ts';
 import { renderClassification } from '../classification.ts';
 import { tally } from '../engine.ts';
+import { LEVERAGE, TRIGGER } from '../../leverage.ts';
 import { isGreeting, mockClassify, stdLeverage } from './classify.ts';
 
 /** 목업 TXT 의 챗봇 대사(화면 문구는 제외). */
@@ -39,19 +40,19 @@ function studentText(req: CompleteRequest, c: Extract<MockContext, { role: 'stud
   }
   // 목업: Eliciting/Extending 이면 elicit 회전, 그 외 idk. 분류 기준이 없는 시나리오는 목업처럼 내장 규칙으로 근사한다.
   const lev = c.leverage ?? stdLeverage(c.teacherText, c.lang);
-  if (lev === 'Eliciting' || lev === 'Extending') return c.lines.elicit[rotation(req, c.lines.elicit) % c.lines.elicit.length];
+  if (lev === LEVERAGE.eliciting || lev === LEVERAGE.extending) return c.lines.elicit[rotation(req, c.lines.elicit) % c.lines.elicit.length];
   return T.idk;
 }
 
 function reportText(lang: Lang, r: ReportInput): string {
   const T = TXT[lang], c = r.counts, { good, bad } = tally(c);
-  const fb = r.verdict === 'dist' ? T.dist(r.names, c) : r.verdict === 'none' ? T.none : r.verdict === 'clean' ? T.clean(c.Eliciting ?? 0, c.Extending ?? 0) : r.verdict === 'heavy' ? T.heavy(bad, good) : T.mixed(good, bad);
+  const fb = r.verdict === 'dist' ? T.dist(r.names, c) : r.verdict === 'none' ? T.none : r.verdict === 'clean' ? T.clean(c[LEVERAGE.eliciting] ?? 0, c[LEVERAGE.extending] ?? 0) : r.verdict === 'heavy' ? T.heavy(bad, good) : T.mixed(good, bad);
   return `${fb}\n${r.reached ? T.endReached : T.endNot}`;
 }
 
 function mentorText(c: Extract<MockContext, { role: 'mentor' }>): string {
-  if (c.trigger === 1) return c.lines.t1;
-  if (c.trigger === 3) return c.lines.t3;
+  if (c.trigger === TRIGGER.takingOver) return c.lines.t1;
+  if (c.trigger === TRIGGER.goal) return c.lines.t3;
   return `${TXT[c.lang].helpLead}\n${c.lines.t2.split('\n').filter(Boolean).map(x => '· ' + x).join('\n')}`;
 }
 

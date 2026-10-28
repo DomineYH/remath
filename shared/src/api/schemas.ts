@@ -2,11 +2,13 @@
 // 서버(Fastify + fastify-type-provider-zod)와 클라이언트(client/src/api/ HTTP·목 구현)가 같은 타입을 본다.
 // 키는 DB 컬럼과 같은 snake_case: scenarios_public 뷰의 컬럼 집합이 곧 예비교사 응답 타입이다(ADR-0003). 매핑 계층 없음.
 import { z } from 'zod';
+import { TRIGGER } from '../leverage.ts';
 
 // ---- 공통 ---------------------------------------------------------------------
 export const Lang = z.enum(['ko', 'en']);
 export const Uuid = z.string().uuid();
 export const Iso = z.string().datetime({ offset: true });
+const TriggerNo = z.union([z.literal(TRIGGER.takingOver), z.literal(TRIGGER.help), z.literal(TRIGGER.goal)]);
 
 /** PRD 9절: 2~16자, 한글·영문·숫자·_ . -, @ 불가, 숫자 7자리 이상 연속 불가. 중복(대소문자 무시)은 서버가 409. */
 export const Nickname = z.string().regex(/^[A-Za-z0-9가-힣_.-]{2,16}$/).refine(s => !/\d{7}/.test(s), 'no 7+ consecutive digits');
@@ -91,7 +93,7 @@ export const PracticeHome = z.object({
 // ---- 연습 세션·발화 -----------------------------------------------------------------
 export const Turn = z.object({
   seq: z.number().int().positive(), speaker: z.enum(['teacher', 'student', 'mentor']), text: z.string(),
-  leverage: z.string().nullable(), object: z.string().nullable(), trigger: z.union([z.literal(1), z.literal(2), z.literal(3)]).nullable(),
+  leverage: z.string().nullable(), object: z.string().nullable(), trigger: TriggerNo.nullable(),
   created_at: Iso,
 });
 export const Verdict = z.enum(['none', 'clean', 'mixed', 'heavy', 'dist']);
@@ -116,7 +118,7 @@ export const TurnBody = z.object({ text: z.string().trim().min(1).max(2000) });
 export const SseEvent = z.union([   // done 이 ended 로 두 갈래라 discriminatedUnion 대신 union
   z.object({ type: z.literal('classification'), leverage: z.string(), object: z.string().nullable() }),  // 분류 기준 없으면 이벤트 자체가 없음
   z.object({ type: z.literal('student'), text: z.string(), final: z.boolean() }),
-  z.object({ type: z.literal('trigger'), trigger: z.union([z.literal(1), z.literal(2), z.literal(3)]) }),
+  z.object({ type: z.literal('trigger'), trigger: TriggerNo }),
   z.object({ type: z.literal('mentor'), text: z.string(), final: z.boolean() }),
   z.object({ type: z.literal('done'), ended: z.literal(false), turns: z.array(Turn) }),                 // 이번 한 턴에 기록된 발화(예비교사·학생·멘토)
   z.object({ type: z.literal('done'), ended: z.literal(true), report: SessionReport.nullable() }),      // END SESSION 발화 턴. 발화는 기록하지 않음
@@ -129,7 +131,7 @@ export const AdminState = z.object({
   mis: z.array(z.number().int().min(0).max(2)),          // 오개념별 카운터, 순서 = internal.misconceptions (ADR-0002)
   counts: z.record(z.string(), z.number().int().nonnegative()), // 레버리지별 누적 (= sessions.counts)
   goal_reached: z.boolean(),
-  last_trigger: z.union([z.literal(1), z.literal(2), z.literal(3)]).nullable(), // 세션 전체의 마지막 트리거 (turns.trigger 최신 non-null 행)
+  last_trigger: TriggerNo.nullable(), // 세션 전체의 마지막 트리거 (turns.trigger 최신 non-null 행)
 });
 export const AdminSseEvent = z.union([...SseEvent.options, AdminState.extend({ type: z.literal('state') })]);
 export const AdminSessionDetail = SessionDetail.extend({ state: AdminState });

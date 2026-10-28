@@ -158,7 +158,7 @@ export function createMockApi(o: MockOptions): Api {
     const history = turnsOf(s.id), turn_count = teacherCount(history);
     if (!END_SESSION_RE.test(text.trim()) && turn_count >= turnLimit) fail('turn_limit_reached', 'turn limit reached', { turn_count, turn_limit: turnLimit });   // END SESSION 은 상한 앞(D-15)
     const sc = scenario(s.scenario_id), t = sc.translations[s.lang], criteria = sc.classification.leverage.length ? sc.classification : null;
-    const state: SessionState = { mis: s.progress.mis, counts: s.counts, goalReached: s.goal_reached, takeOverCount: history.filter(h => h.trigger === 1).length };
+    const state: SessionState = { mis: s.progress.mis, counts: s.counts, goalReached: s.goal_reached, takeOverCount: history.filter(h => h.trigger === S.TRIGGER.takingOver).length };
     const pending: Parameters<typeof addTurn>[1][] = [{ speaker: 'teacher', text }];
     s.turn_started_at = now(); save();
     // ponytail: TURN_TIMEOUT_MS 는 흉내 내지 않는다(D-15). finally 가 항상 지우고, 새로고침으로 남은 고아 플래그는 Store 로드가 지운다.

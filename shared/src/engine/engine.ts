@@ -3,6 +3,7 @@ import type { z } from 'zod';
 import type { SessionReport as SessionReportSchema } from '../api/schemas.ts';
 import type { ClassificationRow, Lang, ReportInput, TurnDirective } from './adapter.ts';
 import type { Classification } from './classification.ts';
+import { LEVERAGE, TRIGGER } from '../leverage.ts';
 
 export interface Misconception { kw: string; h: string; c: string }
 export interface StudentLines { misconceptions: Misconception[]; confused: string[]; aha: string }
@@ -23,7 +24,7 @@ export function kwTest(kw: string, m: string): boolean {
 export type Judgement =
   | { kind: 'end' }
   | { kind: 'help'; state: SessionState }
-  | { kind: 'turn'; directive: TurnDirective | null; trigger: 1 | 3 | null; state: SessionState };
+  | { kind: 'turn'; directive: TurnDirective | null; trigger: typeof TRIGGER.takingOver | typeof TRIGGER.goal | null; state: SessionState };
 
 /** 한 턴의 서버 판정(ADR-0002 순서 1→6). cls 는 분석 챗봇 결과(분류 기준이 없으면 null). 입력 state 를 바꾸지 않는다. */
 export function judgeTurn(text: string, lang: Lang, cls: Classification | null, lines: StudentLines, prev: SessionState): Judgement {
@@ -33,25 +34,25 @@ export function judgeTurn(text: string, lang: Lang, cls: Classification | null, 
   if (cls) state.counts[cls.leverage] = (state.counts[cls.leverage] ?? 0) + 1;
   if (HELP_RE[lang].test(t)) return { kind: 'help', state };
   if (state.goalReached) return { kind: 'turn', directive: null, trigger: null, state };
-  if (cls?.leverage === 'Taking Over') {
+  if (cls?.leverage === LEVERAGE.takingOver) {
     const n = state.takeOverCount++;
-    return { kind: 'turn', directive: { kind: 'confused', text: lines.confused[n % lines.confused.length] }, trigger: 1, state };
+    return { kind: 'turn', directive: { kind: 'confused', text: lines.confused[n % lines.confused.length] }, trigger: TRIGGER.takingOver, state };
   }
   const idx = lines.misconceptions.findIndex((mi, i) => state.mis[i] < 2 && mi.kw && kwTest(mi.kw, t));
   if (idx < 0) return { kind: 'turn', directive: null, trigger: null, state };
   const n = ++state.mis[idx], mi = lines.misconceptions[idx];
   if (n === 1) return { kind: 'turn', directive: { kind: 'hesitation', text: mi.h }, trigger: null, state };
-  if (state.mis.every(x => x >= 2)) { state.goalReached = true; return { kind: 'turn', directive: { kind: 'aha', text: `${mi.c}\n${lines.aha}` }, trigger: 3, state }; }
+  if (state.mis.every(x => x >= 2)) { state.goalReached = true; return { kind: 'turn', directive: { kind: 'aha', text: `${mi.c}\n${lines.aha}` }, trigger: TRIGGER.goal, state }; }
   return { kind: 'turn', directive: { kind: 'correction', text: mi.c }, trigger: null, state };
 }
 
 /** 끌어내기·확장 발문(good)과 Taking Over(bad) 횟수. 판정과 MOCK 리포트 문장이 같은 셈을 쓴다. */
-export const tally = (c: Record<string, number>) => ({ good: (c.Eliciting ?? 0) + (c.Extending ?? 0), bad: c['Taking Over'] ?? 0 });
+export const tally = (c: Record<string, number>) => ({ good: (c[LEVERAGE.eliciting] ?? 0) + (c[LEVERAGE.extending] ?? 0), bad: c[LEVERAGE.takingOver] ?? 0 });
 
 /** 세션 종료 판정(목업 engineEnd). 리포트 전체 스키마는 티켓 14. 여기서는 분석 챗봇 입력에 필요한 부분만. */
 export function reportInput(names: string[], counts: Record<string, number>, reached: boolean): ReportInput {
   const { good, bad } = tally(counts);
-  const std = names.some(n => ['Eliciting', 'Extending', 'Taking Over'].includes(n));
+  const std = names.some(n => (Object.values(LEVERAGE) as string[]).includes(n));
   const verdict = !std ? 'dist' : good === 0 && bad === 0 ? 'none' : bad === 0 ? 'clean' : bad > good ? 'heavy' : 'mixed';
   return { names, counts, verdict, reached };
 }

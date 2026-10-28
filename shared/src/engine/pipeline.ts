@@ -2,6 +2,7 @@
 // 이벤트 이름은 C7 의 SSE 이벤트와 같다(classification·student·mentor·trigger·done). 실제 SSE 직렬화·DB 기록은 여기 없다.
 import { collect, type Criteria, type Lang, type Message, type Provider } from './adapter.ts';
 import { parseClassification, type Classification } from './classification.ts';
+import { TRIGGER, type Trigger } from '../leverage.ts';
 import { HELP_LINE, judgeTurn, reportInput, runtimeBlock, type SessionState, type StudentLines } from './engine.ts';
 
 export interface Compiled { student: string; analysis: string | null; mentor: string }
@@ -12,7 +13,7 @@ export interface Bots { student: Provider; analysis: Provider; mentor: Provider;
 export type TurnEvent =
   | { type: 'classification'; cls: Classification | null }
   | { type: 'student'; text: string }
-  | { type: 'trigger'; trigger: 1 | 2 | 3 }
+  | { type: 'trigger'; trigger: Trigger }
   | { type: 'mentor'; text: string }
   | { type: 'done'; state: SessionState; ended: boolean; summary?: string };
 
@@ -26,7 +27,7 @@ export function studentMessages(history: Turn[], text: string): Message[] {
 export function analysisTurnMessage(lang: Lang, lastStudent: string, text: string): Message[] {
   return [{ role: 'user', content: `[TURN]\n${L[lang].student}: ${lastStudent}\n${L[lang].teacher}: ${text}` }];
 }
-export function mentorMessage(lang: Lang, trigger: 1 | 2 | 3, history: Turn[], text: string): Message[] {
+export function mentorMessage(lang: Lang, trigger: Trigger, history: Turn[], text: string): Message[] {
   const recent = [...history.filter(t => t.speaker !== 'mentor'), { speaker: 'teacher' as const, text }].slice(-6);
   return [{ role: 'user', content: `${L[lang].trig(trigger)}\n${recent.map(t => `${t.speaker === 'teacher' ? L[lang].teacher : L[lang].student}: ${t.text}`).join('\n')}` }];
 }
@@ -59,7 +60,7 @@ export async function* runTurn(p: { bots: Bots; compiled: Compiled; criteria: Cr
     yield { type: 'student', text: (await collect(bots.student.complete(req))).text };
   }
   // 3) 멘토: 트리거 3종 모두 호출(티켓 16).
-  const trigger = j.kind === 'help' ? 2 as const : j.trigger;
+  const trigger = j.kind === 'help' ? TRIGGER.help : j.trigger;
   if (trigger) {
     yield { type: 'trigger', trigger };
     const req = { system: compiled.mentor, messages: mentorMessage(lang, trigger, history, text), model: bots.model, context: { role: 'mentor' as const, lang, trigger, lines: { t1: tr.t1, t2: tr.t2, t3: tr.t3 } } };
