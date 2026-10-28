@@ -53,14 +53,14 @@ export function ProblemBox({ problem }: { problem: string }) {
 }
 
 /** 새 내용이 붙을 때마다 맨 아래로 스크롤한다. */
-export function MessageLog({ children, size }: { children: ReactNode; size: number }) {
+export function TurnLog({ children, size }: { children: ReactNode; size: number }) {
   const t = useT(), ref = useRef<HTMLDivElement>(null);
   useEffect(() => { ref.current?.scrollTo({ top: ref.current.scrollHeight }); }, [size]);
   return <div className="log" ref={ref} role="log" aria-label={t('logAria')}>{children}</div>;
 }
 
 export type Speaker = 'teacher' | 'student' | 'mentor';
-export function Message({ speaker, avatar, name, text, children }: { speaker: Speaker; avatar: string; name: string; text: string; children?: ReactNode }) {
+export function Turn({ speaker, avatar, name, text, children }: { speaker: Speaker; avatar: string; name: string; text: string; children?: ReactNode }) {
   return (
     <div className={`msg ${speaker === 'teacher' ? 'me' : speaker}`}>
       <div className="pf" aria-hidden="true">{avatar}</div>

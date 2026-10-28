@@ -9,7 +9,7 @@ import { ApiError, type AdminApi, type Api } from '../api/index.ts';
 import { adminApi, teacherApi } from '../apis.ts';
 import { AccountMenu } from '../components/AccountMenu.tsx';
 import { AppShell } from '../components/AppShell.tsx';
-import { ChatHeader, ClassificationBlock, Composer, Message, MessageLog, ProblemBox, QuickChips, SystemLine, type Speaker } from '../components/Chat.tsx';
+import { ChatHeader, ClassificationBlock, Composer, ProblemBox, QuickChips, SystemLine, Turn, TurnLog, type Speaker } from '../components/Chat.tsx';
 import { Button } from '../components/Button.tsx';
 import { ErrorLine } from '../components/ErrorLine.tsx';
 import { InternalPanel, triggerText } from '../components/InternalPanel.tsx';
@@ -131,9 +131,9 @@ export function ChatScreen({ isAdminTest }: { isAdminTest: boolean }) {
   const hasCls = view.classification.leverage.length > 0;
   const who = (sp: Speaker) => sp === 'teacher' ? { avatar: '✏️', name: t('me') } : sp === 'student' ? { avatar: view.student_prefix, name: `${view.student_prefix} ${view.name}` } : { avatar: view.mentor_prefix, name: `${view.mentor_prefix} ${t('mentor')}` };
   const msg = (key: string | number, sp: Speaker, text: string, cls?: { leverage: string | null; object: string | null }) => (
-    <Message key={key} speaker={sp} text={text} {...who(sp)}>
+    <Turn key={key} speaker={sp} text={text} {...who(sp)}>
       {cls?.leverage != null && <ClassificationBlock leverage={cls.leverage} object={cls.object} show={showCls} />}
-    </Message>
+    </Turn>
   );
   const panel = isAdminTest && state && view.internal && (
     <InternalPanel state={state} leverage={view.classification.leverage} misconceptions={view.internal.misconceptions.map(m => m.text)} goal={view.internal.goal} turns={detail.session.turn_count} />
@@ -147,7 +147,7 @@ export function ChatScreen({ isAdminTest }: { isAdminTest: boolean }) {
           <ChatHeader avatar={view.student_prefix} name={view.name} description={view.description} showCls={hasCls ? showCls : null} onShowCls={setShowCls}
             onEnd={end} endDisabled={ended || busy} endPrimary={atLimit} onBack={() => navigate(isAdminTest ? '/admin/scenarios' : '/practice')} />
           <ProblemBox problem={view.problem} />
-          <MessageLog size={detail.turns.length + (live ? 3 : 0) + (ended ? 1 : 0)}>
+          <TurnLog size={detail.turns.length + (live ? 3 : 0) + (ended ? 1 : 0)}>
             <SystemLine>{t('sessStart')}</SystemLine>
             {detail.turns.map(x => msg(x.seq, x.speaker, x.text, x))}
             {live && <>
@@ -158,7 +158,7 @@ export function ChatScreen({ isAdminTest }: { isAdminTest: boolean }) {
             {ended && detail.report && <><SessionReport report={detail.report} /><SystemLine>{t('endCls')}</SystemLine></>}
             {ended && !detail.report && <SystemLine>{t('endNoCls')}</SystemLine>}
             {atLimit && <SystemLine>{t('turnLimit', String(detail.turn_limit))}</SystemLine>}
-          </MessageLog>
+          </TurnLog>
           <ErrorLine message={err?.(t)} />
           <QuickChips lang={view.lang} disabled={locked} onPick={c => { setDraft(c); inputRef.current?.focus(); }} />
           <Composer lang={view.lang} value={draft} onChange={setDraft} onSend={send} disabled={locked} inputRef={inputRef} />
