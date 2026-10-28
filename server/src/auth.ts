@@ -1,5 +1,7 @@
-// 쿠키·실 해석·로그인 실패 카운터 (C-7~C-10, O-1, O-12). 순수 함수만 — DB는 routes/auth.ts.
+// 쿠키·auth_sessions·실 해석·로그인 실패 카운터 (C-7~C-10, O-1, O-12).
+import { createHash, randomBytes } from 'node:crypto';
 import type { Realm } from '@remath/shared';
+import { must, type Db } from './db.ts';
 
 export type ClientRealm = 'teacher' | 'admin';
 export type Tokens = Partial<Record<ClientRealm, string>>;
@@ -39,4 +41,26 @@ export function createLimiter() {
     },
     reset(realm: ClientRealm, nick: string) { m.delete(key(realm, nick)); },
   };
+}
+
+// ---- 쿠키·auth_sessions (C-7, C-10) ----------------------------------------------------------
+export const COOKIE: Record<ClientRealm, string> = { teacher: 'remath_teacher', admin: 'remath_admin' };
+export const TTL_MS: Record<ClientRealm, number> = { teacher: 7 * 24 * 3600_000, admin: 12 * 3600_000 };
+export const sha256 = (token: string) => createHash('sha256').update(token).digest('hex');
+export const newToken = () => randomBytes(32).toString('base64url');
+export const cookieOptions = (realm: ClientRealm, secure: boolean) =>
+  ({ httpOnly: true, secure, sameSite: 'lax', path: '/', maxAge: TTL_MS[realm] / 1000 }) as const;
+
+export interface AuthUser { id: string; nickname: string; role: ClientRealm; pw_updated_at: string; password_hash: string }
+export interface Auth { realm: ClientRealm; tokenHash: string; user: AuthUser }
+
+/** 토큰 → 로그인. 없음·만료 = unauthorized, 다른 실의 토큰·역할 = forbidden. last_seen_at 은 갱신하지 않는다. */
+export async function authenticate(db: Db, realm: ClientRealm, token: string, now: Date): Promise<Auth | 'unauthorized' | 'forbidden'> {
+  const tokenHash = sha256(token);
+  const row = must(await db.from('auth_sessions')
+    .select('realm, expires_at, user:users!inner(id, nickname, role, pw_updated_at, password_hash)')
+    .eq('token_hash', tokenHash).maybeSingle()) as { realm: ClientRealm; expires_at: string; user: AuthUser } | null;
+  if (!row || Date.parse(row.expires_at) <= now.getTime()) return 'unauthorized';
+  if (row.realm !== realm || row.user.role !== realm) return 'forbidden';
+  return { realm, tokenHash, user: row.user };
 }
