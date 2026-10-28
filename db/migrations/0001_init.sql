@@ -125,7 +125,6 @@ create table sessions (
   started_at      timestamptz not null default now(),
   ended_at        timestamptz,
   goal_reached    boolean not null default false,                              -- ADR-0002
-  summary         text,                                                        -- 분석 챗봇 종료 요약 문장
   counts          jsonb not null default '{}',                                 -- {"<leverage name>": n} 레버리지 누적
   progress        jsonb not null default '{"mis": []}',                        -- {"mis": int[]} 오개념별 교정 카운터 0..2 (ADR-0002)
   report          jsonb,                                                       -- 종료 시 1회 저장하는 분석 리포트(형태는 "세션 종료 리포트 JSON 스키마 결정")
@@ -135,6 +134,7 @@ create table sessions (
 );
 create index sessions_user_started_idx on sessions (user_id, started_at desc);  -- /practice/history, CSV 필터
 create index sessions_scenario_idx on sessions (scenario_id);
+create unique index sessions_one_active on sessions (user_id) where ended_at is null;  -- D-14 진행 중 세션 사용자당 1개(위반 → 409 session_active)
 create trigger sessions_updated_at before update on sessions for each row execute function set_updated_at();
 
 -- PRD 6절 turns — CSV 의 1행(C13). CSV 의 nickname·scenario 는 내보낼 때 조인한다.
@@ -184,18 +184,16 @@ create table ai_settings (
 );
 create trigger ai_settings_updated_at before update on ai_settings for each row execute function set_updated_at();
 
--- PRD 6절 audit_log. 추가만 한다. action 목록은 지도 "Not yet specified"(예: admin.password_reset, user.delete, scenario.publish, ai.key_set).
+-- PRD 6절 audit_log. 추가만 한다(updated_at·트리거 없음, 티켓 20). action 은 shared/src/api/schemas.ts 의 AuditAction 목록(티켓 20 §1).
 create table audit_log (
   id         uuid primary key default gen_random_uuid(),
   actor_id   uuid references users (id) on delete set null,   -- 서버 CLI(관리자 비밀번호 초기화)는 null
   action     text not null,
   target     text,                                            -- 대상 id 나 이름
   meta       jsonb not null default '{}',
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  created_at timestamptz not null default now()
 );
 create index audit_log_created_idx on audit_log (created_at desc);
-create trigger audit_log_updated_at before update on audit_log for each row execute function set_updated_at();
 
 -- 6. 예비교사용 시나리오 읽기 경로 (ADR-0003 4항) --------------------------------------------
 -- scenarios 에서 internal·compiled_prompt 를 뺀 것 + 활성 챗봇 언어판의 공개 대사(name/description/problem/chars/greet/elicit).
@@ -218,6 +216,32 @@ create function teacher_scenarios(p_user_id uuid) returns setof scenarios_public
                    join group_members gm on gm.group_id = gs.group_id
                   where gs.scenario_id = p.id and gm.user_id = p_user_id)
    order by p.name;
+$$;
+
+-- 턴 원자성 (E-18, 가정 O-2). Data API 는 트랜잭션이 없어서 서버가 rpc 로 부른다. 함수 호출 1번 = 문장 1개 = 전부 아니면 전무.
+-- 인자 이름은 rpc 의 JSON 키라 E-18 그대로 두고, 본문에서는 컬럼과 겹치지 않게 함수 이름으로 한정한다.
+-- record_turn: 이번 턴 발화 n행(seq 는 서버가 매김) insert + sessions 상태 갱신 + turn_started_at 해제. 종료 턴은 turns = '[]' 에 ended_at·report.
+create function record_turn(session_id uuid, turns jsonb, progress jsonb, counts jsonb, goal_reached boolean,
+                            ended_at timestamptz, report jsonb) returns void
+  language sql volatile security invoker set search_path = public as $$
+  insert into turns (session_id, seq, speaker, text, leverage, object, trigger)
+    select record_turn.session_id, t.seq, t.speaker, t.text, t.leverage, t.object, t.trigger
+      from jsonb_to_recordset(record_turn.turns) as t(seq integer, speaker text, text text, leverage text, object text, trigger smallint);
+  update sessions
+     set progress = record_turn.progress, counts = record_turn.counts, goal_reached = record_turn.goal_reached,
+         ended_at = record_turn.ended_at, report = record_turn.report, turn_started_at = null
+   where id = record_turn.session_id;
+$$;
+
+-- claim_turn: turn_started_at 이 null 이거나 timeout_ms 를 넘긴 고아(티켓 19 §3)일 때만 now() 로 잡고 true. 동시 두 요청은 행 잠금 뒤 조건을 다시 봐서 하나만 true.
+create function claim_turn(session_id uuid, timeout_ms integer) returns boolean
+  language sql volatile security invoker set search_path = public as $$
+  with claimed as (
+    update sessions set turn_started_at = now()
+     where id = claim_turn.session_id
+       and (turn_started_at is null or turn_started_at < now() - make_interval(secs => claim_turn.timeout_ms / 1000.0))
+    returning 1)
+  select exists (select 1 from claimed);
 $$;
 
 -- 7. RLS 2차 방어 = anon/authenticated(Data API 직접 접근) 전면 거부 (ADR-0003 1·2항) --------------
@@ -245,6 +269,11 @@ alter default privileges in schema public revoke all on sequences from anon, aut
 alter default privileges in schema public revoke all on functions from anon, authenticated;
 revoke execute on function teacher_scenarios(uuid) from public;
 revoke execute on function set_updated_at()        from public;
+revoke execute on function record_turn(uuid, jsonb, jsonb, jsonb, boolean, timestamptz, jsonb) from public;
+revoke execute on function claim_turn(uuid, integer) from public;
+-- PG15+ 의 public 스키마는 PUBLIC 에 usage 를 준다(anon 도 PUBLIC 이라 위 usage REVOKE 만으로는 남는다). 그래서 이 역할이 이후 만드는 함수의
+-- 기본 PUBLIC EXECUTE 도 끈다. 이 전역 기본값은 `in schema` 로는 지울 수 없다.
+alter default privileges revoke execute on functions from public;
 
 -- 8. 기록 ---------------------------------------------------------------------------
 insert into schema_migrations (version, name) values ('0001', 'init');
