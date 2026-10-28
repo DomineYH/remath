@@ -71,6 +71,12 @@ export function ChatScreen({ isAdminTest }: { isAdminTest: boolean }) {
   const refetch = useCallback(async () => setDetail(await api.getSession(sid)), [api, sid]);
   /** 이 턴은 기록되지 않았다: 말풍선을 거두고 문장을 입력란에 돌려놓는다(I-51). */
   const restore = (text: string, msg: (t: T) => string) => { setLive(null); setDraft(text); setErr(() => msg); refocus.current = true; };
+  /** done 없이 끊긴 턴(I-51): 서버 기록과 맞춘다. 마지막 예비교사 발화가 보낸 문장이면 기록된 것, 아니면 돌려놓는다. */
+  const syncDropped = async (text: string, before: number) => {
+    const d = await api.getSession(sid).catch(() => undefined), last = d?.turns.filter(x => x.speaker === 'teacher').at(-1);
+    if (d) setDetail(d);
+    if (d && d.turns.length > before && last?.text === text) setLive(null); else restore(text, t => t('turnFailed'));
+  };
 
   async function send(text: string) {
     if (!detail || busy) return;
@@ -86,11 +92,8 @@ export function ChatScreen({ isAdminTest }: { isAdminTest: boolean }) {
         else if (ev.type === 'done') done = ev;
       }
       if (failed) return;
-      if (!done) {   // done 없이 끊김: 서버 기록과 맞춘다
-        const d = await api.getSession(sid), last = d.turns.filter(x => x.speaker === 'teacher').at(-1);
-        setDetail(d);
-        if (d.turns.length > detail.turns.length && last?.text === text) setLive(null); else restore(text, t => t('turnFailed'));
-      } else if (done.ended || done.turns[0]?.seq !== lastSeq + 1) { setLive(null); await refetch(); }   // 종료 또는 seq 불연속 → 전체 재조회
+      if (!done) await syncDropped(text, detail.turns.length);
+      else if (done.ended || done.turns[0]?.seq !== lastSeq + 1) { setLive(null); await refetch(); }   // 종료 또는 seq 불연속 → 전체 재조회
       else {
         const turns = done.turns;
         setLive(null);
@@ -101,7 +104,7 @@ export function ChatScreen({ isAdminTest }: { isAdminTest: boolean }) {
       if (code === 'turn_in_progress') { restore(text, t => t('turnBusy')); await refetch(); }
       else if (code === 'session_ended' || code === 'turn_limit_reached') { setLive(null); setDraft(text); await refetch(); }
       else if (code) restore(text, t => errorText(t, e));
-      else { const d = await api.getSession(sid).catch(() => undefined); if (d) setDetail(d); restore(text, t => t('turnFailed')); }   // 스트림 중 끊김
+      else await syncDropped(text, detail.turns.length);   // 스트림 중 끊김
     } finally { setBusy(false); }
   }
 

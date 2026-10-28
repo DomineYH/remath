@@ -223,7 +223,14 @@ export function createMockApi(o: MockOptions): Api {
     getCurrentSession: async () => { const s = current(who(o.realm)); return s ? detail(s) : null; },
     startSession: async b => start(b.scenario_id), getSession: async id => detail(sessionOf(id)),
     // 관리자 세션의 `state` 는 AdminApi 타입으로만 보인다(createApi('admin') 이 좁힌다).
-    sendTurn: async function* (id: string, b: z.infer<typeof S.TurnBody>) { yield* turn(sessionOf(id), b.text); } as Api['sendTurn'],
+    sendTurn: async function* (id: string, b: z.infer<typeof S.TurnBody>) {
+      // E2E 전용 1회성 끊김(I-51): 'before' = 첫 이벤트에서(기록 없음), 'after' = done 에서(이미 기록됨). 목에는 네트워크가 없어 route-abort 가 닿지 않는다.
+      const g = globalThis as { __remathMockDrop?: 'before' | 'after' }, drop = g.__remathMockDrop; delete g.__remathMockDrop;
+      for await (const ev of turn(sessionOf(id), b.text)) {
+        if (drop === 'before' || (drop === 'after' && ev.type === 'done')) throw new TypeError('network error (mock drop)');
+        yield ev;
+      }
+    } as Api['sendTurn'],
     endSession: async id => end(sessionOf(id)),
 
     listScenarios: async () => { who('admin'); return [...db.scenarios].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).map(toSummary); },
