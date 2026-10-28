@@ -34,7 +34,8 @@ const runPsql: Psql = args => {
 };
 
 // Transaction pooler(6543)는 --single-transaction 과 세션 상태를 보장하지 않는다(B절: Direct 5432 또는 Session pooler).
-const Env = z.object({ SUPABASE_DB_URL: z.string().regex(/^postgres(ql)?:\/\//, 'must be a postgres:// connection string').refine(u => !/:6543\b/.test(u), 'transaction pooler (port 6543) is not allowed') });
+export const DbUrl = z.string().regex(/^postgres(ql)?:\/\//, 'must be a postgres:// connection string').refine(u => !/:6543\b/.test(u), 'transaction pooler (port 6543) is not allowed');
+const Env = z.object({ SUPABASE_DB_URL: DbUrl });
 
 if (import.meta.main) main('db:migrate', async () => {
   const { applied, ran } = migrate(readEnv(Env, process.env).SUPABASE_DB_URL, runPsql);
