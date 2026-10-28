@@ -135,3 +135,27 @@ test('B-1: wizard → fill example → review → publish → user and group →
   await teacherHome(page);
   await expect(page.getByText("No scenarios are assigned to Bora's groups.")).toBeVisible();
 });
+
+// #31: a scenario made from scratch has no elicit lines; the wizard save fills the mockup defaults,
+// so the MOCK student answers an eliciting question with them instead of "I'm still thinking".
+test('wizard from scratch → save draft fills default elicit → the MOCK student replies with them, not idk', async ({ page }) => {
+  await adminLogin(page);
+  await page.getByRole('button', { name: '＋ New scenario' }).click();
+  await page.locator('#f-name').fill('민지');
+  await page.getByRole('button', { name: 'Next →' }).click();
+  await page.locator('#f-baseline').fill('- 1/2 + 1/3 = 2/5 라고 답함.\n- 분모끼리 더함.');
+  await page.getByRole('button', { name: 'Save draft' }).click();
+  await expect(page).toHaveURL('/admin/scenarios');
+  await page.getByRole('article').filter({ has: page.getByRole('heading', { name: '민지' }) }).getByRole('button', { name: 'Test chat' }).click();
+  await expect(page).toHaveURL(/\/test\?session=/);
+
+  const students = page.getByRole('log').locator('.msg.student');
+  const input = page.getByRole('textbox', { name: 'Message' }), send = page.getByRole('button', { name: 'Send' });
+  const before = await students.count();
+  for (const [i, line] of ['음… 저는 제 그림대로 생각했어요.', '1/2 + 1/3 = 2/5 라고 답함.'].entries()) {
+    await input.fill('어떻게 풀었는지 말해 줄래?');
+    await send.click();
+    await expect(students).toHaveCount(before + i + 1);
+    await expect(students.last()).toContainText(line);
+  }
+});

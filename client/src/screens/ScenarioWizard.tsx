@@ -6,6 +6,7 @@ import { checkTemplates, compileScenario, TEMPLATES } from '@remath/prompts';
 import seoyeon from '@remath/seed/scenarios/seoyeon.json';
 import * as S from '@remath/shared';
 import { adminApi } from '../apis.ts';
+import { withDefaultElicit } from '../elicit.ts';
 import { AccountMenu } from '../components/AccountMenu.tsx';
 import { AdminSubnav } from '../components/AdminSubnav.tsx';
 import { AppShell } from '../components/AppShell.tsx';
@@ -70,10 +71,11 @@ export function ScenarioWizard() {
   const fillExample = () => { setD({ ...S.ScenarioInput.parse(seoyeon), lang: d.lang }); setCopied(false); setConfirmed([]); };
   const canPublish = review.publishable && confirmed.length === MANUAL.length;
 
-  /** 새 시나리오는 한 번만 만들고, 그 뒤로는 같은 id 에 PUT(게시 실패 뒤 다시 눌러도 중복 생성 없음). */
+  /** 지금 판 elicit 이 비었으면 기본값을 채워 보낸다(#31). 새 시나리오는 한 번만 만들고, 그 뒤로는 같은 id 에 PUT(게시 실패 뒤 다시 눌러도 중복 생성 없음). */
   const save = async () => {
     if (!clean.translations[clean.lang].name.trim()) { setStep(0); setErr(t('nameRequired')); return null; }
-    const s = savedId ? await adminApi.updateScenario(savedId, clean) : await adminApi.createScenario(clean);
+    const body = withDefaultElicit(clean);
+    const s = savedId ? await adminApi.updateScenario(savedId, body) : await adminApi.createScenario(body);
     setSavedId(s.id); setPublished(false);
     return s;
   };
