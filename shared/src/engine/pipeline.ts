@@ -2,8 +2,7 @@
 // 이벤트 이름은 C7 의 SSE 이벤트와 같다(classification·student·mentor·trigger·done). 실제 SSE 직렬화·DB 기록은 여기 없다.
 import { collect, type Criteria, type Lang, type Message, type Provider } from './adapter.ts';
 import { parseClassification, type Classification } from './classification.ts';
-import { judgeTurn, reportInput, runtimeBlock, type SessionState, type StudentLines } from './engine.ts';
-import { TXT } from './mock/provider.ts';
+import { HELP_LINE, judgeTurn, reportInput, runtimeBlock, type SessionState, type StudentLines } from './engine.ts';
 
 export interface Compiled { student: string; analysis: string | null; mentor: string }
 export interface Turn { speaker: 'teacher' | 'student' | 'mentor'; text: string }
@@ -53,7 +52,7 @@ export async function* runTurn(p: { bots: Bots; compiled: Compiled; criteria: Cr
   }
   yield { type: 'classification', cls };
   // 2) 학생: 도움 요청이면 LLM 을 부르지 않고 고정 문구.
-  if (j.kind === 'help') yield { type: 'student', text: TXT[lang].help };
+  if (j.kind === 'help') yield { type: 'student', text: HELP_LINE[lang] };
   else {
     const req = { system: compiled.student + runtimeBlock(j.state, j.directive, lang), messages: studentMessages(history, text), model: bots.model,
       context: { role: 'student' as const, lang, teacherText: text, leverage: cls?.leverage ?? null, directive: j.directive, goalReached: p.state.goalReached, lines: { greet: tr.greet, chars: tr.chars, elicit: tr.elicit } } };

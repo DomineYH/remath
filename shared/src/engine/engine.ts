@@ -12,6 +12,8 @@ export interface SessionState { mis: number[]; counts: Record<string, number>; g
 export const END_SESSION_RE = /^end session$/i;
 /** 도움 요청은 시나리오 데이터가 아니라 서버 상수(ADR-0002). 목업 detectStd/detectEn 의 help 패턴. */
 export const HELP_RE: Record<Lang, RegExp> = { ko: /도와|힌트|어떻게 물어|어떤 질문|뭐라고 물|질문 추천/, en: /\bhelp\b|\bhint\b|what should i ask|which question|suggest a question/i };
+/** 도움 요청 턴의 학생 고정 문구: LLM 을 부르지 않는다(실 LLM·MOCK 공통). */
+export const HELP_LINE: Record<Lang, string> = { ko: '음… 저 아직 생각 중이에요.', en: "Um… I'm still thinking." };
 
 /** 목업 kwTest: 정규식으로 해석되지 않으면 부분 문자열. */
 export function kwTest(kw: string, m: string): boolean {

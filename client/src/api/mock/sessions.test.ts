@@ -1,6 +1,6 @@
 // A-2 (practice-session rules), A-3 (L1·L2 replays through sendTurn), A-6 (admin `state`), against the mock API only.
 import * as S from '@remath/shared';
-import { TXT } from '@remath/shared/engine';
+import { HELP_LINE, TXT } from '@remath/shared/engine';
 import gabriel from '@remath/seed/scenarios/gabriel.json';
 import { describe, expect, it } from 'vitest';
 import { ApiError, type AdminApi, type AdminSseEvent, type Api } from '../types.ts';
@@ -142,7 +142,7 @@ describe('A-3 turn pipeline through sendTurn', () => {
     const env = await setup(), noah = (await env.admin.getScenario(env.ids.noah)).translations.en;
     const sid = (await env.admin.startSession({ scenario_id: env.ids.noah })).session.id;
     const [evs] = await replay(env.admin, sid, ['Help'], S.AdminSseEvent);
-    expect(student(evs)).toBe(TXT.en.help);
+    expect(student(evs)).toBe(HELP_LINE.en);
     expect(trigger(evs)).toBe(2);
     expect(pick(evs, 'mentor')?.text).toBe(`${TXT.en.helpLead}\n${noah.t2.split('\n').filter(Boolean).map(x => '· ' + x).join('\n')}`);
   });
