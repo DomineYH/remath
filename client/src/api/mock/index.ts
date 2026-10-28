@@ -154,7 +154,7 @@ export function createMockApi(o: MockOptions): Api {
     const state: SessionState = { mis: s.progress.mis, counts: s.counts, goalReached: s.goal_reached, takeOverCount: history.filter(h => h.trigger === 1).length };
     const pending: Parameters<typeof addTurn>[1][] = [{ speaker: 'teacher', text }];
     s.turn_started_at = now(); save();
-    // ponytail: TURN_TIMEOUT_MS·고아 turn_started_at 은 흉내 내지 않는다(D-15). finally 가 항상 지운다.
+    // ponytail: TURN_TIMEOUT_MS 는 흉내 내지 않는다(D-15). finally 가 항상 지우고, 새로고침으로 남은 고아 플래그는 Store 로드가 지운다.
     try {
       for await (const ev of runTurn({ bots, compiled: sc.compiled_prompt ?? compile(sc), criteria, tr: t, lang: s.lang, state, history, text })) {
         if (ev.type === 'classification') { if (ev.cls) { Object.assign(pending[0], ev.cls); yield { type: 'classification', ...ev.cls }; } }

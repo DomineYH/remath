@@ -180,6 +180,15 @@ describe('A-2 turn rules', () => {
     expect((await env.admin.getSession(sid)).turns).toHaveLength(1);
     expect((await drain(env.admin.sendTurn(sid, { text: '왜?' }))).at(-1)?.type).toBe('done');
   });
+  it('a reload mid-turn leaves no stuck turn_started_at: the reloaded store can send and end', async () => {
+    const storage = memoryStorage();
+    const env = await setup({ store: new Store(storage, () => seedDb(T0)) });
+    const sid = (await env.admin.startSession({ scenario_id: env.ids.gabriel })).session.id;
+    await env.admin.sendTurn(sid, { text: '어떻게 풀었는지 말해 줄래?' })[Symbol.asyncIterator]().next();   // tab closes mid-stream
+    const admin2 = createMockApi({ realm: 'admin', store: new Store(storage, () => seedDb(T0)), now: () => T0, adminPassword: ADMIN_PW }) as unknown as AdminApi;
+    expect((await drain(admin2.sendTurn(sid, { text: '왜?' }))).at(-1)?.type).toBe('done');
+    expect(await admin2.endSession(sid)).not.toBeUndefined();
+  });
   it('422 turn_limit_reached + details at the limit; END SESSION still ends the session', async () => {
     const env = await setup({ turnLimit: 2 });
     const d = await env.admin.startSession({ scenario_id: env.ids.gabriel });

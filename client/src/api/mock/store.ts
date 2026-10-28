@@ -41,6 +41,8 @@ export class Store {
     const raw = storage.getItem(STORAGE_KEY);
     this.db = raw ? JSON.parse(raw) : seed();
     if (!raw) this.save();
+    // 저장본의 turn_started_at 은 새로고침으로 끊긴 턴의 흔적이다: 이 페이지에서 흐르는 턴은 아직 없다(목은 TURN_TIMEOUT_MS 를 흉내 내지 않는다).
+    for (const s of this.db.sessions) s.turn_started_at = null;
   }
   save() { this.storage.setItem(STORAGE_KEY, JSON.stringify(this.db)); }
 }
