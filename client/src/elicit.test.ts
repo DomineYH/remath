@@ -24,4 +24,11 @@ describe('withDefaultElicit', () => {
     d.translations.ko.elicit = ['제 답이 맞아요.'];
     expect(withDefaultElicit(d).translations.ko.elicit).toEqual(['제 답이 맞아요.']);
   });
+  it('ko never gets a blank line: uses the first non-empty baseline line, else only the fixed line', () => {
+    const ko = (b: string) => withDefaultElicit(draft('ko', b)).translations.ko.elicit;
+    expect(ko('')).toEqual(['음… 저는 제 그림대로 생각했어요.']);
+    expect(ko('- ')).toEqual(['음… 저는 제 그림대로 생각했어요.']);
+    expect(ko('   \n- ')).toEqual(['음… 저는 제 그림대로 생각했어요.']);
+    expect(ko('\n  \n- 0.65가 더 길다고 답함.')).toEqual(['음… 저는 제 그림대로 생각했어요.', '0.65가 더 길다고 답함.']);
+  });
 });
