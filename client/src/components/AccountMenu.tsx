@@ -28,8 +28,8 @@ export function AccountMenu({ kind, nickname }: { kind: 'teacher' | 'admin'; nic
 
   return (
     <div className="acct" ref={box}>
-      <button ref={btn} type="button" className="btn sm acct-name" aria-haspopup="menu" aria-expanded={open} aria-label={t('acctAria')} onClick={() => setOpen(o => !o)}>
-        {kind === 'admin' ? `🔑 ${t('adminAcct')}` : `✏️ ${nickname}`}
+      <button ref={btn} type="button" className="btn sm acct-name" aria-haspopup="menu" aria-expanded={open} aria-label={t('acctAria')} title={kind === 'admin' ? undefined : nickname} onClick={() => setOpen(o => !o)}>
+        <span>{kind === 'admin' ? `🔑 ${t('adminAcct')}` : `✏️ ${nickname}`}</span>
       </button>
       {open && (
         <div className="acct-menu" role="menu">

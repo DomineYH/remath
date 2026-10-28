@@ -2,11 +2,15 @@
 
 /* header */
 .top{position:sticky;top:env(safe-area-inset-top,0px);z-index:9;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
-.top .in{max-width:1180px;margin:0 auto;display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding-block:12px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.top .in{max-width:1180px;margin:0 auto;display:flex;align-items:center;gap:14px;padding-block:12px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 .brand{display:flex;align-items:center;gap:10px;min-width:0}
 .brand .logo{width:32px;height:32px;flex:none;display:block}
 .brand b{font-family:var(--display);font-size:20px;font-weight:600;letter-spacing:-.02em}
 .brand .sub{font-size:13px;color:var(--fg-3)}
+/* the bar never wraps (#33): only the brand and the account button shrink, cut with an ellipsis */
+.top .in > *{flex:none}
+.top .in > .brand,.top .in > .acct{flex:0 1 auto}
+.brand b,.acct-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media (max-width:640px){.brand .sub{display:none}}
 
 /* shell */
@@ -65,9 +69,9 @@
 .authlink:hover{text-decoration:underline}
 
 /* account menu: one nickname button + dropdown at every width (ticket 17 #3) */
-.acct{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap;position:relative}
+.acct{margin-left:auto;display:flex;gap:8px;align-items:center;min-width:0;position:relative}
 .acct:empty{display:none}
-.acct-name{font-size:14px;font-weight:600}
+.acct-name{font-size:14px;font-weight:600;min-width:0;max-width:100%}
 .acct:empty + .ui-seg{margin-left:auto}
 .acct-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:20;min-width:200px;display:flex;flex-direction:column;gap:2px;padding:6px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);box-shadow:0 10px 30px -12px rgba(0,0,0,.25)}
 .acct-menu button{border:0;background:transparent;color:var(--fg);text-align:left;padding:8px 12px;border-radius:8px;font-size:14px}
