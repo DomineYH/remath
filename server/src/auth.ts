@@ -54,17 +54,13 @@ export const cookieOptions = (realm: ClientRealm, secure: boolean) =>
 export interface AuthUser { id: string; nickname: string; role: ClientRealm; pw_updated_at: string; password_hash: string }
 export interface Auth { realm: ClientRealm; tokenHash: string; user: AuthUser }
 
-/**
- * 토큰 → 로그인. 없음·만료 = unauthorized, 다른 실의 토큰·역할 = forbidden. last_seen_at 은 갱신하지 않는다.
- * 비밀번호가 바뀐 뒤에는 그 전에 만든 로그인이 모두 끝난다: created_at <= users.pw_updated_at 이면 unauthorized(C-12).
- * auth_sessions 삭제가 실패해도 이 규칙이 막는다. 두 시각은 모두 서버 시계(Deps.now)로 쓴다 — pw_updated_at 을 바꾸는 곳은 모두 그 시계로.
- */
+/** 토큰 → 로그인. 없음·만료 = unauthorized, 다른 실의 토큰·역할 = forbidden. last_seen_at 은 갱신하지 않는다. */
 export async function authenticate(db: Db, realm: ClientRealm, token: string, now: Date): Promise<Auth | 'unauthorized' | 'forbidden'> {
   const tokenHash = sha256(token);
   const row = must(await db.from('auth_sessions')
-    .select('realm, expires_at, created_at, user:users!inner(id, nickname, role, pw_updated_at, password_hash)')
-    .eq('token_hash', tokenHash).maybeSingle()) as { realm: ClientRealm; expires_at: string; created_at: string; user: AuthUser } | null;
-  if (!row || Date.parse(row.expires_at) <= now.getTime() || Date.parse(row.created_at) <= Date.parse(row.user.pw_updated_at)) return 'unauthorized';
+    .select('realm, expires_at, user:users!inner(id, nickname, role, pw_updated_at, password_hash)')
+    .eq('token_hash', tokenHash).maybeSingle()) as { realm: ClientRealm; expires_at: string; user: AuthUser } | null;
+  if (!row || Date.parse(row.expires_at) <= now.getTime()) return 'unauthorized';
   if (row.realm !== realm || row.user.role !== realm) return 'forbidden';
   return { realm, tokenHash, user: row.user };
 }
