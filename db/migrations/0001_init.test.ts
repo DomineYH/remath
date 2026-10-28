@@ -184,7 +184,7 @@ describe('RLS second line: anon/authenticated get nothing (ADR-0003)', () => {
     }
   });
 
-  it('functions run as the caller (security invoker) with a fixed search_path; the view is security_invoker', async () => {
+  it('the three RPC/query functions run as the caller (security invoker) with a fixed search_path; the view is security_invoker', async () => {
     const fns = await rows<{ proname: string; prosecdef: boolean; proconfig: string[] | null }>(`select proname, prosecdef, proconfig
       from pg_proc where pronamespace = 'public'::regnamespace and proname in ('teacher_scenarios', 'record_turn', 'claim_turn') order by proname`);
     expect(fns).toEqual(['claim_turn', 'record_turn', 'teacher_scenarios'].map(proname =>
@@ -194,11 +194,19 @@ describe('RLS second line: anon/authenticated get nothing (ADR-0003)', () => {
   });
 
   it('denies every read and call, including objects created later', async () => {
-    await db.exec(`create table later (x int); create function later_fn() returns int language sql as 'select 1'`);
+    await db.exec(`create table later (x int); create sequence later_seq; create function later_fn() returns int language sql as 'select 1'`);
+    for (const role of ['anon', 'authenticated']) {
+      for (const priv of ['select', 'insert', 'update', 'delete', 'truncate', 'references', 'trigger']) {
+        expect((await one<{ x: boolean }>(`select has_table_privilege($1, 'later', $2) as x`, [role, priv])).x, `${role} ${priv} on later`).toBe(false);
+      }
+      for (const priv of ['usage', 'select', 'update']) {
+        expect((await one<{ x: boolean }>(`select has_sequence_privilege($1, 'later_seq', $2) as x`, [role, priv])).x, `${role} ${priv} on later_seq`).toBe(false);
+      }
+    }
     const sid = (await one<{ id: string }>(`select id from sessions limit 1`)).id;
     for (const role of ['anon', 'authenticated']) {
       for (const q of ['select * from scenarios', 'select * from scenarios_public', `select * from teacher_scenarios('${admin}')`,
-        'select * from ai_settings', 'select * from later', 'select later_fn()', `select claim_turn('${sid}', 1000)`,
+        'select * from ai_settings', 'select * from later', 'insert into later values (1)', "select nextval('later_seq')", 'select later_fn()', `select claim_turn('${sid}', 1000)`,
         `select record_turn('${sid}', '[]', '{}', '{}', false, null, null)`]) {
         await expect(asRole(role, () => db.exec(q)), `${role}: ${q}`).rejects.toThrow(/permission denied/);
       }
