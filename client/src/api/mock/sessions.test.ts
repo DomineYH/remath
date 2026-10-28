@@ -165,19 +165,6 @@ describe('A-3 turn pipeline through sendTurn', () => {
 });
 
 describe('A-2 turn rules', () => {
-  it('409 turn_in_progress while a turn streams; finally releases it', async () => {
-    const env = await setup();
-    const sid = (await env.admin.startSession({ scenario_id: env.ids.gabriel })).session.id;
-    const it1 = env.admin.sendTurn(sid, { text: '어떻게 풀었는지 말해 줄래?' })[Symbol.asyncIterator]();
-    await it1.next();   // the stream has started
-    const e = await rejects(firstNext(env.admin.sendTurn(sid, { text: '왜?' })), 409, 'turn_in_progress');
-    expect(e.body.error.details).toEqual({ turn_started_at: expect.any(String) });
-    S.Iso.parse((e.body.error.details as { turn_started_at: unknown }).turn_started_at);
-    await rejects(env.admin.endSession(sid), 409, 'turn_in_progress');
-    await it1.return?.(undefined);   // client went away mid-stream: nothing recorded, lock released
-    expect((await env.admin.getSession(sid)).turns).toHaveLength(1);
-    expect((await drain(env.admin.sendTurn(sid, { text: '왜?' }))).at(-1)?.type).toBe('done');
-  });
   it('END SESSION and endSession give the same report, stored once; the session is then 409 session_ended', async () => {
     const env = await setup(), report = async (how: 'turn' | 'end') => {
       const sid = (await env.admin.startSession({ scenario_id: env.ids.gabriel })).session.id;
@@ -192,6 +179,24 @@ describe('A-2 turn rules', () => {
     const a = await report('turn'), b = await report('end');
     expect(a).toEqual(b);
     expect(a?.verdict).toBe('heavy');
+  });
+});
+
+// Mock-only: the mock runs a turn as the client pulls; over HTTP the server records it before the first byte arrives (#46).
+// The server's drop behaviour is covered by server/src/turn.test.ts dropDuring and the #46 live abort check.
+describeMock('A-2 turn rules: mid-stream', () => {
+  it('409 turn_in_progress while a turn streams; finally releases it', async () => {
+    const env = await setup();
+    const sid = (await env.admin.startSession({ scenario_id: env.ids.gabriel })).session.id;
+    const it1 = env.admin.sendTurn(sid, { text: '어떻게 풀었는지 말해 줄래?' })[Symbol.asyncIterator]();
+    await it1.next();   // the stream has started
+    const e = await rejects(firstNext(env.admin.sendTurn(sid, { text: '왜?' })), 409, 'turn_in_progress');
+    expect(e.body.error.details).toEqual({ turn_started_at: expect.any(String) });
+    S.Iso.parse((e.body.error.details as { turn_started_at: unknown }).turn_started_at);
+    await rejects(env.admin.endSession(sid), 409, 'turn_in_progress');
+    await it1.return?.(undefined);   // client went away mid-stream: nothing recorded, lock released
+    expect((await env.admin.getSession(sid)).turns).toHaveLength(1);
+    expect((await drain(env.admin.sendTurn(sid, { text: '왜?' }))).at(-1)?.type).toBe('done');
   });
 });
 

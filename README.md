@@ -33,9 +33,23 @@ The API-boundary suites in `client/src/api/mock/*.test.ts` reach the server only
 | Target | Groups (file) |
 |---|---|
 | any (HTTP-runnable) | A-1 teacher exposure (exposure) · A-2 practice-session rules, A-2 turn rules, A-3 turn pipeline, A-6 admin state (sessions) · sample scenarios, A-4 create·update·review·publish·delete, A-10 providers (scenarios) · A-5 users, groups, getPractice (admin) · A-5 signup·validation, password change, logout·realms (mock) · A-7 sessions CSV, A-10 AI settings (logs) |
-| mock only | A-9 initial state, admin password from env, storage; A-8 audit helper (mock) · A-2 reload, `turnLimit` (sessions) · A-4 stored compiled prompt, `templates` c7 (scenarios) · A-10 stored keys, A-8 audit log (logs) · A-8 user·group rows (admin) · A-8 scenario rows (scenarios) |
+| mock only | A-9 initial state, admin password from env, storage; A-8 audit helper (mock) · A-2 turn rules mid-stream (409 while streaming, dropped stream), A-2 reload, `turnLimit` (sessions) · A-4 stored compiled prompt, `templates` c7 (scenarios) · A-10 stored keys, A-8 audit log (logs) · A-8 user·group rows (admin) · A-8 scenario rows (scenarios) |
 
-HTTP groups assert on `Api` results only: no store reads, and time values (`started_at`, `created_at`, …) only for presence and order. An injected target must be a server seeded like the mock (admin password `ADMIN_PW`, the five samples) and reset between tests.
+HTTP groups assert on `Api` results only: no store reads, and time values (`started_at`, `created_at`, …) only for presence and order. An injected target must be a server seeded like the mock (the five samples), reset between tests, and passes its admin password to `useTarget` (it becomes `ADMIN_PW`).
+
+### HTTP run (`npm run test:http -w server`)
+
+Runs the HTTP-runnable groups above against a real server through `createHttpApi` (T-2). Not part of `npm test` or CI (O-11). Out of scope: A-8 audit (the SQL smoke covers it) and A-9 initial state (the seed smoke covers it); the run prints this too.
+
+```sh
+cd server
+MOCK_LLM=1 COOKIE_SECURE=false PORT=3946 node --env-file=$HOME/.config/remath/dev.env --import ./src/raw-hooks.ts src/index.ts &   # the server under test
+ENV_FILE=$HOME/.config/remath/dev.env SERVER_URL=http://127.0.0.1:3946 npm run test:http
+```
+
+- Env: `SERVER_URL`, `DEV_ADMIN_PASSWORD` (the server's admin password, injected as `ADMIN_PW`), `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`. `ENV_FILE` loads them from a file.
+- Each browser is a cookie-jar `fetch` (`server/src/test-http/jar.ts`): it keeps `set-cookie` (Path, Max-Age/Expires) and sends the `cookie` header; `browser()` is a new jar; a logout's expired cookie empties it.
+- Known state (`server/src/test-http/reset.ts`): **destructive, dev project only.** It refuses to run unless `SUPABASE_URL` contains the dev project ref `ezzufgvulfwygojibujv`. At the start it snapshots the admin password hash, the five samples (`gabriel`, `hajun`, `jiwoo`, `noah`, `seoyeon`) with their translations, and `ai_settings`. Before every test and once at the end it deletes, through the Data API, every teacher (with their sessions, turns, memberships and logins), every session, every group, every non-sample scenario and the audit rows written since the run started, then writes the snapshot back (a changed admin password goes back through `change_password`, which ends every admin login). `schema_migrations` is untouched; no DDL. Never point it at a database whose data you need.
 
 ## G2 demo checklist
 
