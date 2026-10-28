@@ -108,7 +108,7 @@ const teacherTurn = (seq: number, text: string) => JSON.stringify([{ seq, speake
 const record = (sid: string, token: string, turns = '[]', end: { at: string | null; report: unknown } = { at: null, report: null }) =>
   one<{ ok: boolean }>(`select record_turn($1, $2, $3, '{"mis":[1,0]}', '{"Eliciting":1}', false, $4, $5) as ok`,
     [sid, token, turns, end.at, end.report === null ? null : JSON.stringify(end.report)]).then(r => r.ok);
-const release = (sid: string, token: string) => db.query(`select release_turn($1, $2)`, [sid, token]);
+const release = (sid: string, token: string) => one<{ ok: boolean }>(`select release_turn($1, $2) as ok`, [sid, token]).then(r => r.ok);
 const state = (sid: string) => one<{ turn_claim: string | null; started: boolean; ended: boolean; report: unknown; turns: number }>(
   `select turn_claim, turn_started_at is not null as started, ended_at is not null as ended, report, (select count(*)::int from turns where session_id = s.id) as turns
      from sessions s where id = $1`, [sid]);
@@ -134,10 +134,11 @@ describe('claim token fence', () => {
     const sid = await fresh();
     await claim(sid, B);
     expect(await record(sid, A, teacherTurn(2, 'stale'))).toBe(false);
-    await release(sid, A);
+    expect(await release(sid, A)).toBe(false);
     expect(await state(sid)).toMatchObject({ turn_claim: B, started: true, turns: 1 });
-    await release(sid, B);
+    expect(await release(sid, B)).toBe(true);
     expect(await state(sid)).toMatchObject({ turn_claim: null, started: false });
+    expect(await release(sid, B)).toBe(false);
   });
   it('an ended session can be neither claimed nor recorded, even by the token that holds it', async () => {
     const sid = await fresh();
@@ -166,5 +167,17 @@ describe('claim token fence', () => {
     expect(await record(sid, B, '[]', { at: new Date().toISOString(), report })).toBe(true);
     expect(await record(sid, A, teacherTurn(2, 'resumed'))).toBe(false); // A resumes: fenced off
     expect(await state(sid)).toMatchObject({ ended: true, report, turn_claim: null, turns: 1 });
+  });
+
+  it('release fences an outcome-unknown record: release=true means that record can never commit; release=false after it committed', async () => {
+    const sid = await fresh();
+    await claim(sid, A);
+    expect(await release(sid, A)).toBe(true);                            // release won the row lock first
+    expect(await record(sid, A, teacherTurn(2, 'late commit'))).toBe(false);
+    expect((await state(sid)).turns).toBe(1);
+    await claim(sid, B);
+    expect(await record(sid, B, teacherTurn(2, 'committed'))).toBe(true); // the record won the lock first
+    expect(await release(sid, B)).toBe(false);
+    expect((await state(sid)).turns).toBe(3);
   });
 });

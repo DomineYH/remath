@@ -65,11 +65,15 @@ begin
   return true;
 end $$;
 
--- 잡기 해제: p_token 이 아직 turn_claim 일 때만. 이미 기록됐거나 빼앗겼으면 아무것도 하지 않는다(그래서 결과를 모를 때도 부를 수 있다).
+-- 잡기 해제: p_token 이 아직 turn_claim 일 때만 풀고 true. 이미 기록됐거나 빼앗겼으면 아무것도 하지 않고 false.
+-- 결과를 모르는 record_turn 의 울타리이기도 하다: 이 UPDATE 는 같은 행 잠금을 잡으므로 진행 중인 record_turn 을 기다린다.
+-- true = 그 record_turn 은 앞으로도 커밋할 수 없다(토큰이 풀려 WHERE 가 거짓). false = 토큰이 이미 없다(기록됐거나 빼앗김).
 create function release_turn(p_session_id uuid, p_token uuid)
-  returns void language sql volatile security invoker set search_path = public as $$
+  returns boolean language plpgsql volatile security invoker set search_path = public as $$
+begin
   update sessions set turn_claim = null, turn_started_at = null where id = p_session_id and turn_claim = p_token;
-$$;
+  return found;
+end $$;
 
 revoke all on function start_session(uuid, uuid, text, jsonb, jsonb, text)                          from public, anon, authenticated;
 revoke all on function claim_turn(uuid, uuid, integer)                                             from public, anon, authenticated;
