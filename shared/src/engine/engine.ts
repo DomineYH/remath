@@ -57,15 +57,18 @@ export function reportInput(names: string[], counts: Record<string, number>, rea
   return { names, counts, verdict, reached };
 }
 
+const RUNTIME = {
+  ko: { head: 'H) 이번 턴 (서버 주입)', mis: '오개념 진행', prog: ['미교정(0/2)', '망설임(1/2)', '교정됨'], goal: (r: boolean) => `도달점: ${r ? '도달' : '미도달'}`,
+    dir: (t: string) => `이번 턴 지시: 반드시 다음 취지로, 네 말투로 답하십시오 — "${t}"`, none: '이번 턴 지시: 없음. 현재 오개념 상태를 유지하고 질문받은 것만 답하십시오.' },
+  en: { head: 'H) This turn (server-injected)', mis: 'Misconceptions', prog: ['uncorrected (0/2)', 'hesitating (1/2)', 'corrected'], goal: (r: boolean) => `Goal: ${r ? 'reached' : 'not reached'}`,
+    dir: (t: string) => `This turn: you must answer with exactly this gist, in your own voice — "${t}"`, none: 'This turn: none. Keep your current misconceptions and answer only what was asked.' },
+};
+
 /** ADR-0002 런타임 블록. 학생 system 뒤에 호출마다 덧붙인다. */
 export function runtimeBlock(state: SessionState, directive: TurnDirective | null, lang: Lang): string {
-  const prog = state.mis.map((n, i) => `${i + 1}) ${n >= 2 ? (lang === 'ko' ? '교정됨' : 'corrected') : n === 1 ? (lang === 'ko' ? '망설임(1/2)' : 'hesitating (1/2)') : (lang === 'ko' ? '미교정(0/2)' : 'uncorrected (0/2)')}`).join('  ');
-  const goal = lang === 'ko' ? `도달점: ${state.goalReached ? '도달' : '미도달'}` : `Goal: ${state.goalReached ? 'reached' : 'not reached'}`;
-  const dir = directive
-    ? (lang === 'ko' ? `이번 턴 지시: 반드시 다음 취지로, 네 말투로 답하십시오 — "${directive.text}"` : `This turn: you must answer with exactly this gist, in your own voice — "${directive.text}"`)
-    : (lang === 'ko' ? '이번 턴 지시: 없음. 현재 오개념 상태를 유지하고 질문받은 것만 답하십시오.' : 'This turn: none. Keep your current misconceptions and answer only what was asked.');
-  const head = lang === 'ko' ? 'H) 이번 턴 (서버 주입)' : 'H) This turn (server-injected)';
-  return `\n========================================================\n${head}\n========================================================\n${lang === 'ko' ? '오개념 진행' : 'Misconceptions'}: ${prog}\n${goal}\n${dir}\n`;
+  const L = RUNTIME[lang], bar = '========================================================';
+  const prog = state.mis.map((n, i) => `${i + 1}) ${L.prog[n >= 2 ? 2 : n === 1 ? 1 : 0]}`).join('  ');
+  return `\n${bar}\n${L.head}\n${bar}\n${L.mis}: ${prog}\n${L.goal(state.goalReached)}\n${directive ? L.dir(directive.text) : L.none}\n`;
 }
 
 /** 종료 리포트(D-17, 티켓 14): 분류 기준 순서의 rows(설명·발화 스냅샷) + total + 판정. 레버리지 기준이 없으면 null. summary 는 분석 챗봇 문장(실패 시 null). */
