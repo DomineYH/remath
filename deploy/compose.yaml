@@ -26,4 +26,5 @@ services:
     volumes:
       # #47 SQLite 백업 자리(BACKUP_DIR 기본 backup/, 컨테이너 작업 디렉터리 /app/server 기준).
       # 호스트 디렉터리는 컨테이너 사용자 node(uid 1000)가 쓸 수 있어야 한다. 상대 경로는 이 파일의 위치 기준.
+      # 런타임 env 의 BACKUP_DIR 은 비우거나 backup 으로 둔다: 다른 경로면 이 볼륨 밖(컨테이너 안)에 써서 재생성 때 사라진다.
       - "${REMATH_BACKUP_DIR:-../backup}:/app/server/backup"

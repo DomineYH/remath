@@ -40,7 +40,7 @@ describe('scripts/deploy.sh', () => {
     expect(execFileSync('git', ['ls-files', '-s', 'scripts/deploy.sh'], { cwd: ROOT, encoding: 'utf8' })).toMatch(/^100755 /);
   });
 
-  it('migrate → seed → smoke → env:swap → compose up --force-recreate, then /healthz and the DB probe', () => {
+  it('migrate → seed → smoke → env:swap → compose up --force-recreate, then /healthz, the DB probe and the backup in the container', () => {
     const r = deploy(['--with-samples']);
     expect(r.stderr).toBe('');
     expect(r.status).toBe(0);
@@ -52,9 +52,17 @@ describe('scripts/deploy.sh', () => {
       `npm run --silent db:smoke -w server -- --with-samples ${env}`,
       `npm run --silent env:swap -w server ${env}`,
       'docker compose -f deploy/compose.yaml up -d --force-recreate',
+      'docker compose -f deploy/compose.yaml exec -T server npm run --silent backup',
     ]);
     expect(r.calls.filter(c => c.startsWith('curl'))).toEqual(['curl http://127.0.0.1:3000/healthz', 'curl http://127.0.0.1:3000/api/auth/me']);
-    expect(r.stdout).toMatch(/new DB answers/);
+    expect(r.stdout).toMatch(/new DB answers[\s\S]*== 6\/6 backup[\s\S]*deploy\.sh: ok\n$/);
+  });
+
+  it('a failed backup exits non-zero after the switch, with the retry command (H-29 6)', () => {
+    const r = deploy([], { FAIL: 'npm run --silent backup' });
+    expect(r.status).toBe(1);
+    expect(r.steps.at(-1)).toMatch(/exec -T server npm run --silent backup$/);
+    expect(r.stderr).toMatch(/backup failed \(the switch is done and the server is running\); retry: docker compose -f deploy\/compose\.yaml exec server npm run backup/);
   });
 
   it('checks the address compose binds to', () => {
