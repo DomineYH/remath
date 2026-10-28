@@ -75,3 +75,22 @@ export const groupOut = (g: GroupDbRow): z.infer<typeof S.Group> => ({
   scenarios: g.group_scenarios.map(({ scenarios: s }) =>
     ({ id: s.id, name: s.scenario_translations.find(t => t.lang === s.lang)?.name ?? '', lang: s.lang, status: s.status })),
 });
+
+// scenario_name 은 세션 lang 스냅샷 판(M-9): 두 판 이름을 받아 고른다. 예비교사 기록·관리자 기록·CSV 가 같이 쓴다.
+export const SESSION_SELECT = 'id, user_id, scenario_id, lang, started_at, ended_at, goal_reached, report, user:users!inner(nickname), scenario:scenarios!inner(scenario_translations(lang, name))';
+export const SESSION_DETAIL_SELECT = `${SESSION_SELECT}, turns(seq, speaker, text, leverage, object, trigger, created_at)`;
+export interface SessionDbRow {
+  id: string; user_id: string; scenario_id: string; lang: Lang; started_at: string; ended_at: string | null; goal_reached: boolean;
+  report: z.infer<typeof S.SessionReport> | null; user: { nickname: string };
+  scenario: { scenario_translations: { lang: Lang; name: string }[] }; turns: z.infer<typeof S.Turn>[];
+  progress?: { mis: number[] }; counts?: Record<string, number>;   // 관리자 상세만 고른다
+}
+
+/** 목 sessionRow: turn_count = 예비교사 발화 수. */
+export const sessionRow = (s: SessionDbRow): z.infer<typeof S.SessionRow> => ({
+  id: s.id, scenario_id: s.scenario_id, scenario_name: s.scenario.scenario_translations.find(t => t.lang === s.lang)?.name ?? '', lang: s.lang,
+  user_id: s.user_id, nickname: s.user.nickname, started_at: s.started_at, ended_at: s.ended_at, goal_reached: s.goal_reached,
+  turn_count: s.turns.filter(t => t.speaker === 'teacher').length,
+});
+export const sessionDetail = (s: SessionDbRow, turnLimit: number): z.infer<typeof S.SessionDetail> =>
+  ({ session: sessionRow(s), turns: s.turns, report: s.report, turn_limit: turnLimit });

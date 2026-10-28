@@ -12,6 +12,10 @@ export type AdminSseEvent = z.infer<typeof S.AdminSseEvent>;
 /** `event: <type>\ndata: <json>\n\n`(F-23). JSON 은 줄바꿈을 \n 으로 이스케이프하므로 data 는 늘 한 줄이다. */
 export const frame = ({ type, ...data }: AdminSseEvent) => `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
 
+/** 관리자 내부 상태(티켓 15): 진행 값 + 세션 전체의 마지막 트리거. 턴 SSE 의 state 이벤트와 GET /api/admin/sessions/:id 가 같이 쓴다. */
+export const adminState = (s: { mis: number[]; counts: Record<string, number>; goal_reached: boolean }, turns: Pick<z.infer<typeof S.Turn>, 'trigger'>[]): z.infer<typeof S.AdminState> =>
+  ({ mis: s.mis, counts: s.counts, goal_reached: s.goal_reached, last_trigger: [...turns].reverse().find(t => t.trigger)?.trigger ?? null });
+
 export interface TurnOpts { db: Db; log: FastifyBaseLogger; maxTurns: number; timeoutMs: number; templates: Templates; now: () => Date; signal?: AbortSignal }
 
 type Lang = z.infer<typeof S.Lang>;
@@ -133,10 +137,8 @@ async function* stream(o: TurnOpts & { signal: AbortSignal }, id: string, token:
         if (rec.ok === 'unknown') { o.log.error({ session_id: id }, 'turn outcome unknown: ending the stream without a terminal event'); return; }
         done.settled = true;   // 기록됨·울타리에 막힘·release 가 정함: 어느 쪽이든 우리 잡기는 이미 없다
         if (!rec.ok) { yield { type: 'error', code: 'provider_unavailable', message: rec.message, retryable: true }; return; }
-        if (c.user.role === 'admin') {   // 관리자 세션만, done 직전 1회(티켓 15)
-          const last_trigger = [...history, ...turns].reverse().find(t => t.trigger)?.trigger ?? null;
-          yield { type: 'state', mis: ev.state.mis, counts: ev.state.counts, goal_reached: ev.state.goalReached, last_trigger };
-        }
+        // 관리자 세션만, done 직전 1회(티켓 15)
+        if (c.user.role === 'admin') yield { type: 'state', ...adminState({ mis: ev.state.mis, counts: ev.state.counts, goal_reached: ev.state.goalReached }, [...history, ...turns]) };
         // ponytail: 정상 기록이면 created_at 은 서버 시각이다(record_turn 은 boolean, DB 값과 ms 차). 맞춰 읽은 경우만 DB 값.
         yield ev.ended ? { type: 'done', ended: true, report: rec.report !== undefined ? rec.report : report }
           : { type: 'done', ended: false, turns: rec.turns ?? turns.map(t => ({ ...t, created_at: at })) };
