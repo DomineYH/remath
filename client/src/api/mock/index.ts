@@ -93,6 +93,12 @@ export function createMockApi(o: MockOptions): Api {
     const sc = db.scenarios.find(x => x.id === s.scenario_id)!, u = db.users.find(x => x.id === s.user_id)!;
     return { id: s.id, scenario_id: s.scenario_id, scenario_name: sc.translations[s.lang].name, lang: s.lang, user_id: s.user_id, nickname: u.nickname, started_at: s.started_at, ended_at: s.ended_at, goal_reached: s.goal_reached, turn_count: db.turns.filter(t => t.session_id === s.id && t.speaker === 'teacher').length };
   };
+  /** C13: 1행 = 1발화, 모든 칸을 따옴표로. 앞의 BOM 은 엑셀이 UTF-8 로 열게 한다(Blob 바이트에 남는다). */
+  const csv = (rows: SessionRow[]) => {
+    const q = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const body = rows.flatMap(s => { const r = sessionRow(s); return turnsOf(s.id).map(t => [s.id, s.started_at, r.nickname, r.scenario_name, s.lang, t.seq, t.speaker, t.text, t.leverage, t.object, t.trigger].map(q).join(',')); });
+    return '\uFEFF' + ['session_id,started_at,nickname,scenario,lang,seq,speaker,text,leverage,object,trigger', ...body].join('\r\n');
+  };
   const filtered = (q: z.infer<typeof S.SessionFilter>) => db.sessions.filter(s => (!q.user_id || s.user_id === q.user_id) && (!q.scenario_id || s.scenario_id === q.scenario_id)).sort((a, b) => b.started_at.localeCompare(a.started_at));
   const userRow = (u: UserRow): z.infer<typeof S.UserRow> => { const gs = db.groups.filter(g => g.member_ids.includes(u.id)); return { id: u.id, nickname: u.nickname, groups: gs.map(g => ({ id: g.id, name: g.name })), scenario_count: new Set(gs.flatMap(g => g.scenario_ids)).size, session_count: db.sessions.filter(s => s.user_id === u.id).length, created_at: u.created_at, pw_updated_at: u.pw_updated_at }; };
   const teacher = (id: string) => db.users.find(u => u.id === id && u.role === 'teacher') ?? fail('not_found');
@@ -174,6 +180,30 @@ export function createMockApi(o: MockOptions): Api {
     return null;
   };
 
+  // ---- AI 설정 (D-20·G-37) — 키 원문은 저장소에 남기지 않는다. 마스킹·등록일만 ----------------------------
+  const providersFile = S.ProvidersFile.parse(providers);
+  /** 접두어 → 공급자(sk-ant- 를 sk- 보다 먼저). 인식 불가 = null. */
+  const detect = (k: string): z.infer<typeof S.Provider> | null => k.startsWith('sk-ant-') ? 'anthropic' : k.startsWith('AIza') ? 'gemini' : k.startsWith('sk-') ? 'openai' : null;
+  const mask = (k: string) => `${k.match(/^(sk-ant-|sk-proj-|sk-svcacct-|sk-|AIza)/)![0]}…${k.slice(-4)}`;
+  const updateAi = (role: 'student' | 'mentor' | 'analysis', b: z.infer<typeof S.AiRoleInput>) => {
+    const a = who('admin'), cur = db.ai[role] ?? fail('not_found'), key = b.api_key?.trim();
+    if (key && b.key_source !== 'own') fail('validation_failed', 'api_key is only for key_source=own');
+    if (b.key_source === role) fail('validation_failed', 'a role cannot share its own key');
+    const keyProvider = key ? detect(key) ?? fail('validation_failed', 'unrecognized key format') : null;
+    const src = b.key_source === 'own' ? null : db.ai[b.key_source];
+    if (src && (src.key_source !== 'own' || !src.provider)) fail('validation_failed', 'the source role has no key of its own');
+    const provider = keyProvider ?? (src ? src.provider : cur.key_source === 'own' ? cur.provider : null) ?? fail('validation_failed', 'register a key first');
+    // effort: null = 공급자 기본값(통과). 목록 모델은 그 모델 집합, 직접 입력은 공급자 집합(D-20).
+    const P = providersFile[provider], allowed = P.models.find(m => m.id === b.model)?.efforts ?? P.efforts;
+    if (b.effort !== null && !allowed.includes(b.effort)) fail('invalid_effort', 'effort not allowed for this model', { model: b.model, efforts: allowed });
+    const masked = src ? null : key ? mask(key) : cur.key_masked;
+    const next = { ...cur, key_source: b.key_source, provider, key_masked: masked, key_added_at: src ? null : key ? now() : cur.key_added_at, model: b.model, effort: b.effort };
+    db.ai[role] = next;
+    for (const r of Object.values(db.ai)) if (r.key_source === role) r.provider = next.key_source === 'own' ? provider : null;   // 이 키를 함께 쓰던 역할
+    audit(db, now(), { actor_id: a.id, action: 'ai.update', target: role, meta: { provider, model: b.model, effort: b.effort, key_source: b.key_source, key_masked: masked, key_changed: masked !== cur.key_masked || !!key } });
+    save(); return { ...next };
+  };
+
   const impl: Api = {
     signup: async b => {
       if (db.users.some(u => u.nickname.toLowerCase() === b.nickname.toLowerCase())) fail('nickname_taken');
@@ -241,8 +271,10 @@ export function createMockApi(o: MockOptions): Api {
     },
 
     listAdminSessions: async q => { who('admin'); return filtered(q).map(sessionRow); },
-    getAdminSession: async id => { who('admin'); const s = db.sessions.find(x => x.id === id) ?? fail('not_found'); return { ...detail(s), state: adminState(s) }; }, downloadSessionsCsv: todo('downloadSessionsCsv', 27),
-    getAiSettings: async () => { who('admin'); return db.ai; }, /* 읽기만(대화 테스트 ConnectedModels). 저장은 #27 */ updateAiRole: todo('updateAiRole', 27), getProviders: async () => { who('admin'); return S.ProvidersFile.parse(providers); },
+    getAdminSession: async id => { who('admin'); const s = db.sessions.find(x => x.id === id) ?? fail('not_found'); return { ...detail(s), state: adminState(s) }; }, 
+    downloadSessionsCsv: async q => { who('admin'); return new Blob([csv(filtered(q))], { type: 'text/csv;charset=utf-8' }); },
+    getAiSettings: async () => { who('admin'); return structuredClone(db.ai); },
+    updateAiRole: async (role, b) => updateAi(role, b), getProviders: async () => { who('admin'); return providersFile; },
   };
 
   // 본문·쿼리는 라우트 표의 zod 스키마로 검증한다(서버와 같은 400 validation_failed). 메서드마다 다시 쓰지 않도록 여기서 한 번 감싼다.
