@@ -21,18 +21,26 @@ class HttpError extends Error {
   status: number; retryAfterMs: number;
   constructor(msg: string, status: number, retryAfterMs: number) { super(msg); this.status = status; this.retryAfterMs = retryAfterMs; }
 }
+class Timeout extends Error {}
 // encodeURIComponent 는 !'()* 를 남긴다: 셸·env 파일에서도 안전하도록 RFC 3986 unreserved 말고는 모두 인코딩
 const encode = (s: string) => Array.from(new TextEncoder().encode(s), b => /[\w.~-]/.test(String.fromCharCode(b)) ? String.fromCharCode(b) : `%${b.toString(16).toUpperCase().padStart(2, '0')}`).join('');
 
 export async function newProject(o: Opts): Promise<Values> {
   const f = o.fetch ?? fetch, now = o.now ?? Date.now, sleep = o.sleep ?? setTimeout, log = o.log ?? console.log;
-  const api = async (method: string, path: string, body?: unknown) => {
-    const r = await f(`${API}${path}`, { method, headers: { Authorization: `Bearer ${o.token}`, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
-    if (r.ok) return r.json();
-    const text = (await r.text().catch(() => '')).replaceAll(o.token, '***').slice(0, 200);
-    throw new HttpError(`${method} ${path.replace(/\?.*/, '')}: HTTP ${r.status} ${text}`, r.status, Number(r.headers.get('retry-after')) * 1000 || 0);
-  };
   const deadline = now() + o.timeoutMs;
+  /** 요청마다 남은 시간만큼의 signal: 응답이나 본문이 멈춰도 마감에 끊긴다(끊김 = Timeout, 재시도하지 않음). */
+  const api = async (method: string, path: string, body?: unknown) => {
+    const signal = AbortSignal.timeout(Math.max(deadline - now(), 0)), what = `${method} ${path.replace(/\?.*/, '')}`;
+    try {
+      const r = await f(`${API}${path}`, { method, signal, headers: { Authorization: `Bearer ${o.token}`, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+      if (r.ok) return await r.json();
+      const text = (await r.text().catch(() => '')).replaceAll(o.token, '***').slice(0, 200);
+      throw new HttpError(`${what}: HTTP ${r.status} ${text}`, r.status, Number(r.headers.get('retry-after')) * 1000 || 0);
+    } catch (err) {
+      if (signal.aborted) throw new Timeout(`${what}: no response within ${o.timeoutMs / 1000}s`);
+      throw err;
+    }
+  };
   /** get 이 값을 줄 때까지(undefined = 아직) interval 마다. 429·5xx·네트워크 오류는 재시도, 다른 4xx 는 곧바로 실패. */
   const until = async <T>(what: string, get: () => Promise<T | undefined>): Promise<T> => {
     for (;;) {
@@ -55,6 +63,7 @@ export async function newProject(o: Opts): Promise<Values> {
   let created: { ref: string };
   for (;;) {
     try { created = await api('POST', '/v1/projects', body); break; } catch (err) {
+      if (err instanceof Timeout) throw new Error(`${err.message}; a project may have been created: check the Supabase dashboard`);
       if (!(err instanceof HttpError && err.status === 429)) throw err;
       const wait = err.retryAfterMs || o.intervalMs;
       if (now() + wait > deadline) throw new Error(`${err.message}: still rate limited within ${o.timeoutMs / 1000}s; no project was created`);

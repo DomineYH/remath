@@ -6,7 +6,7 @@ import type { FastifyRequest } from 'fastify';
 import type { z } from 'zod';
 import type { Deps, Handlers } from '../app.ts';
 import { audit } from '../audit.ts';
-import { must } from '../db.ts';
+import { must, readAll } from '../db.ts';
 import { ApiFail } from '../errors.ts';
 import { GROUP_SELECT, groupOut, USER_SELECT, userRow, type GroupDbRow, type UserDbRow } from '../projection.ts';
 import { idParam } from './admin-scenarios.ts';
@@ -40,7 +40,7 @@ export function adminUserHandlers({ db }: Deps): Handlers {
 
   return {
     'GET /api/admin/users': async () =>
-      (must(await db.from('users').select(USER_SELECT).eq('role', 'teacher').order('created_at')) as unknown as UserDbRow[]).map(userRow),
+      (await readAll<UserDbRow>(() => db.from('users').select(USER_SELECT).eq('role', 'teacher').order('created_at').order('id'))).map(userRow),
 
     /** 사용자 추가 = 예비교사 계정 만들기(로그인은 만들지 않는다). 닉네임은 대소문자 무시 유일. */
     'POST /api/admin/users': async (req, reply) => {
@@ -73,7 +73,7 @@ export function adminUserHandlers({ db }: Deps): Handlers {
     },
 
     'GET /api/admin/groups': async () =>
-      (must(await db.from('groups').select(GROUP_SELECT).order('created_at')) as unknown as GroupDbRow[]).map(groupOut),
+      (await readAll<GroupDbRow>(() => db.from('groups').select(GROUP_SELECT).order('created_at').order('id'))).map(groupOut),
 
     'POST /api/admin/groups': async (req, reply) => {
       const id = randomUUID();

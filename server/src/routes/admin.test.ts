@@ -11,7 +11,8 @@ import type { Db } from '../db.ts';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- stub rows mirror untyped PostgREST JSON
 type Row = Record<string, any>;
 type Tables = Record<string, Row[]>;
-interface Hooks { before?: (op: string, name: string) => Promise<void> | void; fail?: (op: string, name: string) => boolean }
+/** maxRows = PostgREST max-rows: 한 요청이 돌려주는 행의 상한. */
+interface Hooks { before?: (op: string, name: string) => Promise<void> | void; fail?: (op: string, name: string) => boolean; maxRows?: number }
 const ROOT = new URL('../../../', import.meta.url);
 const config = loadConfig({ SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_KEY: 'k', MOCK_LLM: '1' }, p => readFileSync(new URL(p, ROOT), 'utf8'));
 const NOAH = ScenarioInput.parse(JSON.parse(readFileSync(new URL('db/seed/scenarios/noah.json', ROOT), 'utf8')));
@@ -52,7 +53,7 @@ function remove(t: Tables, table: string, ids: string[]) {
 
 function fakeDb(t: Tables, hooks: Hooks = {}, calls: { name: string; args: Row }[] = []) {
   const from = (table: string) => {
-    let op = 'select', values: Row = {}, mode: 'many' | 'one' | 'maybe' = 'many';
+    let op = 'select', values: Row = {}, mode: 'many' | 'one' | 'maybe' = 'many', offset = 0, limit = Infinity;
     const filters: ((r: Row) => boolean)[] = [];
     const run = async () => {
       await hooks.before?.(op, table);
@@ -64,6 +65,7 @@ function fakeDb(t: Tables, hooks: Hooks = {}, calls: { name: string; args: Row }
         t[table].push(r); out = [r];
       } else {
         out = t[table].filter(r => filters.every(f => f(r)));
+        if (op === 'select') out = out.slice(offset, offset + Math.min(limit, hooks.maxRows ?? Infinity));
         if (op === 'delete') { const e = remove(t, table, out.map(r => r.id)); if (e) return { data: null, error: e }; }
       }
       const data = structuredClone(out.map(r => view(t, table, r)));
@@ -75,6 +77,7 @@ function fakeDb(t: Tables, hooks: Hooks = {}, calls: { name: string; args: Row }
       eq: (c: string, v: unknown) => { filters.push(r => r[c] === v); return b; },
       in: (c: string, v: unknown[]) => { filters.push(r => v.includes(r[c])); return b; },
       single: () => { mode = 'one'; return b; }, maybeSingle: () => { mode = 'maybe'; return b; },
+      range: (a: number, z: number) => { offset = a; limit = z - a + 1; return b; },
       then: (ok: (v: unknown) => unknown, ko: (e: unknown) => unknown) => run().then(ok, ko),
     };
     return b;
@@ -140,7 +143,7 @@ function pausable() {
 }
 
 const ADMIN = crypto.randomUUID(), T1 = crypto.randomUUID(), T2 = crypto.randomUUID();
-async function setup() {
+async function setup(o: { maxRows?: number } = {}) {
   const p = pausable(), calls: { name: string; args: Row }[] = [];
   const later = new Date(Date.now() + 3600_000).toISOString();
   const t: Tables = {
@@ -156,7 +159,7 @@ async function setup() {
     ],
     scenarios: [], scenario_translations: [], groups: [], group_members: [], group_scenarios: [], sessions: [], audit_log: [],
   };
-  const app = await buildApp({ db: fakeDb(t, p.hooks, calls), config });
+  const app = await buildApp({ db: fakeDb(t, { ...p.hooks, maxRows: o.maxRows }, calls), config });
   const req = (method: string, url: string, payload?: unknown, cookie = 'adm') =>
     app.inject({ method: method as 'GET', url, payload: payload as object, cookies: { remath_admin: cookie } });
   const actions = () => t.audit_log.map(a => a.action);
@@ -177,6 +180,21 @@ describe('admin realm only (C-9)', () => {
       expect([teacher.statusCode, none.statusCode], `${r.method} ${r.path}`).toEqual([401, 401]);
     }
     expect(s.calls).toEqual([]);
+  });
+});
+
+describe('admin lists are not cut at the Data API max-rows (review: unpaged reads)', () => {
+  it('users, groups and scenarios lists return every row past a 2-row cap, in the stored order', async () => {
+    const s = await setup({ maxRows: 2 });
+    for (let i = 0; i < 3; i++) {
+      s.t.users.push({ id: crypto.randomUUID(), nickname: `t${i}`, role: 'teacher', password_hash: 'H', pw_updated_at: stamp(), created_at: stamp() });
+      s.t.groups.push({ id: crypto.randomUUID(), name: `g${i}`, created_at: stamp() });
+      await s.createScenario();
+    }
+    const nicks = (await s.req('GET', '/api/admin/users')).json().map((u: Row) => u.nickname);
+    expect(nicks).toEqual(['kim', 'lee', 't0', 't1', 't2']);
+    expect((await s.req('GET', '/api/admin/groups')).json().map((g: Row) => g.name)).toEqual(['g0', 'g1', 'g2']);
+    expect((await s.req('GET', '/api/admin/scenarios')).json()).toHaveLength(3);
   });
 });
 

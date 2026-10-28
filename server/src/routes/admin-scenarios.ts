@@ -6,7 +6,7 @@ import type { FastifyRequest } from 'fastify';
 import type { z } from 'zod';
 import type { Deps, Handlers } from '../app.ts';
 import { audit } from '../audit.ts';
-import { must } from '../db.ts';
+import { must, readAll } from '../db.ts';
 import { ApiFail } from '../errors.ts';
 import { SCENARIO_SELECT, toAdmin, toInput, toSummary, type ScenarioDbRow } from '../projection.ts';
 
@@ -34,7 +34,7 @@ export function adminScenarioHandlers({ db, config }: Deps): Handlers {
 
   return {
     'GET /api/admin/scenarios': async () =>
-      (must(await db.from('scenarios').select(SCENARIO_SELECT).order('updated_at', { ascending: false })) as unknown as ScenarioDbRow[]).map(toSummary),
+      (await readAll<ScenarioDbRow>(() => db.from('scenarios').select(SCENARIO_SELECT).order('updated_at', { ascending: false }).order('id'))).map(toSummary),
 
     /** 새 시나리오는 초안, slug 는 서버가 만든다. */
     'POST /api/admin/scenarios': async (req, reply) => {

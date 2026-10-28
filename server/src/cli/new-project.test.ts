@@ -80,6 +80,28 @@ describe('db:new-project (H-29 1, O-4)', () => {
     expect(r.calls.every(c => c.method === 'GET' || c.url.endsWith('/v1/projects'))).toBe(true);
   });
 
+  /** 응답(헤더)이나 본문이 영영 오지 않는 fetch. undici 처럼 init.signal 이 끊으면 그 reason 으로 실패한다. */
+  const stalled = (o: { body?: boolean } = {}) => (async (url: string, init: RequestInit = {}) => {
+    const signal = init.signal!, abort = (fail: (e: unknown) => void) => signal.addEventListener('abort', () => fail(signal.reason), { once: true });
+    if (!o.body) return new Promise<Response>((_, rej) => abort(rej));
+    return new Response(new ReadableStream({ start: c => abort(e => c.error(e)) }), { status: url.endsWith('/v1/projects') ? 201 : 200 });
+  }) as typeof fetch;
+  const elapsed = async (p: Promise<unknown>) => { const t = Date.now(), err = await p.then(() => new Error('resolved'), (e: Error) => e); return { err, ms: Date.now() - t }; };
+
+  it('a poll whose response never comes still fails at the deadline, with the ref and "left in place"', async () => {
+    const { f } = fake(happy());
+    const fetch = (async (url: string, init?: RequestInit) => url.endsWith('/v1/projects') ? f(url, init) : stalled()(url, init)) as typeof globalThis.fetch;
+    const { err, ms } = await elapsed(run({}, { fetch, now: Date.now, sleep: undefined, timeoutMs: 50, intervalMs: 10 }).p);
+    expect(err.message).toMatch(new RegExp(`${REF}.*GET /v1/projects/${REF}: no response within 0.05s.*left in place`));
+    expect(ms).toBeLessThan(1000);
+  });
+
+  it('a body that never finishes is cut too; on create it warns that a project may exist', async () => {
+    const { err, ms } = await elapsed(run({}, { fetch: stalled({ body: true }), now: Date.now, sleep: undefined, timeoutMs: 50, intervalMs: 10 }).p);
+    expect(err.message).toMatch(/POST \/v1\/projects: no response within 0.05s; a project may have been created/);
+    expect(ms).toBeLessThan(1000);
+  });
+
   it('INIT_FAILED stops polling at once', async () => {
     const r = run(happy({ [`GET /v1/projects/${REF}`]: [ok({ ref: REF, status: 'INIT_FAILED' })] }));
     await expect(r.p).rejects.toThrow(new RegExp(`${REF}.*INIT_FAILED.*left in place`));
