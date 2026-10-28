@@ -10,7 +10,9 @@ import { authenticate, COOKIE, createLimiter, resolveRealm, type Auth } from './
 import type { Config } from './config.ts';
 import type { Db } from './db.ts';
 import { ApiFail } from './errors.ts';
+import { adminAiHandlers } from './routes/admin-ai.ts';
 import { adminScenarioHandlers } from './routes/admin-scenarios.ts';
+import { adminSessionHandlers } from './routes/admin-sessions.ts';
 import { adminUserHandlers } from './routes/admin-users.ts';
 import { authHandlers } from './routes/auth.ts';
 import { sessionHandlers } from './routes/sessions.ts';
@@ -43,7 +45,8 @@ export async function buildApp(d: Pick<Deps, 'db' | 'config'> & Partial<Deps>, o
     return reply.code(500).send({ error: { code: 'internal', message: 'internal error' } });
   });
 
-  const handlers: Handlers = { ...authHandlers(deps), ...sessionHandlers(deps), ...adminScenarioHandlers(deps), ...adminUserHandlers(deps) };
+  const handlers: Handlers = { ...authHandlers(deps), ...sessionHandlers(deps), ...adminScenarioHandlers(deps), ...adminUserHandlers(deps),
+    ...adminSessionHandlers(deps), ...adminAiHandlers(deps) };
   const table = new Set(routes.map(r => `${r.method} ${r.path}`));
   for (const k of Object.keys(handlers)) if (!table.has(k)) throw new Error(`handler ${k} is not in the route table`);
 
