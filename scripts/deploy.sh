@@ -15,17 +15,24 @@
 #   전환 전에 실패하면 새 프로젝트는 남겨 두고 ref 를 알린다(사람이 삭제). 어떤 경로도 프로젝트를 지우거나 바꾸지 않는다.
 #   NEW_PROJECT_TIMEOUT_S(기본 600): ACTIVE_HEALTHY 대기 한도. DEPLOY_NEW_FAULT=anon_as_service: G3 8단계 실패 경로(스모크가 FAIL 해야 한다).
 #
+# 복구(--restore <file>, scripts/restore.sh 가 부른다, H-31): --new 와 같고 3단계 시드 대신 백업 파일 적재(db:restore --load),
+#   4단계 스모크의 기대 행 수 = 백업 파일의 행 수. 파일 점검(db:restore --check)도 사전 점검이라 프로젝트 생성 전. ADMIN_INITIAL_PASSWORD 는 쓰지 않는다.
+#
 # REMATH_ENV_FILE(필수): 서버 런타임 env 파일. 컨테이너 설정(이미지 태그·포트·볼륨·사용자)은 deploy/compose.yaml 만 정한다.
 set -euo pipefail
 
-with_samples=() new=
-for arg in "$@"; do
-  case "$arg" in
+with_samples=() new= restore=
+usage() { echo "deploy.sh: $1 (usage: scripts/deploy.sh [--new] [--with-samples])" >&2; exit 2; }
+while [ $# -gt 0 ]; do
+  case "$1" in
     --with-samples) with_samples=(-- --with-samples) ;;
     --new) new=1 ;;
-    *) echo "deploy.sh: unknown option $arg (usage: scripts/deploy.sh [--new] [--with-samples])" >&2; exit 2 ;;
+    --restore) [ -n "${2:-}" ] || usage "--restore needs a file"; restore="$2" new=1; shift ;;
+    *) usage "unknown option $1" ;;
   esac
+  shift
 done
+[ -n "$restore" ] && [ ${#with_samples[@]} -gt 0 ] && usage "--restore loads a backup; --with-samples does not apply"
 # 토큰은 내보내지 않는 셸 변수로만 들고 db:new-project 한 번에만 넘긴다: docker·compose·다른 npm 단계의 env 에 없다.
 token="${SUPABASE_ACCESS_TOKEN:-}"; unset SUPABASE_ACCESS_TOKEN
 
@@ -37,18 +44,26 @@ docker info >/dev/null 2>&1 || fail "the Docker daemon is not reachable (docker 
 docker compose version >/dev/null 2>&1 || fail "docker compose (v2 plugin) is not installed"
 if [ -n "$new" ]; then need=(SUPABASE_ORG_ID SUPABASE_REGION SUPABASE_DB_PASSWORD); [ -n "$token" ] || fail "SUPABASE_ACCESS_TOKEN is not set"
 else need=(SUPABASE_URL SUPABASE_SERVICE_KEY SUPABASE_DB_URL SUPABASE_ANON_KEY); fi
-for v in "${need[@]}" ADMIN_INITIAL_PASSWORD REMATH_ENV_FILE; do
+if [ -n "$restore" ]; then unset ADMIN_INITIAL_PASSWORD   # 백업의 관리자 해시가 돌아온다: 어느 단계도 읽지 않게
+else need+=(ADMIN_INITIAL_PASSWORD); fi
+for v in "${need[@]}" REMATH_ENV_FILE; do
   [ -n "${!v:-}" ] || fail "$v is not set"
 done
 [ -f "$REMATH_ENV_FILE" ] || fail "REMATH_ENV_FILE $REMATH_ENV_FILE is not a file"
 REMATH_ENV_FILE="$(realpath "$REMATH_ENV_FILE")"
 export REMATH_ENV_FILE
+if [ -n "$restore" ]; then
+  [ -f "$restore" ] || fail "backup file $restore is not a file"
+  restore="$(realpath "$restore")"   # npm -w server 는 server/ 에서 돈다
+fi
 
 cd "$(dirname "$0")/.."
 compose=(docker compose -f deploy/compose.yaml)
 "${compose[@]}" config -q || fail "deploy/compose.yaml is invalid with the current REMATH_* settings"
 host="${REMATH_BIND:-127.0.0.1}"; [ "$host" = 0.0.0.0 ] && host=127.0.0.1   # compose.yaml 의 포트 바인딩과 같은 주소
 base="http://$host:${REMATH_PORT:-3000}"
+# 백업이 아니거나 테이블·열이 빠졌으면 여기서 멈춘다: 프로젝트를 만들기 전.
+[ -z "$restore" ] || npm run --silent db:restore -w server -- --check "$restore" || fail "$restore is not a usable backup file"
 
 if [ -n "$new" ]; then
   tmp_env="$(mktemp)"; ref= switched=
@@ -64,10 +79,17 @@ fi
 
 echo "== 2/6 migrations"
 npm run --silent db:migrate -w server
-echo "== 3/6 seed"
-npm run --silent db:seed -w server "${with_samples[@]}"
-echo "== 4/6 smoke"
-npm run --silent db:smoke -w server "${with_samples[@]}"
+if [ -n "$restore" ]; then
+  echo "== 3/6 restore $restore"
+  npm run --silent db:restore -w server -- --load "$restore"
+  echo "== 4/6 smoke"
+  npm run --silent db:smoke -w server -- --restore "$restore"
+else
+  echo "== 3/6 seed"
+  npm run --silent db:seed -w server "${with_samples[@]}"
+  echo "== 4/6 smoke"
+  npm run --silent db:smoke -w server "${with_samples[@]}"
+fi
 echo "== 5/6 switch to $SUPABASE_URL"
 npm run --silent env:swap -w server   # 실패하면 set -e 로 여기서 끝: 컨테이너는 그대로
 switched=1
