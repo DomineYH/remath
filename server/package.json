@@ -9,7 +9,11 @@
     "admin:reset-password": "node src/cli/reset-password.ts",
     "dev": "node --env-file=.env --import ./src/raw-hooks.ts --watch src/index.ts",
     "start": "node --import ./src/raw-hooks.ts src/index.ts",
-    "typecheck": "tsc --noEmit -p ."
+    "typecheck": "tsc --noEmit -p .",
+    "db:migrate": "node --import ./src/raw-hooks.ts src/cli/migrate.ts",
+    "db:seed": "node --import ./src/raw-hooks.ts src/cli/seed.ts",
+    "db:smoke": "node --import ./src/raw-hooks.ts src/cli/smoke.ts",
+    "env:swap": "node --import ./src/raw-hooks.ts src/cli/env-swap.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.5",
