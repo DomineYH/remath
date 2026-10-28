@@ -1,7 +1,7 @@
 // scripts/deploy.sh 의 순서·멈춤과 deploy/compose.yaml 의 설정을 고정한다. npm·docker·curl·psql 은 가짜; 실 psql·Docker 는 수동(T-4).
 // env 파일 교체 자체는 env-swap.test.ts 가 본다.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,8 +13,10 @@ const SCRIPT = join(ROOT, 'scripts/deploy.sh');
 // 가짜 도구는 받은 인자를 $LOG 에 남긴다. FAIL = 실패시킬 호출의 일부 문자열(예: db:smoke, "compose -f deploy/compose.yaml up").
 const STUBS: Record<string, string> = {
   node: 'exit 0', psql: 'exit 0',
-  npm: 'echo "npm $* REMATH_ENV_FILE=$REMATH_ENV_FILE" >> "$LOG"; case "$*" in *"$FAIL"*) [ -n "$FAIL" ] && exit 1 ;; esac; exit 0',
-  docker: 'echo "docker $*" >> "$LOG"; case "$*" in *"$FAIL"*) [ -n "$FAIL" ] && exit 1 ;; esac; exit 0',
+  // db:new-project 는 마지막 인자(deploy.sh 의 임시 env 파일)에 NEW_ENV 를 쓰고 경로를 $LOG.tmp 에 남긴다. 나머지 호출의 env 는 $LOG.env 로.
+  npm: 'echo "npm $* REMATH_ENV_FILE=$REMATH_ENV_FILE" >> "$LOG"; case "$*" in *db:new-project*) for a; do out="$a"; done; echo "$out" > "$LOG.tmp";'
+    + ' [ "$FAIL" = db:new-project ] && exit 1; printf "$NEW_ENV" > "$out"; exit 0 ;; esac; env >> "$LOG.env"; case "$*" in *"$FAIL"*) [ -n "$FAIL" ] && exit 1 ;; esac; exit 0',
+  docker: 'echo "docker $*" >> "$LOG"; env >> "$LOG.env"; case "$*" in *"$FAIL"*) [ -n "$FAIL" ] && exit 1 ;; esac; exit 0',
   curl: 'for a; do url="$a"; done; echo "curl $url" >> "$LOG"; case "$url" in */healthz) printf 200 ;; */api/auth/me) printf "${ME_CODE:-401}" ;; esac',
 };
 const NEW = { SUPABASE_URL: 'https://new.supabase.co', SUPABASE_SERVICE_KEY: 'new-service', SUPABASE_DB_URL: 'postgres://u:p@new:5432/postgres', SUPABASE_ANON_KEY: 'new-anon' };
@@ -32,7 +34,8 @@ function deploy(args: string[] = [], extra: Record<string, string> = {}) {
     env: { PATH: `${bin}:/usr/bin:/bin`, LOG: log, REMATH_ENV_FILE: 'server.env', ADMIN_INITIAL_PASSWORD: 'admin1234', ...NEW, ...extra },
   });
   const calls = readFileSync(log, 'utf8').trim().split('\n').filter(Boolean);
-  return { ...r, dir, calls, steps: calls.filter(c => !/^docker (info|compose version)|^curl/.test(c)) };
+  const read = (f: string) => existsSync(f) ? readFileSync(f, 'utf8') : '';
+  return { ...r, dir, calls, steps: calls.filter(c => !/^docker (info|compose version)|^curl/.test(c)), childEnv: read(`${log}.env`), tmp: read(`${log}.tmp`).trim() };
 }
 
 describe('scripts/deploy.sh', () => {
@@ -88,14 +91,93 @@ describe('scripts/deploy.sh', () => {
     expect(db.stderr).toMatch(/answered 500, want 401.*roll back by hand/);
   });
 
-  it('an invalid compose config, --new or a missing REMATH_ENV_FILE stop before any DB step', () => {
+  it('an invalid compose config, an unknown option or a missing REMATH_ENV_FILE stop before any DB step', () => {
     const c = deploy([], { FAIL: 'config -q' });
-    const n = deploy(['--new']);
+    const u = deploy(['--bogus']);
     const m = deploy([], { REMATH_ENV_FILE: 'missing.env' });
-    expect([c.status, n.status, m.status]).toEqual([1, 2, 1]);
-    expect(n.stderr).toMatch(/not supported until #48/);
+    expect([c.status, u.status, m.status]).toEqual([1, 2, 1]);
+    expect(u.stderr).toMatch(/unknown option --bogus \(usage: scripts\/deploy\.sh \[--new\] \[--with-samples\]\)/);
     expect(m.stderr).toMatch(/REMATH_ENV_FILE missing\.env is not a file/);
-    for (const r of [c, n, m]) expect(r.calls.some(x => x.startsWith('npm'))).toBe(false);
+    for (const r of [c, u, m]) expect(r.calls.some(x => x.startsWith('npm'))).toBe(false);
+  });
+});
+
+describe('scripts/deploy.sh --new (H-29 1, O-4)', () => {
+  const TOKEN = 'sbp_token_must_not_leak';
+  const MGMT = { SUPABASE_ACCESS_TOKEN: TOKEN, SUPABASE_ORG_ID: 'my-org', SUPABASE_REGION: 'ap-northeast-2', SUPABASE_DB_PASSWORD: 'db-pass' };
+  const REF = 'abcdefghijklmnopqrst';
+  const NEW_ENV = `SUPABASE_URL=https://${REF}.supabase.co\\nSUPABASE_SERVICE_KEY=s\\nSUPABASE_DB_URL=postgresql://postgres.${REF}:x@pooler:5432/postgres?sslmode=require\\nSUPABASE_ANON_KEY=a\\n`;
+  // 셸에 이전 프로젝트의 SUPABASE_* 가 없어도 된다: 새 프로젝트에서 받는다.
+  const deployNew = (args: string[] = [], extra: Record<string, string> = {}) =>
+    deploy(['--new', ...args], { SUPABASE_URL: '', SUPABASE_SERVICE_KEY: '', SUPABASE_DB_URL: '', SUPABASE_ANON_KEY: '', NEW_ENV, ...MGMT, ...extra });
+
+  it('preflight → new project → migrate → seed → smoke → env:swap → compose up → backup, on the new project, without the token', () => {
+    const r = deployNew(['--with-samples']);
+    expect(r.stderr).toBe('');
+    expect(r.status).toBe(0);
+    const env = `REMATH_ENV_FILE=${join(r.dir, 'server.env')}`;
+    expect(r.calls.slice(0, 2)).toEqual(['docker info', 'docker compose version']);
+    expect(r.steps).toEqual([
+      'docker compose -f deploy/compose.yaml config -q',
+      `npm run --silent db:new-project -w server -- ${r.tmp} ${env}`,
+      `npm run --silent db:migrate -w server ${env}`,
+      `npm run --silent db:seed -w server -- --with-samples ${env}`,
+      `npm run --silent db:smoke -w server -- --with-samples ${env}`,
+      `npm run --silent env:swap -w server ${env}`,
+      'docker compose -f deploy/compose.yaml up -d --force-recreate',
+      'docker compose -f deploy/compose.yaml exec -T server npm run --silent backup',
+    ]);
+    expect(r.stdout).toContain(`== 1/6 new Supabase project`);
+    expect(r.stdout).toContain(`== 5/6 switch to https://${REF}.supabase.co`);
+    // 이후 단계는 임시 env 의 새 값으로 돈다
+    expect(r.childEnv).toContain(`SUPABASE_URL=https://${REF}.supabase.co\n`);
+    expect(r.childEnv).toContain('SUPABASE_DB_URL=postgresql://postgres.');
+    expect(r.childEnv).not.toContain(TOKEN);   // docker·compose·다른 npm 단계 어디에도
+    expect(r.stdout + r.stderr).not.toContain(TOKEN);
+    expect(r.tmp).not.toBe('');
+    expect(existsSync(r.tmp)).toBe(false);   // EXIT trap 이 지웠다
+  });
+
+  for (const [what, extra] of [
+    ['SUPABASE_ACCESS_TOKEN', { SUPABASE_ACCESS_TOKEN: '' }], ['SUPABASE_ORG_ID', { SUPABASE_ORG_ID: '' }], ['SUPABASE_REGION', { SUPABASE_REGION: '' }],
+    ['SUPABASE_DB_PASSWORD', { SUPABASE_DB_PASSWORD: '' }], ['ADMIN_INITIAL_PASSWORD', { ADMIN_INITIAL_PASSWORD: '' }],
+    ['REMATH_ENV_FILE', { REMATH_ENV_FILE: 'missing.env' }], ['config -q', { FAIL: 'config -q' }], ['docker info', { FAIL: 'info' }],
+  ] as const) {
+    it(`a failed preflight (${what}) never creates a project`, () => {
+      const r = deployNew([], extra);
+      expect(r.status).toBe(1);
+      expect(r.stderr).toMatch(what === 'config -q' ? /compose\.yaml is invalid/ : what === 'docker info' ? /Docker daemon/ : new RegExp(what));
+      expect(r.calls.some(c => c.startsWith('npm'))).toBe(false);
+    });
+  }
+
+  it('a failed new-project stops there; the temp env file is removed', () => {
+    const r = deployNew([], { FAIL: 'db:new-project' });
+    expect(r.status).toBe(1);
+    expect(r.steps.at(-1)).toMatch(/db:new-project/);
+    expect(existsSync(r.tmp)).toBe(false);
+  });
+
+  it('a failed smoke keeps the env file and the container, and prints the new ref to delete by hand (H-29 4)', () => {
+    const r = deployNew([], { FAIL: 'db:smoke' });
+    expect(r.status).toBe(1);
+    expect(r.steps.at(-1)).toMatch(/db:smoke/);
+    expect(r.calls.some(c => c.includes('env:swap') || c.includes(' up '))).toBe(false);
+    expect(readFileSync(join(r.dir, 'server.env'), 'utf8')).toBe('MOCK_LLM=1\n');
+    expect(r.stderr).toMatch(new RegExp(`new Supabase project ${REF} is left in place.*delete it by hand`));
+    expect(existsSync(r.tmp)).toBe(false);
+  });
+
+  it('after the switch a failure does not tell the operator to delete the project in use', () => {
+    const r = deployNew([], { FAIL: 'npm run --silent backup' });
+    expect(r.status).toBe(1);
+    expect(r.stderr).not.toMatch(/delete it by hand/);
+  });
+
+  it('still rejects unknown options and stops before anything', () => {
+    const r = deployNew(['--bogus']);
+    expect(r.status).toBe(2);
+    expect(r.calls).toEqual([]);
   });
 });
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 재배포 (#35 H-29 2~6단계, D-15, D-16, D-17): 현재 env 의 Supabase 프로젝트에
+# 배포 (#35 H-29, D-15, D-16, D-17). --new 면 1) Management API 로 새 Supabase 프로젝트(O-4, npm run db:new-project), 없으면 현재 env 의 프로젝트에
 #   2) 미적용 마이그레이션 → 3) 시드 → 4) 스모크 → 5) 전환: 런타임 env 파일의 SUPABASE_* 4개 교체(env:swap)
 #   → deploy/compose.yaml 로 컨테이너 재생성 → /healthz 200 + 새 DB 응답 확인 → 6) 컨테이너 안에서 SQLite 백업(npm run backup).
 # 어느 단계든 실패하면 거기서 멈추고 종료코드 ≠ 0. 스모크나 env 교체가 실패하면 env 파일·컨테이너는 그대로다.
@@ -8,17 +8,26 @@
 #   set -a; . ./deploy.env; set +a      # SUPABASE_URL SUPABASE_SERVICE_KEY SUPABASE_DB_URL SUPABASE_ANON_KEY ADMIN_INITIAL_PASSWORD
 #   REMATH_ENV_FILE=/etc/remath/server.env scripts/deploy.sh [--with-samples]
 #
+# 새 프로젝트(--new): 셸에 SUPABASE_ACCESS_TOKEN SUPABASE_ORG_ID(조직 slug) SUPABASE_REGION SUPABASE_DB_PASSWORD ADMIN_INITIAL_PASSWORD.
+#   SUPABASE_* 4개는 새 프로젝트에서 받아 임시 env 파일(mktemp, 600, 종료 시 삭제)로 2~6단계에 넘긴다.
+#   REMATH_ENV_FILE=/etc/remath/server.env scripts/deploy.sh --new [--with-samples]
+#   사전 점검이 모두 통과해야 프로젝트를 만든다(과금). 토큰은 db:new-project 에만 넘어가고 docker·compose·다른 단계·파일에는 없다.
+#   전환 전에 실패하면 새 프로젝트는 남겨 두고 ref 를 알린다(사람이 삭제). 어떤 경로도 프로젝트를 지우거나 바꾸지 않는다.
+#   NEW_PROJECT_TIMEOUT_S(기본 600): ACTIVE_HEALTHY 대기 한도. DEPLOY_NEW_FAULT=anon_as_service: G3 8단계 실패 경로(스모크가 FAIL 해야 한다).
+#
 # REMATH_ENV_FILE(필수): 서버 런타임 env 파일. 컨테이너 설정(이미지 태그·포트·볼륨·사용자)은 deploy/compose.yaml 만 정한다.
 set -euo pipefail
 
-with_samples=()
+with_samples=() new=
 for arg in "$@"; do
   case "$arg" in
     --with-samples) with_samples=(-- --with-samples) ;;
-    --new) echo "deploy.sh: --new is not supported until #48 (new Supabase project via Management API)" >&2; exit 2 ;;
-    *) echo "deploy.sh: unknown option $arg (usage: scripts/deploy.sh [--with-samples])" >&2; exit 2 ;;
+    --new) new=1 ;;
+    *) echo "deploy.sh: unknown option $arg (usage: scripts/deploy.sh [--new] [--with-samples])" >&2; exit 2 ;;
   esac
 done
+# 토큰은 내보내지 않는 셸 변수로만 들고 db:new-project 한 번에만 넘긴다: docker·compose·다른 npm 단계의 env 에 없다.
+token="${SUPABASE_ACCESS_TOKEN:-}"; unset SUPABASE_ACCESS_TOKEN
 
 fail() { echo "deploy.sh: $*" >&2; exit 1; }
 for tool in node npm psql docker curl; do
@@ -26,7 +35,9 @@ for tool in node npm psql docker curl; do
 done
 docker info >/dev/null 2>&1 || fail "the Docker daemon is not reachable (docker info failed)"
 docker compose version >/dev/null 2>&1 || fail "docker compose (v2 plugin) is not installed"
-for v in SUPABASE_URL SUPABASE_SERVICE_KEY SUPABASE_DB_URL SUPABASE_ANON_KEY ADMIN_INITIAL_PASSWORD REMATH_ENV_FILE; do
+if [ -n "$new" ]; then need=(SUPABASE_ORG_ID SUPABASE_REGION SUPABASE_DB_PASSWORD); [ -n "$token" ] || fail "SUPABASE_ACCESS_TOKEN is not set"
+else need=(SUPABASE_URL SUPABASE_SERVICE_KEY SUPABASE_DB_URL SUPABASE_ANON_KEY); fi
+for v in "${need[@]}" ADMIN_INITIAL_PASSWORD REMATH_ENV_FILE; do
   [ -n "${!v:-}" ] || fail "$v is not set"
 done
 [ -f "$REMATH_ENV_FILE" ] || fail "REMATH_ENV_FILE $REMATH_ENV_FILE is not a file"
@@ -39,6 +50,18 @@ compose=(docker compose -f deploy/compose.yaml)
 host="${REMATH_BIND:-127.0.0.1}"; [ "$host" = 0.0.0.0 ] && host=127.0.0.1   # compose.yaml 의 포트 바인딩과 같은 주소
 base="http://$host:${REMATH_PORT:-3000}"
 
+if [ -n "$new" ]; then
+  tmp_env="$(mktemp)"; ref= switched=
+  # 전환 전 실패 = 새 프로젝트는 쓰이지 않는다: ref 를 알리고 남겨 둔다(db:new-project 자신의 실패는 그 CLI 가 알린다).
+  trap 'st=$?; rm -f "$tmp_env"; [ $st -ne 0 ] && [ -n "$ref" ] && [ -z "$switched" ] && echo "deploy.sh: new Supabase project $ref is left in place (not switched to); delete it by hand in the dashboard" >&2; exit $st' EXIT
+  echo "== 1/6 new Supabase project"
+  SUPABASE_ACCESS_TOKEN="$token" npm run --silent db:new-project -w server -- "$tmp_env"
+  unset token
+  # source 하지 않는다: 값(DB 비밀번호 등)을 셸 문법으로 해석하지 않게 줄마다 첫 = 에서 나눈다.
+  while IFS= read -r line; do export "${line%%=*}=${line#*=}"; done < "$tmp_env"
+  ref="${SUPABASE_URL#https://}"; ref="${ref%%.*}"
+fi
+
 echo "== 2/6 migrations"
 npm run --silent db:migrate -w server
 echo "== 3/6 seed"
@@ -47,6 +70,7 @@ echo "== 4/6 smoke"
 npm run --silent db:smoke -w server "${with_samples[@]}"
 echo "== 5/6 switch to $SUPABASE_URL"
 npm run --silent env:swap -w server   # 실패하면 set -e 로 여기서 끝: 컨테이너는 그대로
+switched=1
 rollback="roll back by hand: mv $REMATH_ENV_FILE.prev $REMATH_ENV_FILE && ${compose[*]} up -d --force-recreate"
 "${compose[@]}" up -d --force-recreate || fail "docker compose up failed; $rollback"
 
