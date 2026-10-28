@@ -5,7 +5,7 @@ import * as S from '@remath/shared';
 import type { FastifyRequest } from 'fastify';
 import type { z } from 'zod';
 import type { Deps, Handlers } from '../app.ts';
-import { must } from '../db.ts';
+import { must, readAll } from '../db.ts';
 import { ApiFail } from '../errors.ts';
 import { SESSION_DETAIL_SELECT, SESSION_SELECT, sessionDetail, sessionRow, type SessionDbRow } from '../projection.ts';
 import { frame, withTurn } from '../turn.ts';
@@ -32,9 +32,9 @@ export function sessionHandlers({ db, config, now }: Deps): Handlers {
     'GET /api/practice': async req => {
       const uid = req.auth!.user.id;
       const [scenarios, groups] = await Promise.all([
-        db.rpc('teacher_scenarios', { p_user_id: uid }).then(must) as Promise<{ id: string }[]>,
-        db.from('groups').select('id, name, group_members!inner(user_id), group_scenarios(scenario_id)')
-          .eq('group_members.user_id', uid).order('created_at').then(must) as Promise<{ id: string; name: string; group_scenarios: { scenario_id: string }[] }[]>,
+        readAll<{ id: string }>(() => db.rpc('teacher_scenarios', { p_user_id: uid }).order('name').order('id')),   // 함수의 order by name 그대로 + id
+        readAll<{ id: string; name: string; group_scenarios: { scenario_id: string }[] }>(() => db.from('groups')
+          .select('id, name, group_members!inner(user_id), group_scenarios(scenario_id)').eq('group_members.user_id', uid).order('created_at').order('id')),
       ]);
       return {
         groups: groups.map(g => ({ id: g.id, name: g.name })),
@@ -43,7 +43,7 @@ export function sessionHandlers({ db, config, now }: Deps): Handlers {
     },
     /** 내 기록, 최신순(M-13: 예비교사 쿠키만). */
     'GET /api/sessions': async req =>
-      (must(await mine(req, `${SESSION_SELECT}, turns(speaker)`).order('started_at', { ascending: false })) as unknown as SessionDbRow[]).map(sessionRow),
+      (await readAll<SessionDbRow>(() => mine(req, `${SESSION_SELECT}, turns(speaker)`).order('started_at', { ascending: false }).order('id', { ascending: false }))).map(sessionRow),
     'GET /api/sessions/current': async req => {
       const s = await load(mine(req, SESSION_DETAIL_SELECT).is('ended_at', null));
       return s ? detail(s) : null;

@@ -35,10 +35,11 @@ const keyset = (s: string) => {
   return (r: Row) => r.started_at < m[1] || (r.started_at === m[2] && r.id < m[3]);
 };
 
-function fakeDb(t: Tables, calls: string[] = [], fail?: (table: string, n: number) => boolean) {
+/** maxRows = PostgREST max-rows: 한 요청이 돌려주는 행의 상한(limit·range 보다 작으면 말없이 잘린다). */
+function fakeDb(t: Tables, calls: string[] = [], fail?: (table: string, n: number) => boolean, maxRows = Infinity) {
   let n = 0;
   const from = (table: string) => {
-    let op = 'select', values: Row[] = [], mode: 'many' | 'maybe' = 'many', limit = Infinity;
+    let op = 'select', values: Row[] = [], mode: 'many' | 'maybe' = 'many', limit = Infinity, offset = 0;
     const filters: ((r: Row) => boolean)[] = [], orders: [string, boolean][] = [];
     const run = async () => {
       calls.push(`${op} ${table}`);
@@ -49,7 +50,7 @@ function fakeDb(t: Tables, calls: string[] = [], fail?: (table: string, n: numbe
       else {
         out = t[table].filter(r => filters.every(f => f(r)));
         for (const [c, asc] of [...orders].reverse()) out.sort((a, b) => (a[c] < b[c] ? -1 : a[c] > b[c] ? 1 : 0) * (asc ? 1 : -1));
-        out = out.slice(0, limit);
+        out = out.slice(offset, offset + Math.min(limit, maxRows));
       }
       const data = structuredClone(out.map(r => view(t, table, r)));
       return { data: mode === 'many' ? data : data[0] ?? null, error: null };
@@ -61,6 +62,7 @@ function fakeDb(t: Tables, calls: string[] = [], fail?: (table: string, n: numbe
       or: (s: string) => { filters.push(keyset(s)); return b; },
       order: (c: string, o?: { ascending?: boolean; referencedTable?: string }) => { if (!o?.referencedTable) orders.push([c, o?.ascending ?? true]); return b; },
       limit: (k: number) => { limit = k; return b; },
+      range: (a: number, z: number) => { offset = a; limit = z - a + 1; return b; },
       maybeSingle: () => { mode = 'maybe'; return b; },
       then: (ok: (v: unknown) => unknown, ko: (e: unknown) => unknown) => run().then(ok, ko),
     };
@@ -72,7 +74,7 @@ function fakeDb(t: Tables, calls: string[] = [], fail?: (table: string, n: numbe
 const ADMIN = crypto.randomUUID(), KIM = crypto.randomUUID(), LEE = crypto.randomUUID(), GAB = crypto.randomUUID(), NOAH = crypto.randomUUID();
 const aiRow = (role: string) => ({ role, key_source: role === 'student' ? 'own' : 'student', provider: null, key_ciphertext: null, key_masked: null, key_added_at: null, model: null, effort: null, created_at: T0 });
 
-async function setup(o: { sessions?: number; fail?: (table: string, n: number) => boolean } = {}) {
+async function setup(o: { sessions?: number; fail?: (table: string, n: number) => boolean; maxRows?: number } = {}) {
   const later = new Date(Date.now() + 3600_000).toISOString(), calls: string[] = [];
   const t: Tables = {
     users: [{ id: ADMIN, nickname: 'admin', role: 'admin' }, { id: KIM, nickname: 'kim', role: 'teacher' }, { id: LEE, nickname: 'lee', role: 'teacher' }],
@@ -93,7 +95,7 @@ async function setup(o: { sessions?: number; fail?: (table: string, n: number) =
       { session_id: id, seq: 1, speaker: 'student', text: 'hi', leverage: null, object: null, trigger: null, created_at: started_at },
       { session_id: id, seq: 3, speaker: 'mentor', text: 'm', leverage: null, object: null, trigger: i % 3 === 0 ? 2 : null, created_at: started_at });
   }
-  const app = await buildApp({ db: fakeDb(t, calls, o.fail), config, now: () => new Date(T0) });
+  const app = await buildApp({ db: fakeDb(t, calls, o.fail, o.maxRows), config, now: () => new Date(T0) });
   const req = (method: string, url: string, payload?: unknown, cookies: Record<string, string> = { remath_admin: 'adm' }) =>
     app.inject({ method: method as 'GET', url, payload: payload as object, cookies });
   const newest = () => [...t.sessions].sort((a, b) => b.started_at < a.started_at ? -1 : b.started_at > a.started_at ? 1 : b.id < a.id ? -1 : 1);
@@ -125,6 +127,22 @@ describe('GET /api/admin/sessions (E-19)', () => {
     expect(kim.map(r => r.id)).toEqual(s.newest().filter(r => r.user_id === KIM && r.scenario_id === GAB).map(r => r.id));
     expect(kim.every(r => r.nickname === 'kim' && r.turn_count === 1 && r.scenario_name === (r.lang === 'ko' ? '가브리엘' : 'Gabriel'))).toBe(true);
     expect((await s.req('GET', '/api/admin/sessions?user_id=nope')).statusCode).toBe(400);
+  });
+});
+
+describe('lists are not cut at the Data API max-rows (review: unpaged reads)', () => {
+  it('teacher history GET /api/sessions returns every own session newest first past a 100-row cap', async () => {
+    const s = await setup({ sessions: 250, maxRows: 100 });
+    const mine = (await s.req('GET', '/api/sessions', undefined, { remath_teacher: 'kim' })).json() as z.infer<typeof S.SessionRow>[];
+    const kim = s.newest().filter(r => r.user_id === KIM);
+    expect(kim.length).toBeGreaterThan(100);
+    expect(mine.map(r => r.id)).toEqual(kim.map(r => r.id));
+    expect(mine[0]).toEqual(S.SessionRow.strict().parse(mine[0]));
+  });
+  it('admin CSV returns all 250 sessions past a 100-row cap', async () => {
+    const s = await setup({ sessions: 250, maxRows: 100 });
+    const body = (await s.req('GET', '/api/admin/sessions.csv')).rawPayload.toString('utf8');
+    expect(new Set(body.split('\r\n').filter(l => l.startsWith('"')).map(l => l.slice(1, 37)))).toEqual(new Set(s.t.sessions.map(r => r.id)));
   });
 });
 
