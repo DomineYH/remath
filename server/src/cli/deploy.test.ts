@@ -93,9 +93,10 @@ describe('scripts/deploy.sh', () => {
 
 describe('deploy/compose.yaml (the only container definition)', () => {
   const y = readFileSync(join(ROOT, 'deploy/compose.yaml'), 'utf8').split('\n').filter(l => !l.trim().startsWith('#')).join('\n');
-  it('binds to 127.0.0.1 by default and reads the runtime env file', () => {
+  it('binds to 127.0.0.1 by default and reads the runtime env file in raw format', () => {
     expect(y).toMatch(/^ {6}- "\$\{REMATH_BIND:-127\.0\.0\.1\}:\$\{REMATH_PORT:-3000\}:3000"$/m);
-    expect(y).toMatch(/^ {4}env_file: \$\{REMATH_ENV_FILE:\?/m);
+    // raw = 값 글자 그대로($VAR 치환 없음, Compose v2.30.0+). env-swap 은 이 형식으로 쓴다(env-swap.test.ts).
+    expect(y).toMatch(/^ {4}env_file:\n {6}- path: \$\{REMATH_ENV_FILE:\?[^\n]*\n {8}format: raw$/m);
   });
   it('fixes the image tag, restart policy, user and the backup volume', () => {
     expect(y).toMatch(/^ {4}image: \$\{REMATH_IMAGE:-remath:latest\}$/m);

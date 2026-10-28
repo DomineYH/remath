@@ -14,7 +14,11 @@ services:
     restart: unless-stopped
     # 서버 런타임 env(MOCK_LLM, COOKIE_SECURE, SUPABASE_* …). deploy.sh 는 스모크 통과 뒤 SUPABASE_* 4줄만 바꾼다.
     # 컨테이너는 3000 에서 듣는다: 이 파일에 PORT 를 넣지 않는다.
-    env_file: ${REMATH_ENV_FILE:?set REMATH_ENV_FILE to the absolute path of the server runtime env file}
+    # format: raw (Docker Compose v2.30.0 이상) = `docker run --env-file` 과 같은 파서: 한 줄 KEY=value, `#` 줄·빈 줄은 무시,
+    # 값은 첫 `=` 뒤 글자 그대로(따옴표도 값의 일부, $VAR·${VAR} 치환 없음). 그래서 스모크한 값이 바이트 그대로 컨테이너에 간다.
+    env_file:
+      - path: ${REMATH_ENV_FILE:?set REMATH_ENV_FILE to the absolute path of the server runtime env file}
+        format: raw
     user: node
     ports:
       # 기본은 이 호스트에서만 열린다(앞단 리버스 프록시가 HTTPS 종단). 모든 인터페이스에 열려면 REMATH_BIND=0.0.0.0.

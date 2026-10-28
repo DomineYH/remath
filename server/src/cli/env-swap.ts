@@ -11,7 +11,10 @@ import { DbUrl } from './migrate.ts';
 export const KEYS = ['SUPABASE_URL', 'SUPABASE_SERVICE_KEY', 'SUPABASE_DB_URL', 'SUPABASE_ANON_KEY'] as const;
 type Values = Record<(typeof KEYS)[number], string>;
 
-/** KEY= 로 시작하는 줄의 값만 바꾸고, 없는 키는 끝에 붙인다. */
+/**
+ * KEY= 로 시작하는 줄의 값만 바꾸고, 없는 키는 끝에 붙인다. 값은 따옴표·이스케이프 없이 그대로 쓴다: deploy/compose.yaml 의
+ * env_file 이 format: raw(= docker run --env-file 파서)라 첫 `=` 뒤가 글자 그대로 값이 된다($VAR 치환 없음). 줄바꿈은 Env 가 막는다.
+ */
 export function swapEnv(text: string, v: Values) {
   const seen = new Set<string>();
   const lines = text.split('\n').map(line => {
