@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { Writable } from 'node:stream';
+import { routes } from '@remath/shared';
 import { describe, expect, it } from 'vitest';
 import { buildApp } from './app.ts';
 import { loadConfig } from './config.ts';
@@ -16,9 +17,9 @@ describe('app wiring (A-2, M-2, O-8)', () => {
     const r = await app.inject('/healthz');
     expect(r.statusCode).toBe(200);
   });
-  it('table routes without a handler stay unregistered (Fastify 404)', async () => {
+  it('every route-table route has a handler (#44 filled the last ones)', async () => {
     const app = await buildApp({ db, config });
-    expect((await app.inject('/api/admin/ai/providers')).statusCode).toBe(404);
+    for (const r of routes) expect(app.hasRoute({ method: r.method, url: r.path }), `${r.method} ${r.path}`).toBe(true);
   });
   it('a zod failure is 400 validation_failed in the {error:{code,message,details}} shape', async () => {
     const app = await buildApp({ db, config });
