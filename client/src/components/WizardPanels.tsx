@@ -78,6 +78,7 @@ function MisconceptionList({ e }: { e: Edit }) {
   const setLine = (i: number, p: Partial<Tr['misconceptions'][number]>) => setTr({ misconceptions: tr.misconceptions.map((m, j) => j === i ? { ...m, ...p } : m) });
   return (
     <fieldset className="field">
+      {/* eslint-disable-next-line no-restricted-syntax -- spine placeholder name */}
       <legend>{t('lMis')} <span className="spine">MISCONCEPTIONS_LIST</span></legend>
       {mis.map((m, i) => (
         <div className="mis" key={i}>

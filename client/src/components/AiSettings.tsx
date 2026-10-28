@@ -66,6 +66,7 @@ function KeyInput({ value, providers, onChange, onCancel }: { value: string; pro
     <div className="field">
       <label htmlFor={id}>{t('keyLabel')}</label>
       <div className="keyrow">
+        {/* eslint-disable-next-line no-restricted-syntax -- key prefixes, not copy */}
         <input id={id} type="password" autoComplete="off" spellCheck={false} placeholder="sk-… / sk-ant-… / AIza…" value={value} onChange={e => onChange(e.target.value)} />
         {onCancel && <Button onClick={onCancel}>{t('cancel')}</Button>}
       </div>

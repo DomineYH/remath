@@ -13,6 +13,7 @@ export function TopBar({ account }: { account?: ReactNode }) {
       <div className="in">
         <div className="brand">
           <svg className="logo" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#3B3FD8" /><path d="M8 10.5A2.5 2.5 0 0 1 10.5 8h11a2.5 2.5 0 0 1 2.5 2.5v7a2.5 2.5 0 0 1-2.5 2.5H14l-4 3.5V20a2 2 0 0 1-2-2z" fill="#fff" /><circle cx="22.5" cy="21.5" r="4" fill="#E8743B" /></svg>
+          {/* eslint-disable-next-line no-restricted-syntax -- brand name */}
           <b>ReMath</b><span className="sub">{t('brandSub')}</span>
         </div>
         {account ?? <div className="acct" />}

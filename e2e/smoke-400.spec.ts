@@ -8,15 +8,19 @@ test.use({ viewport: { width: 400, height: 800 } });
 const PW = 'abcd1234';
 const GREET = '안녕하세요… 저는 가브리엘이에요.';
 
-/** No document-level horizontal scroll (I-54) and the top bar on one line (ticket 17 #3): all bar items share one centre line. */
+/** No document-level horizontal scroll (I-54), the top bar on one line (ticket 17 #3: all bar items share one centre line)
+ *  and a label on every form control (I-55). */
 async function fits(page: Page, where: string) {
   await expect(page.locator('.top')).toBeVisible();
   const m = await page.evaluate(() => ({
     sw: document.documentElement.scrollWidth,
     mids: [...document.querySelectorAll('.top .in > *')].map(e => e.getBoundingClientRect()).filter(r => r.height > 0).map(r => r.top + r.height / 2),
+    unlabelled: [...document.querySelectorAll<HTMLInputElement>('input, select, textarea')]
+      .filter(e => !e.labels?.length && !e.getAttribute('aria-label') && !e.getAttribute('aria-labelledby')).map(e => e.outerHTML.slice(0, 80)),
   }));
   expect(m.sw, `${where}: scrollWidth`).toBeLessThanOrEqual(400);
   expect(Math.max(...m.mids) - Math.min(...m.mids), `${where}: top bar on one line`).toBeLessThan(4);
+  expect(m.unlabelled, `${where}: form controls without a label`).toEqual([]);
 }
 
 /** A menu button: Enter opens it (aria-expanded), Esc closes it and returns focus, an outside click closes it too. */
@@ -82,9 +86,17 @@ test('B-4: 400px smoke over every screen, menus by keyboard, dark mode, EN↔한
   for (const input of await row.locator('input, textarea').all()) await expect(input).toHaveAttribute('placeholder', /\S/);
 
   // users and groups: a teacher in a group with Gabriel
+  // modal focus rules (I-55): first input focused, Esc closes and restores focus to the opener
   await page.goto('/admin/users');
-  await page.getByRole('button', { name: '＋ Add user' }).click();
+  const opener = page.getByRole('button', { name: '＋ Add user' });
   const add = page.getByRole('dialog', { name: 'Add user' });
+  await opener.focus();
+  await page.keyboard.press('Enter');
+  await expect(add.getByLabel('Nickname')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(add).toBeHidden();
+  await expect(opener).toBeFocused();
+  await opener.click();
   await add.getByLabel('Nickname').fill('Bora');
   await add.getByLabel('Password', { exact: true }).fill(PW);
   await add.getByLabel('Confirm password').fill(PW);

@@ -31,3 +31,12 @@ describe('screen code boundary (A-3, C-11)', () => {
     expect(await rulesHit(`import { createHttpApi } from './http.ts';\nexport const a = createHttpApi;\n`, 'client/src/api/index.ts')).toEqual([]);
   });
 });
+
+describe('screen copy comes from the i18n dict (B-9)', () => {
+  for (const code of ['export const X = () => <p>Save</p>;', 'export const X = () => <p>저장</p>;', 'export const X = () => <input aria-label="Name" />;', 'export const X = () => <input placeholder="이름" />;', "export const X = () => <b>{'Done'}</b>;"]) {
+    it(`flags ${code.slice(22)}`, async () => expect(await rulesHit(`${code}\n`, 'client/src/components/X.tsx')).toContain('no-restricted-syntax'));
+  }
+  it('allows dict text, symbols and markup', async () => {
+    expect(await rulesHit(`import { useT } from '../i18n/index.tsx';\nexport const X = () => { const t = useT(); return <p aria-label={t('save')} className="a b">{t('save')} · ⋯ ☾ 1/2 ✓</p>; };\n`, 'client/src/components/X.tsx')).toEqual([]);
+  });
+});

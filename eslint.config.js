@@ -7,6 +7,14 @@ import tseslint from 'typescript-eslint';
 const API_IMPL = '(^|/)api/(\\./)*(http|mock)(\\.[jt]sx?|/|$)';
 const IMPORT_MSG = 'Screens import only Api/ApiError/createApi from api/index (A-3, C-11).';
 const HTTP_MSG = 'HTTP goes through Api (A-3).';
+// Screen copy comes from the i18n dict, never a literal (B-9): JSX text, user-facing attributes and {'...'} with a Latin or Hangul letter.
+const COPY_MSG = 'Screen copy goes through t() and the i18n dict (B-9).';
+const LETTER = '/[A-Za-z가-힣]/';
+const COPY = [
+  `JSXText[value=${LETTER}]`,
+  `JSXAttribute[name.name=/^(aria-label|placeholder|title|alt|label|ariaLabel)$/] > Literal[value=${LETTER}]`,
+  `JSXExpressionContainer > Literal[value=${LETTER}]`,
+].map(selector => ({ selector, message: COPY_MSG }));
 
 export default tseslint.config(
   { ignores: ['**/dist/**', '**/dist-mock/**', 'playwright-report/**', 'test-results/**', 'base_ui/**'] },
@@ -26,7 +34,7 @@ export default tseslint.config(
     ignores: ['client/src/api/**'],
     rules: {
       'no-restricted-imports': ['error', { patterns: [{ regex: API_IMPL, message: IMPORT_MSG }] }],
-      'no-restricted-syntax': ['error', { selector: `ImportExpression[source.value=/${API_IMPL.replaceAll('/', '\\/')}/]`, message: IMPORT_MSG }],
+      'no-restricted-syntax': ['error', { selector: `ImportExpression[source.value=/${API_IMPL.replaceAll('/', '\\/')}/]`, message: IMPORT_MSG }, ...COPY],
       'no-restricted-globals': ['error',
         { name: 'fetch', message: HTTP_MSG },
         { name: 'EventSource', message: HTTP_MSG }],
