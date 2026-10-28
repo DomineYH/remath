@@ -1,4 +1,5 @@
-// 시드 (D-16): 행 모양·게시+컴파일본·멱등성을 메모리 Data API 스텁으로 고정한다. 실 DB 2회 실행은 수동(T-4).
+// 시드 (D-16): 행 모양·게시+컴파일본·멱등성, 그리고 "넣기만 한다"(지우거나 고치지 않음)를 메모리 Data API 스텁으로 고정한다.
+// 실 DB 2회 실행은 수동(T-4).
 import { compileScenario, TEMPLATES } from '@remath/prompts';
 import { ScenarioInput } from '@remath/shared';
 import argon2 from 'argon2';
@@ -7,43 +8,49 @@ import type { Db } from '../db.ts';
 import { readSamples, sampleRows, seed } from './seed.ts';
 
 type Row = Record<string, unknown>;
-// 0001 의 unique 중 시드가 부딪히는 것만. users 는 users_single_admin(관리자 1행)이라 teacher 는 겹쳐도 된다.
-const UNIQUE: Record<string, string> = { users: 'role', ai_settings: 'role', scenarios: 'slug' };
+type T = Record<string, Row[]>;
+const err = (code: string, message: string) => ({ data: null, error: { code, message } });
 
-/** seed.ts 가 쓰는 supabase-js 빌더만. fail = 실패시킬 `연산:테이블` 목록(예: 'delete:scenarios'). */
-function fakeDb(t: Record<string, Row[]>, fail: string[] = []) {
+/**
+ * seed.ts 가 쓰는 supabase-js 빌더 + 0004 의 save_scenario·publish_scenario(각각 한 트랜잭션).
+ * 제약: users_single_admin, ai_settings.role, scenarios.slug, scenario_translations(scenario_id, lang).
+ * fail = 실패시킬 지점(`insert:users`, `select:scenarios`, `rpc:save_scenario` …). `lost:<지점>` = 커밋은 되고 응답만 잃음.
+ * before(지점) = 그 연산 직전에 끼어들기. from().update/delete 는 부르는 것 자체가 테스트 실패다.
+ */
+function fakeDb(t: T, o: { fail?: string[]; before?: (point: string) => void } = {}) {
+  let clock = 0;
+  const now = () => `2026-10-28T00:00:${String(clock++).padStart(2, '0')}Z`;
+  const gate = (point: string, commit: () => { data: unknown; error: unknown }) => {
+    o.before?.(point);
+    if (o.fail?.includes(point)) return err('XX000', `injected ${point} failure`);
+    const r = commit();
+    return o.fail?.includes(`lost:${point}`) && !r.error ? err('08006', `lost response after ${point}`) : r;
+  };
   const from = (table: string) => {
     let op = 'select', values: Row[] = [], ignore = false, mode: 'many' | 'one' | 'maybe' = 'many';
     const filters: ((r: Row) => boolean)[] = [];
-    const run = async () => {
-      if (fail.includes(`${op === 'upsert' ? 'insert' : op}:${table}`)) return { data: null, error: { code: 'XX000', message: `injected ${op} failure` } };
+    const run = async () => gate(`${op === 'upsert' ? 'insert' : op}:${table}`, () => {
       const rows = t[table] ??= [];
-      let out: Row[];
-      if (op === 'insert' || op === 'upsert') {
-        const key = UNIQUE[table];
-        out = [];
-        for (const v of values) {
-          if (key && v[key] !== 'teacher' && rows.some(r => r[key] === v[key])) {
-            if (ignore) continue;
-            return { data: null, error: { code: '23505', message: 'duplicate key' } };
-          }
-          const r = { id: crypto.randomUUID(), ...structuredClone(v) };
-          rows.push(r); out.push(r);
-        }
-      } else {
-        out = rows.filter(r => filters.every(f => f(r)));
-        if (op === 'update') out.forEach(r => Object.assign(r, structuredClone(values[0])));
-        if (op === 'delete') t[table] = rows.filter(r => !out.includes(r));
+      if (op === 'select') {
+        const out = rows.filter(r => filters.every(f => f(r))).map(r => structuredClone(r));
+        const data = mode === 'many' ? out : out[0] ?? null;
+        return mode === 'one' && !data ? err('PGRST116', 'no rows') : { data, error: null };
       }
-      const data = mode === 'many' ? out : out[0] ?? null;
-      return mode === 'one' && !data ? { data: null, error: { code: 'PGRST116', message: 'no rows' } } : { data, error: null };
-    };
+      const out: Row[] = [];
+      for (const v of values) {
+        const dup = table === 'users' ? v.role === 'admin' && rows.some(r => r.role === 'admin') : rows.some(r => r.role === v.role);
+        if (dup) { if (ignore) continue; return err('23505', 'duplicate key'); }
+        const r = { id: crypto.randomUUID(), ...structuredClone(v) };
+        rows.push(r); out.push(r);
+      }
+      return { data: out.map(r => structuredClone(r)), error: null };
+    });
+    const forbidden = (what: string) => () => { throw new Error(`seed must never ${what} (${table})`); };
     const b = {
       select: () => b,
       insert: (v: Row | Row[]) => { op = 'insert'; values = [v].flat(); return b; },
-      upsert: (v: Row[], o: { ignoreDuplicates?: boolean }) => { op = 'upsert'; values = v; ignore = !!o.ignoreDuplicates; return b; },
-      update: (v: Row) => { op = 'update'; values = [v]; return b; },
-      delete: () => { op = 'delete'; return b; },
+      upsert: (v: Row[], x: { ignoreDuplicates?: boolean }) => { op = 'upsert'; values = v; ignore = !!x.ignoreDuplicates; return b; },
+      update: forbidden('update'), delete: forbidden('delete'),
       eq: (c: string, v: unknown) => { filters.push(r => r[c] === v); return b; },
       in: (c: string, v: unknown[]) => { filters.push(r => v.includes(r[c])); return b; },
       single: () => { mode = 'one'; return b; }, maybeSingle: () => { mode = 'maybe'; return b; },
@@ -51,30 +58,50 @@ function fakeDb(t: Record<string, Row[]>, fail: string[] = []) {
     };
     return b;
   };
-  return { from } as unknown as Db;
+  const rpc = async (name: string, a: Row) => gate(`rpc:${name}`, () => {
+    const scenarios = t.scenarios ??= [], translations = t.scenario_translations ??= [];
+    if (name === 'save_scenario') {
+      const { translations: tr, ...s } = a.p_input as { translations: Record<'ko' | 'en', Row> } & Row;
+      if (a.p_slug === null) throw new Error('seed only creates scenarios');
+      if (scenarios.some(r => r.slug === a.p_slug)) return err('23505', 'duplicate key value violates unique constraint "scenarios_slug_key"');
+      const ts = now();
+      scenarios.push({ id: a.p_id, slug: a.p_slug, status: 'draft', compiled_prompt: null, ...structuredClone(s), created_at: ts, updated_at: ts });
+      for (const lang of ['ko', 'en'] as const) translations.push({ id: crypto.randomUUID(), scenario_id: a.p_id, lang, ...structuredClone(tr[lang]) });
+      return { data: true, error: null };
+    }
+    if (name === 'publish_scenario') {
+      const s = scenarios.find(r => r.id === a.p_id && r.updated_at === a.p_expected_updated_at);
+      if (!s) return { data: false, error: null };
+      Object.assign(s, { status: 'published', compiled_prompt: structuredClone(a.p_compiled), updated_at: now() });
+      return { data: true, error: null };
+    }
+    throw new Error(`unknown rpc ${name}`);
+  });
+  return { from, rpc } as unknown as Db;
 }
 
 const PW = 'admin1234';
 const samples = readSamples();
+const SLUGS = Object.keys(samples);
+const byId = (rows: Row[] = []) => Object.fromEntries(rows.map(r => [String(r.id), r]));
+/** 시드 뒤에도 이전의 모든 행이 같은 값으로 남아 있어야 한다(지우지도 고치지도 않음). */
+const expectKept = (before: T, after: T) => {
+  for (const [table, rows] of Object.entries(before)) for (const r of rows) expect(byId(after[table])[String(r.id)], `${table} ${r.id}`).toEqual(r);
+};
 
 describe('seed (D-16)', () => {
   it('reads the five sample files by slug', () => {
-    expect(Object.keys(samples)).toEqual(['gabriel', 'hajun', 'jiwoo', 'noah', 'seoyeon']);
+    expect(SLUGS).toEqual(['gabriel', 'hajun', 'jiwoo', 'noah', 'seoyeon']);
   });
 
-  it('turns a sample into a published scenario with the publish-time compiled prompt and two translations', () => {
-    const { scenario, translations } = sampleRows('gabriel', samples.gabriel);
+  it('a sample becomes the parsed ScenarioInput and the publish-time compiled prompt', () => {
     const s = ScenarioInput.parse(samples.gabriel);
-    expect(scenario).toMatchObject({ slug: 'gabriel', status: 'published', lang: s.lang, internal: s.internal, classification: s.classification });
-    expect(scenario.compiled_prompt).toEqual(compileScenario(s, s.translations[s.lang], s.lang, TEMPLATES));
-    expect(scenario).not.toHaveProperty('translations');
-    expect(translations).toEqual([{ lang: 'ko', ...s.translations.ko }, { lang: 'en', ...s.translations.en }]);
+    expect(sampleRows('gabriel', samples.gabriel)).toEqual({ slug: 'gabriel', input: s, compiled: compileScenario(s, s.translations[s.lang], s.lang, TEMPLATES) });
   });
 
   it('empty DB: one argon2id admin and three ai_settings rows, no samples without --with-samples', async () => {
-    const t: Record<string, Row[]> = {};
-    const done = await seed(fakeDb(t), { adminPassword: PW });
-    expect(done).toEqual({ admin: 'inserted', ai_settings: ['student', 'mentor', 'analysis'], scenarios: [], skipped_scenarios: [] });
+    const t: T = {};
+    expect(await seed(fakeDb(t), { adminPassword: PW })).toEqual({ admin: 'inserted', ai_settings: ['student', 'mentor', 'analysis'], scenarios: [], skipped_scenarios: [] });
     expect(t.users).toHaveLength(1);
     expect(t.users[0]).toMatchObject({ nickname: 'admin', role: 'admin' });
     expect(String(t.users[0].password_hash)).toMatch(/^\$argon2id\$/);
@@ -84,75 +111,90 @@ describe('seed (D-16)', () => {
       expect.objectContaining({ role: 'mentor', key_source: 'student' }),
       expect.objectContaining({ role: 'analysis', key_source: 'student' }),
     ]);
-    expect(t.scenarios ?? []).toEqual([]);
+    expect(t.scenarios).toBeUndefined();
   });
 
-  it('--with-samples: 5 scenarios and 10 translations; a second run changes nothing', async () => {
-    const t: Record<string, Row[]> = {};
-    const first = await seed(fakeDb(t), { adminPassword: PW, samples });
-    expect(first.scenarios).toEqual(Object.keys(samples));
-    expect(t.scenarios).toHaveLength(5);
-    expect(t.scenario_translations).toHaveLength(10);
-    for (const s of t.scenarios) expect(t.scenario_translations.filter(tr => tr.scenario_id === s.id).map(tr => tr.lang)).toEqual(['ko', 'en']);
+  it('--with-samples: 5 published scenarios with their compiled prompt and 10 translations; a second run changes nothing', async () => {
+    const t: T = {};
+    expect((await seed(fakeDb(t), { adminPassword: PW, samples })).scenarios).toEqual(SLUGS);
+    expect(t.scenarios.map(s => [s.slug, s.status])).toEqual(SLUGS.map(s => [s, 'published']));
+    for (const s of t.scenarios) {
+      expect(s.compiled_prompt).toEqual(sampleRows(String(s.slug), samples[String(s.slug)]).compiled);
+      expect(t.scenario_translations.filter(tr => tr.scenario_id === s.id).map(tr => tr.lang)).toEqual(['ko', 'en']);
+    }
 
     const before = structuredClone(t);
-    const second = await seed(fakeDb(t), { adminPassword: 'other999', samples });
-    expect(second).toEqual({ admin: 'skipped', ai_settings: [], scenarios: [], skipped_scenarios: Object.keys(samples) });
+    expect(await seed(fakeDb(t), { adminPassword: 'other999', samples })).toEqual({ admin: 'skipped', ai_settings: [], scenarios: [], skipped_scenarios: SLUGS });
     expect(t).toEqual(before);   // 관리자 비밀번호도 그대로
   });
 
-  it('skips only the slugs that exist with both translations and leaves an existing admin and ai_settings untouched', async () => {
-    const t: Record<string, Row[]> = {
+  it('an existing slug is skipped untouched whatever its state (draft, edited, even without translations)', async () => {
+    const t: T = {
       users: [{ id: 'a', nickname: 'admin', role: 'admin', password_hash: 'kept' }],
-      ai_settings: [{ role: 'mentor', key_source: 'own' }],
-      scenarios: [{ id: 's', slug: 'noah', status: 'draft' }],
-      scenario_translations: [{ id: 'k', scenario_id: 's', lang: 'ko', name: 'edited' }, { id: 'e', scenario_id: 's', lang: 'en', name: 'edited' }],
+      ai_settings: [{ id: 'm', role: 'mentor', key_source: 'own' }],
+      scenarios: [{ id: 's1', slug: 'noah', status: 'draft', updated_at: 'x' }, { id: 's2', slug: 'hajun', status: 'published', updated_at: 'y' }],
+      scenario_translations: [{ id: 'k', scenario_id: 's1', lang: 'ko', name: 'edited' }],
     };
+    const before = structuredClone(t);
     const done = await seed(fakeDb(t), { adminPassword: PW, samples });
-    expect(done).toEqual({ admin: 'skipped', ai_settings: ['student', 'analysis'], scenarios: ['gabriel', 'hajun', 'jiwoo', 'seoyeon'], skipped_scenarios: ['noah'] });
-    expect(t.users).toEqual([{ id: 'a', nickname: 'admin', role: 'admin', password_hash: 'kept' }]);
-    expect(t.ai_settings.find(r => r.role === 'mentor')).toEqual({ role: 'mentor', key_source: 'own' });
-    expect(t.scenarios.find(r => r.slug === 'noah')).toEqual({ id: 's', slug: 'noah', status: 'draft' });
-    expect(t.scenario_translations.filter(r => r.scenario_id === 's')).toEqual([
-      { id: 'k', scenario_id: 's', lang: 'ko', name: 'edited' }, { id: 'e', scenario_id: 's', lang: 'en', name: 'edited' }]);
+    expect(done).toEqual({ admin: 'skipped', ai_settings: ['student', 'analysis'], scenarios: ['gabriel', 'jiwoo', 'seoyeon'], skipped_scenarios: ['hajun', 'noah'] });
+    expectKept(before, t);
+    expect(t.scenario_translations.filter(r => r.scenario_id === 's1' || r.scenario_id === 's2')).toEqual(before.scenario_translations);
   });
 
-  it('a failed translation insert removes its scenario so a rerun can insert it', async () => {
-    const t: Record<string, Row[]> = {};
-    await expect(seed(fakeDb(t, ['insert:scenario_translations']), { adminPassword: PW, samples })).rejects.toMatchObject({ code: 'XX000' });
-    expect(t.scenarios).toEqual([]);
-    await seed(fakeDb(t), { adminPassword: PW, samples });
-    expect(t.scenarios).toHaveLength(5);
+  it('a slug created by someone else between the check and the save is skipped and left alone', async () => {
+    const t: T = {};
+    let raced = false;
+    const before = (point: string) => {
+      if (point !== 'rpc:save_scenario' || raced) return;
+      raced = true;   // 첫 save 직전에 다른 실행이 gabriel 을 만든다
+      t.scenarios = [{ id: 'other', slug: 'gabriel', status: 'published', updated_at: 'z' }];
+      t.scenario_translations = [{ id: 'o1', scenario_id: 'other', lang: 'ko' }, { id: 'o2', scenario_id: 'other', lang: 'en' }];
+    };
+    const done = await seed(fakeDb(t, { before }), { adminPassword: PW, samples });
+    expect(done.skipped_scenarios).toEqual(['gabriel']);
+    expect(done.scenarios).toEqual(SLUGS.slice(1));
+    expect(t.scenarios[0]).toEqual({ id: 'other', slug: 'gabriel', status: 'published', updated_at: 'z' });
+    expect(t.scenario_translations.filter(r => r.scenario_id === 'other').map(r => r.id)).toEqual(['o1', 'o2']);
   });
 
-  it('failed insert + failed cleanup: the run fails loudly and the next run completes the unfinished sample', async () => {
-    const t: Record<string, Row[]> = {};
-    await expect(seed(fakeDb(t, ['insert:scenario_translations', 'delete:scenarios']), { adminPassword: PW, samples }))
-      .rejects.toThrow(/gabriel.*cleanup.*injected delete failure/);
-    expect(t.scenarios.map(r => r.slug)).toEqual(['gabriel']);   // 번역 없이 남은 행
-    expect(t.scenario_translations ?? []).toEqual([]);
-
-    const done = await seed(fakeDb(t), { adminPassword: PW, samples });
-    expect(done.scenarios).toEqual(Object.keys(samples));
-    expect(done.skipped_scenarios).toEqual([]);
-    expect(t.scenarios).toHaveLength(5);
-    expect(t.scenario_translations).toHaveLength(10);
-    const g = t.scenarios.find(r => r.slug === 'gabriel')!, want = sampleRows('gabriel', samples.gabriel);
-    expect(g).toMatchObject({ status: 'published', compiled_prompt: want.scenario.compiled_prompt });
-    expect(t.scenario_translations.filter(r => r.scenario_id === g.id).map(r => r.lang)).toEqual(['ko', 'en']);
-
-    expect((await seed(fakeDb(t), { adminPassword: PW, samples })).skipped_scenarios).toEqual(Object.keys(samples));
+  it('a publish that loses to a concurrent save fails loudly and leaves the newer row as it is', async () => {
+    const t: T = {};
+    const before = (point: string) => {
+      if (point === 'rpc:publish_scenario' && t.scenarios?.length === 1) Object.assign(t.scenarios[0], { updated_at: 'edited', grade: 'admin edit' });
+    };
+    await expect(seed(fakeDb(t, { before }), { adminPassword: PW, samples })).rejects.toThrow(/sample gabriel was saved as a draft but not published \(changed since it was saved\)/);
+    expect(t.scenarios[0]).toMatchObject({ slug: 'gabriel', status: 'draft', grade: 'admin edit', compiled_prompt: null });
   });
 
-  it('a sample row with one translation gets only the missing one', async () => {
-    const t: Record<string, Row[]> = { scenarios: [{ id: 's', slug: 'hajun', status: 'draft' }], scenario_translations: [{ id: 'k', scenario_id: 's', lang: 'ko' }] };
-    await seed(fakeDb(t), { adminPassword: PW, samples: { hajun: samples.hajun } });
-    expect(t.scenario_translations.map(r => [r.id === 'k' ? 'kept' : 'new', r.lang])).toEqual([['kept', 'ko'], ['new', 'en']]);
-    expect(t.scenarios[0]).toMatchObject({ id: 's', status: 'published' });
+  // 실패 지점마다: 실패한 실행도, 이어지는 정상 실행도 아무것도 지우거나 고치지 않는다. 시나리오는 언제나 번역 2행을 가진다.
+  const POINTS = ['insert:users', 'insert:ai_settings', 'select:scenarios', 'rpc:save_scenario', 'rpc:publish_scenario'];
+  for (const fail of POINTS.flatMap(p => [p, `lost:${p}`])) {
+    it(`never deletes or modifies on failure (${fail}), and a rerun only adds`, async () => {
+      const t: T = { scenarios: [{ id: 'mine', slug: 'noah', status: 'published', updated_at: 'u' }], scenario_translations: [{ id: 'n1', scenario_id: 'mine', lang: 'ko' }] };
+      const outcome = (p: Promise<unknown>) => p.then(() => 'ok', (e: Error) => e.message);
+      expect(await outcome(seed(fakeDb(t, { fail: [fail] }), { adminPassword: PW, samples }))).not.toMatch(/must never/);
+      const afterFailure = structuredClone(t);
+      expect(await outcome(seed(fakeDb(t), { adminPassword: PW, samples }))).not.toMatch(/must never/);
+      expectKept(afterFailure, t);
+      expect(t.scenarios.find(r => r.id === 'mine')).toEqual({ id: 'mine', slug: 'noah', status: 'published', updated_at: 'u' });
+      for (const s of t.scenarios.filter(r => r.id !== 'mine')) expect(t.scenario_translations.filter(r => r.scenario_id === s.id)).toHaveLength(2);
+      expect(t.users.filter(u => u.role === 'admin')).toHaveLength(1);
+      expect(t.ai_settings.map(r => r.role).sort()).toEqual(['analysis', 'mentor', 'student']);
+    });
+  }
+
+  it('an unpublished sample (publish failed) is reported and then skipped on rerun, never touched', async () => {
+    const t: T = {};
+    await expect(seed(fakeDb(t, { fail: ['rpc:publish_scenario'] }), { adminPassword: PW, samples }))
+      .rejects.toThrow(/sample gabriel was saved as a draft but not published.*publish it in the admin Scenarios tab/);
+    const draft = structuredClone(t.scenarios[0]);
+    expect((await seed(fakeDb(t), { adminPassword: PW, samples })).skipped_scenarios).toEqual(['gabriel']);
+    expect(t.scenarios[0]).toEqual(draft);
   });
 
-  it('an invalid sample file inserts nothing', async () => {
-    const t: Record<string, Row[]> = {};
+  it('an invalid sample file writes nothing', async () => {
+    const t: T = {};
     await expect(seed(fakeDb(t), { adminPassword: PW, samples: { ...samples, broken: { lang: 'fr' } } })).rejects.toThrow();
     expect(t).toEqual({});
   });
