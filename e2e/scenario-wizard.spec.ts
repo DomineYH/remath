@@ -159,3 +159,34 @@ test('wizard from scratch → save draft fills default elicit → the MOCK stude
     await expect(students.last()).toContainText(line);
   }
 });
+
+// Repair of #31 (F2): switching a saved ko scenario to a blank English edition copies the form, not the ko elicit lines,
+// so the save fills the English defaults and the MOCK student answers in English.
+test('saved ko scenario → switch to a blank English edition → save → the MOCK student replies with the English defaults', async ({ page }) => {
+  await adminLogin(page);
+  await page.getByRole('button', { name: '＋ New scenario' }).click();
+  await page.locator('#f-name').fill('지호');
+  await page.getByRole('button', { name: 'Next →' }).click();
+  await page.locator('#f-baseline').fill('- 0.7 이 0.65 보다 짧다고 답함.');
+  await page.getByRole('button', { name: 'Save draft' }).click();
+  const card = page.getByRole('article').filter({ has: page.getByRole('heading', { name: '지호' }) });
+  await card.getByRole('button', { name: 'Edit' }).click();
+  await expect(page.locator('#f-name')).toHaveValue('지호');
+  await page.getByRole('group', { name: 'Bot language' }).getByRole('button', { name: 'English' }).click();
+  await expect(page.locator('.notice.info')).toContainText('You are editing the English dialogue set');
+  await page.getByRole('button', { name: 'Save draft' }).click();
+  await expect(page).toHaveURL('/admin/scenarios');
+  await expect(card).toContainText('English');
+  await card.getByRole('button', { name: 'Test chat' }).click();
+  await expect(page).toHaveURL(/\/test\?session=/);
+
+  const students = page.getByRole('log').locator('.msg.student');
+  const input = page.getByRole('textbox', { name: 'Message' }), send = page.getByRole('button', { name: 'Send' });
+  const before = await students.count();
+  for (const [i, line] of ['Um… I just did it the way I drew it.', "I'm pretty sure my answer is right."].entries()) {
+    await input.fill('Can you tell me how you solved it?');
+    await send.click();
+    await expect(students).toHaveCount(before + i + 1);
+    await expect(students.last()).toContainText(line);
+  }
+});

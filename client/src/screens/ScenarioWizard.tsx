@@ -61,11 +61,11 @@ export function ScenarioWizard() {
     setTr: p => setD({ ...d, translations: { ...d.translations, [d.lang]: { ...tr, ...p } } }),
     setIn: p => setD({ ...d, internal: { ...d.internal, ...p } }),
   };
-  /** 언어별 필드만 바뀐다(내부 설정·분류는 그대로). 비어 있는 판으로 가면 지금 판을 옮겨 오고 안내한다. */
+  /** 언어별 필드만 바뀐다(내부 설정·분류는 그대로). 비어 있는 판으로 가면 지금 판의 폼 필드를 옮겨 오고 안내한다(elicit 은 폼에 없는 언어 대사라 비운다: 저장 때 그 언어 기본값). */
   const switchLang = (l: Lang) => {
     if (l === d.lang) return;
     const fresh = blank(d.translations[l]);
-    setD({ ...d, lang: l, translations: fresh ? { ...d.translations, [l]: structuredClone(tr) } : d.translations });
+    setD({ ...d, lang: l, translations: fresh ? { ...d.translations, [l]: { ...structuredClone(tr), elicit: [] } } : d.translations });
     setCopied(fresh);
   };
   const fillExample = () => { setD({ ...S.ScenarioInput.parse(seoyeon), lang: d.lang }); setCopied(false); setConfirmed([]); };
