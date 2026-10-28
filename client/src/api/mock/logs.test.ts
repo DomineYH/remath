@@ -1,20 +1,19 @@
-// A-7 (CSV), A-10 (AI settings · providers), A-8 (every admin write the mock can make leaves one audit row), against the mock API only.
+// A-7 (CSV), A-10 (AI settings · providers), A-8 (every admin write the mock can make leaves one audit row).
+// A-7 and A-10 run on any target (seam.ts); [mock] groups read the store (stored keys, A-8 audit rows).
 import * as S from '@remath/shared';
 import { describe, expect, it } from 'vitest';
 import { ApiError, type Api } from '../types.ts';
-import { createMockApi } from './index.ts';
-import { memoryStorage, seedDb, Store } from './store.ts';
+import { ADMIN_PW, describeMock, mockTarget, T0, target, type Target } from '../seam.ts';
 
-const T0 = '2026-10-28T00:00:00.000Z';
-const ADMIN_PW = 'Admin1234';
 const PW = 'abcd1234';
 const HEADER = 'session_id,started_at,nickname,scenario,lang,seq,speaker,text,leverage,object,trigger';
 
-async function setup() {
-  const store = new Store(memoryStorage(), () => seedDb(T0));
-  let tick = 0;   // every call is one second later, so "newest first" is observable
-  const now = () => new Date(Date.parse(T0) + 1000 * tick++).toISOString();
-  const mk = (realm: 'teacher' | 'admin') => createMockApi({ realm, store, now, adminPassword: ADMIN_PW, cookies: { teacher: null, admin: null } });
+/** The mock clock: every call is one second later, so "newest first" is observable. */
+const ticking = () => { let tick = 0; return () => new Date(Date.parse(T0) + 1000 * tick++).toISOString(); };
+
+/** Every instance is its own browser. */
+async function setup(t: Target = target({ now: ticking() })) {
+  const mk = (realm: 'teacher' | 'admin') => t.browser()(realm);
   const admin = mk('admin');
   await admin.adminLogin({ nickname: 'admin', password: ADMIN_PW });
   const ids = Object.fromEntries((await admin.listScenarios()).map(s => [s.slug, s.id]));
@@ -24,7 +23,7 @@ async function setup() {
     await admin.createGroup({ name: nickname, member_ids: [me.id], scenario_ids: slugs.map(s => ids[s]) });
     return { t, me };
   };
-  return { store, admin, ids, teacher };
+  return { admin, ids, teacher };
 }
 
 async function rejects(p: Promise<unknown>, status: number, code: string): Promise<ApiError> {
@@ -66,7 +65,7 @@ describe('A-7 sessions CSV', () => {
     expect(await lines(await admin.downloadSessionsCsv({ scenario_id: ids.gabriel }))).toHaveLength(1 + t1.length + t3.length);
     expect(await lines(await admin.downloadSessionsCsv({ user_id: b.me.id, scenario_id: ids.noah }))).toEqual([HEADER]);
     await rejects(admin.downloadSessionsCsv({ user_id: 'nope' }), 400, 'validation_failed');
-    await rejects(createMockApi({ realm: 'teacher', store: new Store(memoryStorage(), () => seedDb(T0)), adminPassword: ADMIN_PW }).downloadSessionsCsv({}), 401, 'unauthorized');
+    await rejects(target().api('teacher').downloadSessionsCsv({}), 401, 'unauthorized');
   });
   it('listAdminSessions uses the same filter, newest first', async () => {
     const { admin, ids, teacher } = await setup();
@@ -81,16 +80,14 @@ describe('A-7 sessions CSV', () => {
 const ANT = 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123WXYZ', OAI = 'sk-proj-abcdefghijklmnopqrstuv9876', GEM = 'AIzaSyabcdefghijklmnopqrstuvwxyz012345GGGG';
 describe('A-10 AI settings', () => {
   it('the key prefix picks the provider; only the masked key and its date are stored and returned', async () => {
-    const { admin, store } = await setup();
+    const { admin } = await setup();
     const a = await admin.updateAiRole('student', { key_source: 'own', api_key: ANT, model: 'claude-haiku-5-5', effort: 'low' });
     expect(S.AiRoleSetting.strict().parse(a)).toMatchObject({ role: 'student', key_source: 'own', provider: 'anthropic', key_masked: 'sk-ant-…WXYZ', model: 'claude-haiku-5-5', effort: 'low' });
-    expect(a.key_added_at).toMatch(/^2026-10-28T/);
+    S.Iso.parse(a.key_added_at);
     expect((await admin.updateAiRole('analysis', { key_source: 'own', api_key: OAI, model: 'gpt-6-astra', effort: 'high' })).key_masked).toBe('sk-proj-…9876');
     expect((await admin.updateAiRole('mentor', { key_source: 'own', api_key: GEM, model: 'gemini-4-argon', effort: null })).provider).toBe('gemini');
     expect((await admin.updateAiRole('mentor', { key_source: 'own', api_key: 'sk-plainopenai0000LAST', model: 'gpt-5.5', effort: null })).provider).toBe('openai');
     expect(await admin.getAiSettings()).toEqual(S.AiSettings.parse(await admin.getAiSettings()));
-    const json = JSON.stringify(store.db) + JSON.stringify(store.storage.getItem('remath.mock.v1'));
-    for (const k of [ANT, OAI, GEM, 'sk-plainopenai0000LAST']) expect(json).not.toContain(k);
   });
   it('omitting api_key keeps the key; sharing uses the source key provider; unknown prefix and bad sources → 400', async () => {
     const { admin } = await setup();
@@ -129,9 +126,21 @@ describe('A-10 AI settings', () => {
   });
 });
 
-describe('A-8 audit log: every write the mock can make', () => {
+describeMock('A-10 stored keys', () => {
+  it('only the masked key and its date reach the store, never the key', async () => {
+    const m = mockTarget({ now: ticking() }), { admin } = await setup(m);
+    expect((await admin.updateAiRole('student', { key_source: 'own', api_key: ANT, model: 'claude-haiku-5-5', effort: 'low' })).key_added_at).toMatch(/^2026-10-28T/);
+    await admin.updateAiRole('analysis', { key_source: 'own', api_key: OAI, model: 'gpt-6-astra', effort: 'high' });
+    await admin.updateAiRole('mentor', { key_source: 'own', api_key: GEM, model: 'gemini-4-argon', effort: null });
+    await admin.updateAiRole('mentor', { key_source: 'own', api_key: 'sk-plainopenai0000LAST', model: 'gpt-5.5', effort: null });
+    const json = JSON.stringify(m.store.db) + JSON.stringify(m.store.storage.getItem('remath.mock.v1'));
+    for (const k of [ANT, OAI, GEM, 'sk-plainopenai0000LAST']) expect(json).not.toContain(k);
+  });
+});
+
+describeMock('A-8 audit log: every write the mock can make', () => {
   it('one row per successful write with ticket-20 target·meta; reads, turns and failed writes leave none; no secrets, no updated_at', async () => {
-    const { admin, store, ids, teacher } = await setup();
+    const m = mockTarget({ now: ticking() }), { store } = m, { admin, ids, teacher } = await setup(m);
     const adminId = (await admin.adminMe()).id;
     const { t, me } = await teacher('Haneul', ['gabriel']);                       // signup: no row; createGroup: group.create
     await rejects(t.login({ nickname: 'Haneul', password: 'wrong999' }), 401, 'invalid_credentials');
@@ -140,7 +149,7 @@ describe('A-8 audit log: every write the mock can make', () => {
     const s = await t.startSession({ scenario_id: ids.gabriel });
     await say(t, s.session.id, '비밀스러운 발화 텍스트');
     await t.endSession(s.session.id);
-    await rejects(createMockApi({ realm: 'admin', store, adminPassword: ADMIN_PW, cookies: { teacher: null, admin: null } }).adminLogin({ nickname: 'admin', password: 'nope1234' }), 401, 'invalid_credentials');
+    await rejects(m.browser()('admin').adminLogin({ nickname: 'admin', password: 'nope1234' }), 401, 'invalid_credentials');
     await admin.adminChangePassword({ current: ADMIN_PW, next: 'Admin5678' });
     const u = await admin.createUser({ nickname: 'Bora', password: PW });
     await rejects(admin.createUser({ nickname: 'bora', password: PW }), 409, 'nickname_taken');
