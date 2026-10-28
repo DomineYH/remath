@@ -14,6 +14,7 @@
     "db:seed": "node --import ./src/raw-hooks.ts src/cli/seed.ts",
     "db:smoke": "node --import ./src/raw-hooks.ts src/cli/smoke.ts",
     "env:swap": "node --import ./src/raw-hooks.ts src/cli/env-swap.ts",
+    "db:new-project": "node --import ./src/raw-hooks.ts src/cli/new-project.ts",
     "test:http": "vitest run --config vitest.http.config.ts",
     "backup": "node --import ./src/raw-hooks.ts src/cli/backup.ts"
   },
