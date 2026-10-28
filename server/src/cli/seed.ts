@@ -3,11 +3,13 @@
 // 실행: `npm run db:seed -w server [-- --with-samples]` (deploy.sh 3단계).
 import { randomUUID } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
+import { isDeepStrictEqual } from 'node:util';
 import { compileScenario, TEMPLATES } from '@remath/prompts';
 import { Password, ScenarioInput } from '@remath/shared';
 import argon2 from 'argon2';
 import { z } from 'zod';
 import { createDb, must, type Db } from '../db.ts';
+import { SCENARIO_SELECT, toInput, type ScenarioDbRow } from '../projection.ts';
 import { main, readEnv } from './main.ts';
 
 // 목 `aiRole` 초기값과 같다(client/src/api/mock/store.ts).
@@ -26,7 +28,8 @@ export function sampleRows(slug: string, json: unknown) {
 
 /**
  * 시드는 넣기만 한다: 지우거나 있는 행을 고치지 않는다. 샘플은 #43 의 0004 함수로 만든다 — save_scenario(행 + 번역 2행이
- * 한 트랜잭션) → 읽은 updated_at 으로 publish_scenario. 그래서 번역이 모자란 샘플은 생기지 않는다.
+ * 한 트랜잭션) → 행+번역을 한 번에 읽어 그 내용으로 컴파일 → 읽은 updated_at 으로 publish_scenario. 그래서 번역이 모자란 샘플은
+ * 생기지 않고, 게시되는 컴파일본은 언제나 읽은 내용 그대로다.
  */
 export async function seed(db: Db, o: { adminPassword: string; samples?: Record<string, unknown> }) {
   const done = { admin: 'skipped', ai_settings: [] as string[], scenarios: [] as string[], skipped_scenarios: [] as string[] };
@@ -43,7 +46,7 @@ export async function seed(db: Db, o: { adminPassword: string; samples?: Record<
 
   if (!samples.length) return done;
   const existing = new Set((must(await db.from('scenarios').select('slug').in('slug', samples.map(r => r.slug))) as { slug: string }[]).map(r => r.slug));
-  for (const { slug, input, compiled } of samples) {
+  for (const { slug, input } of samples) {
     if (existing.has(slug)) { done.skipped_scenarios.push(slug); continue; }
     const id = randomUUID();
     const saved = await db.rpc('save_scenario', { p_id: id, p_slug: slug, p_input: input });
@@ -51,11 +54,15 @@ export async function seed(db: Db, o: { adminPassword: string; samples?: Record<
     if ((saved.error as { code?: string } | null)?.code === '23505') { done.skipped_scenarios.push(slug); continue; }
     must(saved);
     // 여기서 실패하면 샘플은 초안으로 남고, 다음 실행은 있는 slug 라 건너뛴다(스모크의 게시 수가 FAIL 로 알린다).
-    const read = await db.from('scenarios').select('updated_at').eq('id', id).single();
-    const pub = read.error ? read
-      : await db.rpc('publish_scenario', { p_id: id, p_expected_updated_at: (read.data as { updated_at: string }).updated_at, p_compiled: compiled });
-    if (pub.error || pub.data !== true)
-      throw new Error(`sample ${slug} was saved as a draft but not published (${pub.error?.message ?? 'changed since it was saved'}); publish it in the admin Scenarios tab`);
+    const unpublished = (why: string) => new Error(`sample ${slug} was saved as a draft but not published (${why}); publish it in the admin Scenarios tab`);
+    // 행 + 번역 2행을 한 요청(= 한 스냅숏, 관리자 게시 경로와 같은 SCENARIO_SELECT)으로 읽는다. 그새 관리자가 저장했다면
+    // 검수 안 된 내용이므로 게시하지 않는다. 같으면 읽은 그 내용으로 컴파일하고 읽은 updated_at 으로 게시한다.
+    const read = await db.from('scenarios').select(SCENARIO_SELECT).eq('id', id).single();
+    if (read.error) throw unpublished(read.error.message);
+    const row = read.data as unknown as ScenarioDbRow, now = toInput(row);
+    if (!isDeepStrictEqual(now, input)) throw unpublished('changed since it was saved');
+    const pub = await db.rpc('publish_scenario', { p_id: id, p_expected_updated_at: row.updated_at, p_compiled: compileScenario(now, now.translations[now.lang], now.lang, TEMPLATES) });
+    if (pub.error || pub.data !== true) throw unpublished(pub.error?.message ?? 'changed since it was saved');
     done.scenarios.push(slug);
   }
   return done;

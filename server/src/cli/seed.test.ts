@@ -27,12 +27,17 @@ function fakeDb(t: T, o: { fail?: string[]; before?: (point: string) => void } =
     return o.fail?.includes(`lost:${point}`) && !r.error ? err('08006', `lost response after ${point}`) : r;
   };
   const from = (table: string) => {
-    let op = 'select', values: Row[] = [], ignore = false, mode: 'many' | 'one' | 'maybe' = 'many';
+    let op = 'select', cols = '', values: Row[] = [], ignore = false, mode: 'many' | 'one' | 'maybe' = 'many';
     const filters: ((r: Row) => boolean)[] = [];
     const run = async () => gate(`${op === 'upsert' ? 'insert' : op}:${table}`, () => {
       const rows = t[table] ??= [];
       if (op === 'select') {
-        const out = rows.filter(r => filters.every(f => f(r))).map(r => structuredClone(r));
+        // SCENARIO_SELECT 는 번역을 임베드한다(PostgREST: 같은 요청 = 같은 스냅숏). TR_COLS = lang + Translation 필드.
+        const embed = (r: Row) => !cols.includes('scenario_translations(') ? r : {
+          ...r, group_scenarios: [], sessions: [{ count: 0 }],
+          scenario_translations: (t.scenario_translations ?? []).filter(tr => tr.scenario_id === r.id).map(({ id: _id, scenario_id: _s, ...tr }) => tr),
+        };
+        const out = rows.filter(r => filters.every(f => f(r))).map(r => structuredClone(embed(r)));
         const data = mode === 'many' ? out : out[0] ?? null;
         return mode === 'one' && !data ? err('PGRST116', 'no rows') : { data, error: null };
       }
@@ -47,7 +52,7 @@ function fakeDb(t: T, o: { fail?: string[]; before?: (point: string) => void } =
     });
     const forbidden = (what: string) => () => { throw new Error(`seed must never ${what} (${table})`); };
     const b = {
-      select: () => b,
+      select: (c = '') => { cols = c; return b; },
       insert: (v: Row | Row[]) => { op = 'insert'; values = [v].flat(); return b; },
       upsert: (v: Row[], x: { ignoreDuplicates?: boolean }) => { op = 'upsert'; values = v; ignore = !!x.ignoreDuplicates; return b; },
       update: forbidden('update'), delete: forbidden('delete'),
@@ -165,6 +170,43 @@ describe('seed (D-16)', () => {
     };
     await expect(seed(fakeDb(t, { before }), { adminPassword: PW, samples })).rejects.toThrow(/sample gabriel was saved as a draft but not published \(changed since it was saved\)/);
     expect(t.scenarios[0]).toMatchObject({ slug: 'gabriel', status: 'draft', grade: 'admin edit', compiled_prompt: null });
+  });
+
+  it('an admin save between save_scenario and the read is never published, so unreviewed content never goes live', async () => {
+    const t: T = {}, published: Row[] = [];
+    const db = fakeDb(t, {
+      before: point => {
+        // 리뷰의 끼어들기: 저장 직후, 시드가 행+번역을 읽기 전에 관리자가 활성 언어판 이름을 바꿔 저장한다.
+        if (point !== 'select:scenarios' || t.scenarios?.length !== 1 || t.scenarios[0].status !== 'draft') return;
+        const s = t.scenarios[0];
+        Object.assign(s, { updated_at: 'admin-saved' });
+        Object.assign(t.scenario_translations.find(r => r.scenario_id === s.id && r.lang === s.lang)!, { name: 'admin edit, not reviewed' });
+      },
+    });
+    const rpc = db.rpc.bind(db);
+    (db as unknown as { rpc: typeof rpc }).rpc = ((name: string, a: Row) => { if (name === 'publish_scenario') published.push(a); return rpc(name, a); }) as typeof rpc;
+    await expect(seed(db, { adminPassword: PW, samples })).rejects.toThrow(/sample gabriel was saved as a draft but not published \(changed since it was saved\)/);
+    expect(published).toEqual([]);
+    expect(t.scenarios[0]).toMatchObject({ slug: 'gabriel', status: 'draft', compiled_prompt: null, updated_at: 'admin-saved' });
+  });
+
+  it('publishes the compiled prompt of exactly the content it read, with the updated_at it read', async () => {
+    const t: T = {}, published: Row[] = [];
+    const db = fakeDb(t);
+    const rpc = db.rpc.bind(db);
+    (db as unknown as { rpc: typeof rpc }).rpc = ((name: string, a: Row) => {
+      if (name === 'publish_scenario') {
+        const s = t.scenarios.find(r => r.id === a.p_id)!, tr = t.scenario_translations.find(r => r.scenario_id === s.id && r.lang === s.lang)!;
+        published.push({ ...a, stored: compileScenario(s as never, tr as never, s.lang as 'ko' | 'en', TEMPLATES), updated_at: s.updated_at });
+      }
+      return rpc(name, a);
+    }) as typeof rpc;
+    await seed(db, { adminPassword: PW, samples });
+    expect(published).toHaveLength(5);
+    for (const p of published) {
+      expect(p.p_compiled).toEqual(p.stored);
+      expect(p.p_expected_updated_at).toBe(p.updated_at);
+    }
   });
 
   // 실패 지점마다: 실패한 실행도, 이어지는 정상 실행도 아무것도 지우거나 고치지 않는다. 시나리오는 언제나 번역 2행을 가진다.
