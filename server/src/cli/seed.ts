@@ -40,14 +40,22 @@ export async function seed(db: Db, o: { adminPassword: string; samples?: Record<
     .map((r: { role: string }) => r.role);
 
   if (!samples.length) return done;
-  const existing = new Set(must(await db.from('scenarios').select('slug').in('slug', samples.map(r => r.scenario.slug)))!.map((r: { slug: string }) => r.slug));
+  const existing = new Map((must(await db.from('scenarios').select('id, slug').in('slug', samples.map(r => r.scenario.slug))) as { id: string; slug: string }[])
+    .map(r => [r.slug, r.id]));
+  const langs = existing.size
+    ? must(await db.from('scenario_translations').select('scenario_id, lang').in('scenario_id', [...existing.values()])) as { scenario_id: string; lang: string }[] : [];
   for (const { scenario, translations } of samples) {
-    if (existing.has(scenario.slug)) { done.skipped_scenarios.push(scenario.slug); continue; }
-    const { id } = must(await db.from('scenarios').insert(scenario).select('id').single())!;
-    const t = await db.from('scenario_translations').insert(translations.map(tr => ({ scenario_id: id, ...tr })));
+    let id = existing.get(scenario.slug);
+    const have = new Set(langs.filter(t => t.scenario_id === id).map(t => t.lang));
+    if (id && have.size === 2) { done.skipped_scenarios.push(scenario.slug); continue; }
+    // 번역이 모자란 행 = 앞선 실행이 시나리오 행만 넣고 멈춘 것(번역 insert 실패 + 정리 실패): 샘플 상태(게시+컴파일본)로 마저 채운다.
+    if (id) must(await db.from('scenarios').update(scenario).eq('id', id));
+    else id = (must(await db.from('scenarios').insert(scenario).select('id').single()) as { id: string }).id;
+    const t = await db.from('scenario_translations').insert(translations.filter(tr => !have.has(tr.lang)).map(tr => ({ scenario_id: id, ...tr })));
     if (t.error) {
-      // 번역 없는 시나리오가 slug 를 차지하면 재실행이 건너뛴다: 지우고 실패한다.
-      await db.from('scenarios').delete().eq('id', id);
+      // 번역 없는 게시 시나리오를 남기지 않는다. 정리도 실패하면 다음 실행이 위에서 마저 채운다.
+      const d = await db.from('scenarios').delete().eq('id', id);
+      if (d.error) throw new Error(`sample ${scenario.slug}: translations insert failed (${t.error.message}) and cleanup failed (${d.error.message}); rerun db:seed to complete it`);
       throw t.error;
     }
     done.scenarios.push(scenario.slug);
