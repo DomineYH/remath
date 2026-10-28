@@ -30,14 +30,14 @@ const recording = () => {
 };
 
 describe('initial state (G-33)', () => {
-  it('no teachers, groups or sessions; one admin', async () => {
+  it('no teachers, groups or sessions; one admin; the five published samples', async () => {
     const { store, teacher, admin } = setup();
     expect(store.db.users.map(u => [u.nickname, u.role])).toEqual([['admin', 'admin']]);
     await admin.adminLogin({ nickname: 'admin', password: ADMIN_PW });
     expect(await admin.listUsers()).toEqual([]);
     expect(await admin.listGroups()).toEqual([]);
     expect(await admin.listAdminSessions({})).toEqual([]);
-    expect(await admin.listScenarios()).toEqual([]);
+    expect((await admin.listScenarios()).map(s => [s.slug, s.status])).toEqual(['gabriel', 'noah', 'jiwoo', 'hajun', 'seoyeon'].map(x => [x, 'published']));
     await teacher.signup(creds);
     expect(await teacher.getPractice()).toEqual({ groups: [], scenarios: [] });
     expect(await teacher.listSessions()).toEqual([]);
@@ -173,6 +173,12 @@ describe('logout and realm separation (C-10)', () => {
     await admin.adminLogin({ nickname: 'admin', password: ADMIN_PW });
     await rejects(teacher.getPractice(), 401, 'unauthorized');
     await rejects(teacher.me(), 401, 'unauthorized');
+  });
+  it('auth (401) comes before body validation (400), as the server middleware orders them', async () => {
+    const { teacher, admin } = setup();
+    await rejects(admin.createUser({ nickname: '', password: '' }), 401, 'unauthorized');
+    await rejects(teacher.changePassword({ current: '', next: '' }), 401, 'unauthorized');
+    await rejects(teacher.sendTurn('x', { text: '' })[Symbol.asyncIterator]().next() as Promise<unknown>, 401, 'unauthorized');
   });
 });
 

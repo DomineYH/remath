@@ -2,11 +2,13 @@
 // 서버(Fastify + fastify-type-provider-zod)와 클라이언트(client/src/api/ HTTP·목 구현)가 같은 타입을 본다.
 // 키는 DB 컬럼과 같은 snake_case: scenarios_public 뷰의 컬럼 집합이 곧 예비교사 응답 타입이다(ADR-0003). 매핑 계층 없음.
 import { z } from 'zod';
+import { TRIGGER } from '../leverage.ts';
 
 // ---- 공통 ---------------------------------------------------------------------
 export const Lang = z.enum(['ko', 'en']);
 export const Uuid = z.string().uuid();
 export const Iso = z.string().datetime({ offset: true });
+const TriggerNo = z.union([z.literal(TRIGGER.takingOver), z.literal(TRIGGER.help), z.literal(TRIGGER.goal)]);
 
 /** PRD 9절: 2~16자, 한글·영문·숫자·_ . -, @ 불가, 숫자 7자리 이상 연속 불가. 중복(대소문자 무시)은 서버가 409. */
 export const Nickname = z.string().regex(/^[A-Za-z0-9가-힣_.-]{2,16}$/).refine(s => !/\d{7}/.test(s), 'no 7+ consecutive digits');
@@ -62,10 +64,10 @@ export const ScenarioAdmin = ScenarioBase.extend({
   groups: z.array(z.object({ id: Uuid, name: z.string() })),
   session_count: z.number().int().nonnegative(),
 });
-/** 목록 카드(PRD 3절): 이모지·이름·학년·문제·상태·언어·분류 수·이용 그룹. 활성 언어판 문구만. */
+/** 목록 카드(PRD 3절, I-43): 이모지·이름·학년·문제·상태·언어·오개념 수·분류 수·이용 그룹. 활성 언어판 문구만. */
 export const ScenarioSummary = z.object({
   id: Uuid, slug: z.string(), status: z.enum(['draft', 'published']), lang: Lang, student_prefix: z.string(), grade: z.string(),
-  name: z.string(), problem: z.string(),
+  name: z.string(), problem: z.string(), misconception_count: z.number().int().nonnegative(),
   classification_count: z.object({ leverage: z.number().int(), object: z.number().int() }),
   groups: z.array(z.object({ id: Uuid, name: z.string() })), session_count: z.number().int().nonnegative(), updated_at: Iso,
 });
@@ -83,6 +85,13 @@ export const ScenarioPublic = z.object({
   name: z.string(), description: z.string(), problem: z.string(), chars: z.string(), greet: z.string(), elicit: z.array(z.string()),
   created_at: Iso, updated_at: Iso,
 });
+type ScenarioCols = z.infer<typeof ScenarioBase> & { id: string; slug: string; created_at: string; updated_at: string };
+/** scenarios_public 뷰의 한 행: 시나리오 열 + 한 언어판의 공개 문구(기본은 활성 언어판). 내부 설정·나머지 대사는 빠진다. status 는 뷰가 게시본만 담아 상수. */
+export function scenarioPublic(s: ScenarioCols, lang: z.infer<typeof Lang> = s.lang): z.infer<typeof ScenarioPublic> {
+  const t = s.translations[lang];
+  return { id: s.id, slug: s.slug, status: 'published', lang, student_prefix: s.student_prefix, mentor_prefix: s.mentor_prefix, grade: s.grade, classification: s.classification,
+    name: t.name, description: t.description, problem: t.problem, chars: t.chars, greet: t.greet, elicit: t.elicit, created_at: s.created_at, updated_at: s.updated_at };
+}
 export const PracticeHome = z.object({
   groups: z.array(z.object({ id: Uuid, name: z.string() })),              // 0개면 "그룹 없음" 안내
   scenarios: z.array(ScenarioPublic.extend({ group_ids: z.array(Uuid) })), // groups 가 있는데 0개면 "할당 없음" 안내
@@ -91,7 +100,7 @@ export const PracticeHome = z.object({
 // ---- 연습 세션·발화 -----------------------------------------------------------------
 export const Turn = z.object({
   seq: z.number().int().positive(), speaker: z.enum(['teacher', 'student', 'mentor']), text: z.string(),
-  leverage: z.string().nullable(), object: z.string().nullable(), trigger: z.union([z.literal(1), z.literal(2), z.literal(3)]).nullable(),
+  leverage: z.string().nullable(), object: z.string().nullable(), trigger: TriggerNo.nullable(),
   created_at: Iso,
 });
 export const Verdict = z.enum(['none', 'clean', 'mixed', 'heavy', 'dist']);
@@ -116,7 +125,7 @@ export const TurnBody = z.object({ text: z.string().trim().min(1).max(2000) });
 export const SseEvent = z.union([   // done 이 ended 로 두 갈래라 discriminatedUnion 대신 union
   z.object({ type: z.literal('classification'), leverage: z.string(), object: z.string().nullable() }),  // 분류 기준 없으면 이벤트 자체가 없음
   z.object({ type: z.literal('student'), text: z.string(), final: z.boolean() }),
-  z.object({ type: z.literal('trigger'), trigger: z.union([z.literal(1), z.literal(2), z.literal(3)]) }),
+  z.object({ type: z.literal('trigger'), trigger: TriggerNo }),
   z.object({ type: z.literal('mentor'), text: z.string(), final: z.boolean() }),
   z.object({ type: z.literal('done'), ended: z.literal(false), turns: z.array(Turn) }),                 // 이번 한 턴에 기록된 발화(예비교사·학생·멘토)
   z.object({ type: z.literal('done'), ended: z.literal(true), report: SessionReport.nullable() }),      // END SESSION 발화 턴. 발화는 기록하지 않음
@@ -129,7 +138,7 @@ export const AdminState = z.object({
   mis: z.array(z.number().int().min(0).max(2)),          // 오개념별 카운터, 순서 = internal.misconceptions (ADR-0002)
   counts: z.record(z.string(), z.number().int().nonnegative()), // 레버리지별 누적 (= sessions.counts)
   goal_reached: z.boolean(),
-  last_trigger: z.union([z.literal(1), z.literal(2), z.literal(3)]).nullable(), // 세션 전체의 마지막 트리거 (turns.trigger 최신 non-null 행)
+  last_trigger: TriggerNo.nullable(), // 세션 전체의 마지막 트리거 (turns.trigger 최신 non-null 행)
 });
 export const AdminSseEvent = z.union([...SseEvent.options, AdminState.extend({ type: z.literal('state') })]);
 export const AdminSessionDetail = SessionDetail.extend({ state: AdminState });
@@ -175,6 +184,14 @@ export const AiRoleInput = z.object({
   key_source: z.enum(['own', 'student', 'mentor', 'analysis']), api_key: z.string().min(8).optional(),
   model: z.string().min(1), effort: Effort.nullable(),
 });
+
+/** 키 접두어 → 공급자(D-20·G-37): sk-ant- 를 sk- 보다 먼저 본다. 인식 불가 = null(저장은 400). 화면의 KeyDetect 와 목이 같은 규칙을 쓴다. */
+export const detectProvider = (key: string): z.infer<typeof Provider> | null => {
+  const k = key.trim();
+  return k.startsWith('sk-ant-') ? 'anthropic' : k.startsWith('AIza') ? 'gemini' : k.startsWith('sk-') ? 'openai' : null;
+};
+/** 접두어 + … + 끝 4자. 키 원문 대신 저장·표시하는 유일한 값(AI-3). */
+export const maskKey = (key: string) => { const k = key.trim(); return `${k.match(/^(sk-ant-|sk-proj-|sk-svcacct-|sk-|AIza)/)?.[0] ?? ''}…${k.slice(-4)}`; };
 
 export const Csv = z.string(); // text/csv; charset=utf-8, BOM, 열 = C13
 

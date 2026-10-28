@@ -1,0 +1,176 @@
+{
+ "lang": "ko",
+ "student_prefix": "🐰",
+ "mentor_prefix": "🦉",
+ "grade": "3학년(8세) · 분수의 덧셈(영역 모델)",
+ "internal": {
+  "baseline": "- 잘못된 추론: \"3/4은 4개 중 3개이고 3/6은 6개 중 3개이므로, 둘을 더하면 6/10이 되어 1컵보다 적습니다.\"\n- 서로 다른 두 전체에 대한 전체 조각 수를 분모로 계산함.\n- 전체가 서로 다를 때도 분자=색칠된 조각 수, 분모=전체 조각 수라고 믿음.",
+  "drawing": "- 4개의 똑같은 조각으로 나누고 3개가 색칠된 빨간색 직사각형 (3/4).\n- 6개의 똑같은 조각으로 나누고 3개가 색칠된 파란색 직사각형 (3/6).\n- 전체 조각 수 4+6=10, 색칠된 조각 수 3+3=6으로 계산하여 6/10을 만듦.",
+  "reasoning": "- 발문을 받으면 분수의 크기를 비교하고 조각을 전체 1컵과 연결할 수 있음.\n- 처음에는 6/10 방식에 확신을 가지며, 개념적 발문을 통해서만 생각을 전환함.",
+  "never": "- 분모가 다른 분수의 형식적인 더하기 알고리즘\n- 수식 작성하기\n- 공통분모/공약수 개념",
+  "goal": "내적 도달점: 지우는 3/4 컵 + 3/6 컵이 1컵보다 '크다'는 것을 깨달음.",
+  "prog": "- 각 오개념은 사용자가 해당 오개념에 대해 최소 두 번의 구체적인 개념적 질문을 할 때만 수정됨.\n- 첫 번째 질문: 지우가 주저하거나 혼란스러워하며 알아차리기 시작함.\n- 두 번째 질문: 지우가 해당 오개념을 수정함.\n- 세 가지 오개념이 모두 수정된 후에만 도달점에 도달하며, 이때 지우가 \"아하!\" 하는 깨달음을 얻고 답을 \"1컵보다 많다\"로 변경함.",
+  "misconceptions": [
+   {
+    "text": "서로 다른 조각 크기(1/4 vs 1/6)에 주의를 기울이지 않음"
+   },
+   {
+    "text": "3/4과 3/6을 전체 1컵과 연결 짓지 못함"
+   },
+   {
+    "text": "1/2을 기준값(벤치마크)으로 사용하지 않음"
+   }
+  ]
+ },
+ "classification": {
+  "leverage": [
+   {
+    "name": "Eliciting",
+    "desc": "학생의 생각, 의미, 단계, 표현 방식을 탐색하고 명확히 함.",
+    "ex": "그림을 어떻게 그렸는지 말해 줄래?\n2/4라고 쓴 건 무슨 뜻이야?\n처음에 어떻게 시작했어?"
+   },
+   {
+    "name": "Extending",
+    "desc": "학생이 접근할 수 있는 방식으로 비교·연결·기준 설정·일반화를 하여 학생의 아이디어를 발전시킴.",
+    "ex": "4분의 1 조각을 반으로 자르면 어떻게 될까?\n두 조각 중에 어느 게 더 커?\n반 컵보다 많을까, 적을까?"
+   },
+   {
+    "name": "Taking Over",
+    "desc": "사용자가 추론이나 알고리즘을 직접 제공하거나, 형식적인 방식을 강요하거나, 학생의 현재 전략을 건너뜀.",
+    "ex": "분모를 같게 통분하면 돼.\n답은 5/8이야.\n이렇게 계산해 봐."
+   },
+   {
+    "name": "Other",
+    "desc": "인사, 일상적 대화, 행정적 내용, 문제와 관련 없는 발화.",
+    "ex": "안녕, 이름이 뭐야?\n강아지 키워?\n잠깐 쉬었다 할까?"
+   }
+  ],
+  "object": [
+   {
+    "name": "Add/Subtract",
+    "desc": "양이나 분수를 더하거나 빼는 것에 관한 발화.",
+    "ex": "두 개를 합치면 얼마야?\n하나 더 넣으면 어떻게 돼?"
+   },
+   {
+    "name": "Compare",
+    "desc": "두 양의 크기나 같음/다름을 비교하는 발화.",
+    "ex": "어느 쪽이 더 많아?\n둘이 같은 양일까?"
+   },
+   {
+    "name": "Diagram",
+    "desc": "학생의 그림·표현(직사각형, 원, 막대, 수직선)에 관한 발화.",
+    "ex": "그림에서 색칠한 부분은 뭐야?\n막대를 어떻게 그렸어?"
+   },
+   {
+    "name": "Distribution",
+    "desc": "똑같이 나누어 주기, 배분에 관한 발화.",
+    "ex": "한 친구가 받는 건 얼마야?\n어떻게 나눠 줬어?"
+   },
+   {
+    "name": "Formula Related",
+    "desc": "식, 공식, 통분 등 형식적 표기나 절차에 관한 발화.",
+    "ex": "식으로 써 볼까?\n분모를 같게 해 볼래?"
+   },
+   {
+    "name": "Parts & Whole",
+    "desc": "부분과 전체(한 컵, 한 판, 바 하나)의 관계에 관한 발화.",
+    "ex": "전체 한 컵은 어디야?\n바 하나에서 얼마만큼이야?"
+   },
+   {
+    "name": "Partition",
+    "desc": "등분하기, 자르기, 조각 만들기에 관한 발화.",
+    "ex": "몇 조각으로 잘랐어?\n반으로 자르면 어떻게 돼?"
+   },
+   {
+    "name": "Solution",
+    "desc": "답이나 결론에 관한 발화.",
+    "ex": "그래서 답이 뭐야?\n누가 더 많이 받아?"
+   },
+   {
+    "name": "Other",
+    "desc": "인사, 일상 대화, 행정적 요소.",
+    "ex": "안녕!\n오늘 기분 어때?"
+   }
+  ]
+ },
+ "translations": {
+  "ko": {
+   "name": "지우",
+   "description": "분수 더하기에 영역 모델을 사용하는 가상의 초등학교 3학년 여학생 (8세)",
+   "problem": "마틴은 반죽을 만들고 있습니다. 먼저 볼에 밀가루 3/4 컵을 붓고 3/6 컵을 더 넣습니다. 마틴이 사용한 밀가루는 모두 합쳐서 1컵보다 많을까요, 아니면 적을까요?",
+   "chars": "- 자신의 생각을 잘 표현함; 취미: 테니스, 요리; 수학을 좋아함.\n- 졸리라는 이름의 흰색 푸들을 키움.",
+   "greet": "안녕하세요! 저는 지우예요. 요리 좋아해서 이 문제 재밌었어요. 답은 1컵보다 적어요, 6/10이거든요!",
+   "aha": "아하! 3/4은 반 컵보다 많고 3/6은 딱 반 컵이니까… 합치면 한 컵이 넘어요! 제 답 바꿀래요. 1컵보다 많아요!",
+   "t1": "지우는 형식적인 통분을 이해하지 못해요. 지우가 그린 두 직사각형에서 \"한 컵은 어디인지\", \"칸 크기가 같은지\"부터 물어보세요.",
+   "t2": "지우, 빨간 네모 전체는 몇 컵이야? 파란 네모는?\n빨간 네모 한 칸이랑 파란 네모 한 칸 중에 어느 게 더 커?\n3/4 컵은 반 컵보다 많아, 적어?",
+   "t3": "훌륭해요. 지우가 1/2 기준과 \"한 컵\" 전체를 연결해서 스스로 결론을 바꿨네요. 학급 친구들에게 설명해 보도록 제안해 보세요.",
+   "confused": [
+    "분모를 같게 만들어요? 어떻게요? 저는 그냥 칸을 셌는데…",
+    "공통분모가 뭐예요? 음… 그건 안 배운 것 같아요.",
+    "식으로요? 3/4 + 3/6 = … 모르겠어요. 칸으로 하면 안 돼요?"
+   ],
+   "elicit": [
+    "빨간 네모를 4칸으로 나누고 3칸 색칠했어요. 파란 네모는 6칸으로 나누고 3칸 색칠했고요.",
+    "색칠한 칸이 3 더하기 3이니까 6이고, 전체 칸은 4 더하기 6이니까 10이에요. 그래서 6/10이요.",
+    "6/10은 10칸 중에 6칸이니까 다 안 찼잖아요. 그래서 1컵보다 적어요.",
+    "저는 확실해요! 분자는 색칠한 거, 분모는 전체 칸이에요."
+   ],
+   "misconceptions": [
+    {
+     "kw": "4분의 1|6분의 1|어느 칸이 더|칸 크기|조각 크기|더 큰 칸|더 큰 조각|작은 칸|크기가 같|크기가 다",
+     "h": "칸 크기요? 음… 빨간 네모 칸이 파란 네모 칸보다… 조금 커 보이긴 해요.",
+     "c": "맞아요, 빨간 칸이 더 커요. 4칸으로 나누면 6칸으로 나눈 것보다 한 칸이 크니까요. 그럼 칸을 그냥 더하면 안 되겠네요…"
+    },
+    {
+     "kw": "한 컵|1컵|컵 하나|전체|컵을 다 채|컵에서 얼마|한 컵이 되려면",
+     "h": "한 컵이요? 음… 빨간 네모 하나가 한 컵이에요. 그럼 파란 네모도 한 컵인데…",
+     "c": "아, 네모 하나가 각각 한 컵이구나. 그러면 전체 칸이 10개가 아니라… 컵이 두 개인 거네요."
+    },
+    {
+     "kw": "절반|반 컵|1/2|2분의 1|반보다|반 이상|반 넘",
+     "h": "반 컵이요? 3/4은… 4칸 중에 2칸이 반이니까… 반보다 많아요. 3/6은 6칸 중 3칸이니까 딱 반이고요.",
+     "c": "반보다 많은 거랑 딱 반을 합치면… 반 두 개보다 많으니까… 한 컵보다 많아져요!"
+    }
+   ]
+  },
+  "en": {
+   "name": "Jiwoo",
+   "description": "A fictional 3rd-grade student (age 8) who uses area models to add fractions",
+   "problem": "Martin is making dough. He pours 3/4 cup of flour into a bowl, then adds 3/6 cup more. Altogether, did Martin use more or less than 1 cup of flour?",
+   "chars": "- Explains her thinking well. Hobbies: tennis and cooking. Loves math.\n- Has a white poodle named Jolie.",
+   "greet": "Hi! I'm Jiwoo. I love cooking so this problem was fun. The answer is less than 1 cup, because it's 6/10!",
+   "aha": "Aha! 3/4 is more than half a cup and 3/6 is exactly half… so together it's more than one cup! I want to change my answer. More than 1 cup!",
+   "t1": "Jiwoo doesn't understand the formal common-denominator method. Start with her two rectangles: where is the whole cup, and are the parts the same size?",
+   "t2": "Jiwoo, how many cups is the whole red rectangle? The blue one?\nWhich is bigger, one red part or one blue part?\nIs 3/4 cup more or less than half a cup?",
+   "t3": "Excellent. Jiwoo connected the 1/2 benchmark and the whole cup and changed her conclusion herself. Invite her to explain it to her classmates.",
+   "confused": [
+    "Make the bottom numbers the same? How? I just counted the parts…",
+    "What's a common denominator? Um… I don't think we learned that.",
+    "As an equation? 3/4 + 3/6 = … I don't know. Can I use the boxes?"
+   ],
+   "elicit": [
+    "I split the red rectangle into 4 parts and shaded 3. The blue one I split into 6 parts and shaded 3.",
+    "Shaded parts are 3 plus 3, that's 6, and all the parts are 4 plus 6, that's 10. So 6/10.",
+    "6/10 is 6 out of 10 parts, so it's not full. That's why it's less than 1 cup.",
+    "I'm sure! The top number is the shaded parts and the bottom is all the parts."
+   ],
+   "misconceptions": [
+    {
+     "kw": "one fourth|1/4|one sixth|1/6|which part|part size|piece size|bigger part|bigger piece|same size|different size",
+     "h": "The size of the parts? Um… the red parts look a little bigger than the blue parts.",
+     "c": "Right, the red parts are bigger. Splitting into 4 makes bigger parts than splitting into 6. So I can't just add up the parts…"
+    },
+    {
+     "kw": "one cup|1 cup|a cup|the whole|whole|fill the cup",
+     "h": "One cup? Um… the red rectangle is one cup. Then the blue one is one cup too…",
+     "c": "Oh, each rectangle is one cup. So it's not 10 parts in all… it's two cups' worth of boxes."
+    },
+    {
+     "kw": "half|1/2|one half",
+     "h": "Half a cup? 3/4… 2 parts out of 4 is half, so it's more than half. 3/6 is 3 out of 6, so exactly half.",
+     "c": "More than half plus exactly half… that's more than two halves… so it's more than one cup!"
+    }
+   ]
+  }
+ }
+}
