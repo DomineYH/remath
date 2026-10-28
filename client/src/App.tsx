@@ -12,6 +12,7 @@ import { ChatScreen } from './screens/ChatScreen.tsx';
 import { HistoryScreen } from './screens/HistoryScreen.tsx';
 import { LoginScreen } from './screens/LoginScreen.tsx';
 import { PracticeHomeScreen } from './screens/PracticeHomeScreen.tsx';
+import { ScenarioWizard } from './screens/ScenarioWizard.tsx';
 import { LoginGate, RequireRealm } from './session.tsx';
 
 const admin = (el: ReactNode) => <RequireRealm realm="admin">{el}</RequireRealm>;
@@ -28,6 +29,8 @@ export function App() {
           <Route path="/practice/history" element={teacher(<HistoryScreen />)} />
           <Route path="/practice/:id" element={teacher(<ChatScreen isAdminTest={false} />)} />
           <Route path="/admin/scenarios" element={admin(<AdminScenariosScreen />)} />
+          <Route path="/admin/scenarios/new" element={admin(<ScenarioWizard />)} />
+          <Route path="/admin/scenarios/:id" element={admin(<ScenarioWizard />)} />
           <Route path="/admin/scenarios/:id/test" element={admin(<ChatScreen isAdminTest />)} />
           <Route path="/admin/users" element={admin(<AdminUsersScreen />)} />
           <Route path="/admin/groups" element={admin(<AdminGroupsScreen />)} />

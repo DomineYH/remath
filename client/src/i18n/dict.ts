@@ -1,6 +1,7 @@
 // 화면 언어 사전 (B-8). 문구는 목업 그대로, 비밀번호 규칙만 PRD 9절(8자 이상 · 영문+숫자 · 공백 불가 — 목업의 4~8자는 옛 규칙).
 // err.<code> = 오류 코드 → 문구. 서버 message 는 화면에 내지 않는다.
 import type { ErrorCode } from '@remath/shared';
+import { wizard } from './wizard.ts';
 
 type Text = string | ((n: string) => string);
 type Entry = { ko: Text; en: Text };
@@ -27,6 +28,7 @@ const errors = {
 
 export const dict = {
   ...errors,
+  ...wizard,
   brandSub: { ko: '오개념 발문 코칭 시뮬레이터', en: 'Misconception questioning simulator' },
   uiAria: { ko: '화면 언어', en: 'Interface language' },
   themeDark: { ko: '다크 모드', en: 'Dark mode' },

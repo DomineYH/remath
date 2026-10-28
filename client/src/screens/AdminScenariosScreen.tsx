@@ -32,10 +32,10 @@ export function AdminScenariosScreen() {
   return (
     <AppShell account={<AccountMenu kind="admin" nickname={me.nickname} />} subnav={<AdminSubnav />}>
       <WorkflowStrip />
-      <PageHead eyebrow={t('adminEyebrow')} title={t('listTitle')} lead={t('listLead')} />
+      <PageHead eyebrow={t('adminEyebrow')} title={t('listTitle')} lead={t('listLead')} actions={<Button variant="primary" onClick={() => navigate('/admin/scenarios/new')}>{t('newScenario')}</Button>} />
       {err !== undefined && <ErrorLine message={errorText(t, err)} />}
       {list?.length === 0 && <p className="muted">{t('noScenarios')}</p>}
-      <div className="cards">{list?.map(s => <ScenarioCard key={s.id} s={s} onViewPrompt={() => view(s)} onCsv={s.session_count ? () => csv({ scenario_id: s.id }, 'scenario', s.slug) : undefined} onTestChat={() => navigate(`/admin/scenarios/${s.id}/test`)} />)}</div>
+      <div className="cards">{list?.map(s => <ScenarioCard key={s.id} s={s} onViewPrompt={() => view(s)} onEdit={() => navigate(`/admin/scenarios/${s.id}`)} onCsv={s.session_count ? () => csv({ scenario_id: s.id }, 'scenario', s.slug) : undefined} onTestChat={() => navigate(`/admin/scenarios/${s.id}/test`)} />)}</div>
       <Modal open={!!viewing} title={t('promptTitle', viewing?.name)} onClose={() => setViewing(undefined)} actions={<Button onClick={() => setViewing(undefined)}>{t('close')}</Button>}>
         {promptErr !== undefined && <ErrorLine message={errorText(t, promptErr)} />}
         {compiled && <CompiledPrompt compiled={compiled} />}

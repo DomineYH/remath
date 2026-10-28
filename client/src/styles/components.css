@@ -261,3 +261,45 @@ fieldset.field legend{font-weight:600;font-size:13.5px;padding:0;margin-bottom:6
 .effs button small{font-family:var(--body);font-size:10.5px;color:var(--fg-3)}
 .effs button[aria-checked="true"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 .effs button[aria-checked="true"] small{color:inherit;opacity:.8}
+
+/* scenario wizard (I-44): mockup rules; ≤640px steps show number circles only and the head tools shrink (ticket 17 #5, #6) */
+.wiz{display:grid;grid-template-columns:240px minmax(0,1fr);gap:24px}
+@media (max-width:860px){.wiz{grid-template-columns:1fr}}
+.steps{display:flex;flex-direction:column;gap:4px;position:sticky;top:84px;align-self:start}
+@media (max-width:860px){.steps{position:static;flex-direction:row;overflow-x:auto;padding-bottom:4px}}
+.steps button{text-align:left;border:1px solid transparent;background:transparent;color:var(--fg-2);padding:10px 12px;border-radius:12px;display:flex;gap:10px;align-items:center;white-space:nowrap;font-size:14px}
+.steps button .n{width:26px;height:26px;border-radius:50%;border:1.5px solid var(--line);display:grid;place-items:center;font-family:var(--display);font-weight:600;font-size:12px;flex:none}
+.steps button[aria-current="step"]{background:var(--surface);border-color:var(--line);color:var(--fg);font-weight:600}
+.steps button[aria-current="step"] .n{border-color:var(--accent);color:var(--accent)}
+.steps button.done .n{border-color:var(--teal);color:var(--teal)}
+@media (max-width:640px){.steps{overflow-x:visible;justify-content:space-between}.steps button{padding:6px}.steps button .lbl{display:none}
+  .wiz-tools .seg > span{display:none}.wiz-tools .btn{padding:6px 13px;font-size:13px}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:28px;min-width:0}
+@media (max-width:640px){.panel{padding:20px 16px}}
+.panel h3{font-size:22px;margin-bottom:6px}
+.panel .lead{color:var(--fg-2);margin:0 0 20px;max-width:68ch}
+fieldset.field{border:0;padding:0;margin-inline:0;min-width:0}
+fieldset.field legend{font-weight:600;font-size:13.5px;padding:0;margin-bottom:6px}
+.spine{font-family:var(--mono);font-size:11.5px;font-weight:500;color:var(--accent);background:var(--accent-soft);padding:1px 6px;border-radius:5px}
+.mis{border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;background:var(--bg)}
+.mis .mh{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.mis .mh b{font-family:var(--display);font-size:14px;color:var(--orange)}
+.mis .field{margin-bottom:8px}
+.wiz-nav{display:flex;justify-content:space-between;gap:10px;margin-top:20px;flex-wrap:wrap}
+.checks{display:flex;flex-direction:column;gap:8px}
+fieldset.checks{border:0;padding:0;margin:10px 0 0;min-width:0}
+.chk{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);font-size:14px}
+.chk input{width:auto;margin-top:4px}
+.st{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:999px;flex:none;font-weight:500}
+.st.ok{background:var(--teal-soft);color:var(--teal)}.st.no{background:var(--bad-soft);color:var(--bad)}.st.info{background:var(--accent-soft);color:var(--accent)}
+.emoji-sel{font-size:17px;padding-block:7px}
+.prefix-prev{display:flex;flex-direction:column;gap:2px;background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:12px;padding:12px 16px;margin:-2px 0 16px;font-size:14px;color:var(--fg)}
+.prefix-prev .eyebrow{color:var(--accent);font-size:11.5px;margin-bottom:2px}
+.grp-h{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:22px 0 10px;flex-wrap:wrap}
+.grp-h b{font-family:var(--display);font-size:17px;font-weight:600}
+.clsgrid{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+.clsrow{display:grid;grid-template-columns:160px minmax(0,1fr) minmax(0,1fr) auto;gap:8px;align-items:start;padding:10px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
+.clsrow.head{background:transparent;border:0;padding:0 10px;font-size:12px;color:var(--fg-3);font-weight:600;letter-spacing:.03em}
+.clsrow textarea{min-height:68px}
+.clsrow .c-name{font-weight:600}
+@media (max-width:700px){.clsrow{grid-template-columns:1fr}.clsrow.head{display:none}}
