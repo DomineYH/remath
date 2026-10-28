@@ -3,6 +3,7 @@ import { useCallback, useEffect, useId, useState } from 'react';
 import type * as S from '@remath/shared';
 import type { z } from 'zod';
 import { adminApi } from '../apis.ts';
+import { pickerName } from '../pickerName.ts';
 import { AccountMenu } from '../components/AccountMenu.tsx';
 import { AdminSubnav } from '../components/AdminSubnav.tsx';
 import { AppShell } from '../components/AppShell.tsx';
@@ -76,7 +77,7 @@ function GroupEditModal({ open, group, users, scenarios, onClose, onDone }: { op
       </Field>
       <CheckList legend={t('fMembers')} items={users.map(u => ({ id: u.id, label: u.nickname }))} value={members} onChange={setMembers} empty={t('noUsersYet')} />
       <CheckList legend={t('fScen')} hint={t('fScenH')} value={scen} onChange={setScen} empty={t('noScenarios')}
-        items={scenarios.map(s => ({ id: s.id, label: <>{s.student_prefix} {s.name} {s.status === 'draft' && <Pill tone="draft">{t('draft')}</Pill>}</> }))} />
+        items={scenarios.map(s => ({ id: s.id, label: <>{s.student_prefix} {pickerName(s, scenarios)} {s.status === 'draft' && <Pill tone="draft">{t('draft')}</Pill>}</> }))} />
       <ErrorLine message={err} />
     </Modal>
   );

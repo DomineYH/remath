@@ -14,6 +14,7 @@ import { SessionReport } from '../components/SessionReport.tsx';
 import { SessionsTable } from '../components/SessionsTable.tsx';
 import { TranscriptModal } from '../components/TranscriptModal.tsx';
 import { useDownloadCsv } from '../csv.ts';
+import { pickerName } from '../pickerName.ts';
 import { errorText, useT } from '../i18n/index.tsx';
 import { useMe } from '../session.tsx';
 import { localDateTime } from '../time.ts';
@@ -49,7 +50,7 @@ export function AdminLogsScreen() {
   useEffect(() => {
     Promise.all([adminApi.listUsers(), adminApi.listScenarios()]).then(([u, s]) => {
       setTeachers(u.map(x => ({ id: x.id, label: x.nickname })));
-      setScenarios(s.map(x => ({ id: x.id, label: x.name, slug: x.slug })));
+      setScenarios(s.map(x => ({ id: x.id, label: pickerName(x, s), slug: x.slug })));
     }, setErr);
   }, []);
   useEffect(() => { adminApi.listAdminSessions(filter).then(setRows, setErr); }, [filter]);

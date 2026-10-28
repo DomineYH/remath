@@ -190,3 +190,26 @@ test('saved ko scenario → switch to a blank English edition → save → the M
     await expect(students.last()).toContainText(line);
   }
 });
+
+// #33: a scenario made with "Fill example" shares the seeded name 서연, so both pickers add the slug to those two names only.
+test('fill example → save draft → the group modal and the logs filter tell the two 서연 apart by slug', async ({ page }) => {
+  await adminLogin(page);
+  await page.getByRole('button', { name: '＋ New scenario' }).click();
+  await page.getByRole('button', { name: 'Fill example (Seoyeon)' }).click();
+  await page.getByRole('button', { name: 'Save draft' }).click();
+  await expect(page).toHaveURL('/admin/scenarios');
+  await expect(page.getByRole('article').filter({ has: page.getByRole('heading', { name: '서연' }) })).toHaveCount(2);
+
+  await page.goto('/admin/groups');
+  await page.getByRole('button', { name: '＋ New group' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('checkbox', { name: /^🐱 서연 · seoyeon$/ })).toHaveCount(1);
+  await expect(dialog.getByRole('checkbox', { name: /^🐱 서연 · scenario-[0-9a-f]{8}\b/ })).toHaveCount(1);
+  await expect(dialog.getByRole('checkbox', { name: '🦊 가브리엘', exact: true })).toHaveCount(1);
+
+  await page.goto('/admin/logs');
+  const options = page.getByLabel('Scenario').locator('option');
+  await expect(options.filter({ hasText: /^서연 · seoyeon$/ })).toHaveCount(1);
+  await expect(options.filter({ hasText: /^서연 · scenario-[0-9a-f]{8}$/ })).toHaveCount(1);
+  await expect(options.filter({ hasText: /^가브리엘$/ })).toHaveCount(1);
+});
