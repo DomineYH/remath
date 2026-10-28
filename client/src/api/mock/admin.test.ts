@@ -1,24 +1,20 @@
-// A-5 (admin users·groups, getPractice's two empty cases) and the user.*·group.* rows of A-8, against the mock API only.
+// A-5 (admin users·groups, getPractice's two empty cases) and the user.*·group.* rows of A-8.
+// A-5 groups run on any target (seam.ts); A-8 is a [mock] group (it reads the audit rows from the store).
 import * as S from '@remath/shared';
 import { describe, expect, it } from 'vitest';
 import { ApiError, type Api } from '../types.ts';
-import { createMockApi, type MockOptions } from './index.ts';
-import { memoryStorage, seedDb, Store } from './store.ts';
+import { ADMIN_PW, describeMock, mockTarget, T0, target, type Target } from '../seam.ts';
 
-const T0 = '2026-10-28T00:00:00.000Z';
-const ADMIN_PW = 'Admin1234';
 const PW = 'abcd1234';
 
-async function setup() {
-  const store = new Store(memoryStorage(), () => seedDb(T0));
-  const mk = (realm: 'teacher' | 'admin', more: Partial<MockOptions> = {}) => createMockApi({ realm, store, now: () => T0, adminPassword: ADMIN_PW, ...more });
+async function setup(t: Target = target()) {
   /** Another browser: its own cookie jar on the same server. */
-  const browser = () => mk('teacher', { cookies: { teacher: null, admin: null } });
-  const admin = mk('admin');
+  const browser = () => t.browser()('teacher');
+  const admin = t.api('admin');
   await admin.adminLogin({ nickname: 'admin', password: ADMIN_PW });
   const ids = Object.fromEntries((await admin.listScenarios()).map(s => [s.slug, s.id]));
   const adminId = (await admin.adminMe()).id;
-  return { store, admin, browser, ids, adminId };
+  return { admin, browser, ids, adminId };
 }
 
 async function rejects(p: Promise<unknown>, status: number, code: string): Promise<ApiError> {
@@ -36,7 +32,7 @@ describe('A-5 users', () => {
   it('createUser returns a UserRow with no groups; the user can log in; listUsers shows teachers only', async () => {
     const { admin, browser } = await setup();
     const u = await admin.createUser({ nickname: 'Haneul', password: PW });
-    expect(S.UserRow.strict().parse(u)).toMatchObject({ nickname: 'Haneul', groups: [], scenario_count: 0, session_count: 0, created_at: T0, pw_updated_at: T0 });
+    expect(S.UserRow.strict().parse(u)).toMatchObject({ nickname: 'Haneul', groups: [], scenario_count: 0, session_count: 0, created_at: expect.any(String), pw_updated_at: expect.any(String) });
     expect(await admin.listUsers()).toEqual([u]);
     expect((await loginAs(browser(), 'Haneul')).id).toBe(u.id);
   });
@@ -130,7 +126,7 @@ describe('A-5 groups', () => {
 
 describe('A-5 getPractice: no group → no scenario → visible (teacher_scenarios = published ∧ in my group)', () => {
   it('walks the three states and keeps drafts and other groups out', async () => {
-    const { admin, browser, ids, store } = await setup();
+    const { admin, browser, ids } = await setup();
     const u = await admin.createUser({ nickname: 'Haneul', password: PW }), other = await admin.createUser({ nickname: 'Bora', password: PW });
     const t = browser();
     await loginAs(t, 'Haneul');
@@ -140,16 +136,16 @@ describe('A-5 getPractice: no group → no scenario → visible (teacher_scenari
     await admin.createGroup({ name: 'B반', member_ids: [other.id], scenario_ids: [ids.noah] });
     await admin.updateGroup(g.id, { name: 'A반', member_ids: [u.id], scenario_ids: [ids.seoyeon, ids.jiwoo] });
     const g2 = await admin.createGroup({ name: 'C반', member_ids: [u.id], scenario_ids: [ids.seoyeon] });
-    store.db.scenarios.find(s => s.id === ids.jiwoo)!.status = 'draft';   // drafts never reach teachers (the wizard is #26)
+    await admin.updateScenario(ids.jiwoo, S.ScenarioInput.parse(await admin.getScenario(ids.jiwoo)));   // PUT → draft: drafts never reach teachers
     const home = await t.getPractice();
     expect(home.groups.map(x => x.name)).toEqual(['A반', 'C반']);
     expect(home.scenarios.map(s => [s.slug, s.group_ids])).toEqual([['seoyeon', [g.id, g2.id]]]);
   });
 });
 
-describe('A-8 audit rows for user.* and group.*', () => {
+describeMock('A-8 audit rows for user.* and group.*', () => {
   it('one row after each successful write, with the ticket-20 meta; failed writes leave none', async () => {
-    const { admin, store, ids, adminId, browser } = await setup();
+    const m = mockTarget(), { store } = m, { admin, ids, adminId, browser } = await setup(m);
     const rows = () => store.db.audit_log.filter(r => r.action.startsWith('user.') || r.action.startsWith('group.'));
     const u = await admin.createUser({ nickname: 'Haneul', password: PW });
     await rejects(admin.createUser({ nickname: 'haneul', password: PW }), 409, 'nickname_taken');

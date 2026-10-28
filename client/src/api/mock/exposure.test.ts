@@ -1,12 +1,10 @@
 // A-1: every response and turn event the teacher realm can reach, walked deep at runtime: no internal keys,
 // and scenario rows are exactly the public scenario view (+ group_ids). The schema-level twin is contract.test (C-2).
+// HTTP group (seam.ts): runs on any target.
 import * as S from '@remath/shared';
 import { describe, expect, it } from 'vitest';
-import { createMockApi } from './index.ts';
-import { memoryStorage, seedDb, Store } from './store.ts';
+import { ADMIN_PW, target } from '../seam.ts';
 
-const T0 = '2026-10-28T00:00:00.000Z';
-const ADMIN_PW = 'Admin1234';
 const FORBIDDEN = ['internal', 'compiled_prompt', 'progress', 'counts', 'summary', 'password', 'password_hash', 'state'];
 const L1 = ['안녕, 네 이름이 뭐야?', '어떻게 풀었는지 말해 줄래?', '한 친구가 받는 걸 모두 합치면 얼마야?', '그러면 한 사람이 받는 게 전부 얼마인지 하나로 말해 볼래?', '4분의 1 조각을 반으로 자르면 어떻게 될까?', '그 조각을 더 작게 자르면 8분의 1이 몇 개야?', '8분의 1 조각이 다 해서 몇 개야?', '모두 몇 조각인지 세어 볼래?'];
 
@@ -24,9 +22,7 @@ describe('A-1 teacher exposure', () => {
     expect(leaks([{ a: { internal: {} } }, { report: { total: 0, reached: false, verdict: 'none', rows: [], summary: null }, summary: 'x' }])).toEqual(['$[0].a.internal', '$[1].summary']);
   });
   it('a whole teacher journey leaks no internal key; scenario rows pass ScenarioPublic.extend({group_ids}).strict()', async () => {
-    const store = new Store(memoryStorage(), () => seedDb(T0));
-    const admin = createMockApi({ realm: 'admin', store, now: () => T0, adminPassword: ADMIN_PW });
-    const teacher = createMockApi({ realm: 'teacher', store, now: () => T0, adminPassword: ADMIN_PW });
+    const t = target(), admin = t.api('admin'), teacher = t.api('teacher');
     await admin.adminLogin({ nickname: 'admin', password: ADMIN_PW });
     const ids = Object.fromEntries((await admin.listScenarios()).map(s => [s.slug, s.id]));
 

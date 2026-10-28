@@ -1,18 +1,16 @@
 // A-4 (part): the five samples load published with compiled prompts, getScenarioPrompt = compileScenario. A-10 (part): getProviders.
+// HTTP groups run on any target (seam.ts); [mock] groups read the stored compiled prompt, inject templates (c7) or read audit rows (A-8).
 import * as S from '@remath/shared';
 import { compileScenario, TEMPLATES } from '@remath/prompts';
 import seoyeon from '@remath/seed/scenarios/seoyeon.json';
 import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 import { ApiError } from '../types.ts';
-import { createMockApi, type MockOptions } from './index.ts';
-import { memoryStorage, seedDb, Store } from './store.ts';
+import { ADMIN_PW, describeMock, mockTarget, T0, target, type Target } from '../seam.ts';
 
-const T0 = '2026-10-28T00:00:00.000Z';
-async function admin() {
-  const store = new Store(memoryStorage(), () => seedDb(T0));
-  const api = createMockApi({ realm: 'admin', store, now: () => T0, adminPassword: 'Admin1234' });
-  await api.adminLogin({ nickname: 'admin', password: 'Admin1234' });
+async function admin(t: Target = target()) {
+  const api = t.api('admin');
+  await api.adminLogin({ nickname: 'admin', password: ADMIN_PW });
   return api;
 }
 
@@ -42,7 +40,7 @@ describe('sample scenarios (H-38, G-33)', () => {
   it('unknown id → 404; teacher realm → 401', async () => {
     const api = await admin();
     await expect(api.getScenarioPrompt('00000000-0000-4000-8000-0000000000ff')).rejects.toSatisfy(e => e instanceof ApiError && e.status === 404);
-    const teacher = createMockApi({ realm: 'teacher', store: new Store(memoryStorage(), () => seedDb(T0)), now: () => T0 });
+    const teacher = target().api('teacher');
     await expect(teacher.getProviders()).rejects.toSatisfy(e => e instanceof ApiError && e.status === 401);
   });
 });
@@ -61,12 +59,10 @@ describe('providers (A-10 part, D-20)', () => {
 const SEO = S.ScenarioInput.parse(seoyeon);
 type Input = typeof SEO;
 const PW = 'abcd1234';
-async function env(extra: Partial<MockOptions> = {}) {
-  const store = new Store(memoryStorage(), () => seedDb(T0));
-  const mk = (realm: 'teacher' | 'admin') => createMockApi({ realm, store, now: () => T0, adminPassword: 'Admin1234', ...extra });
-  const a = mk('admin'), teacher = mk('teacher');
-  await a.adminLogin({ nickname: 'admin', password: 'Admin1234' });
-  return { store, admin: a, teacher, adminId: (await a.adminMe()).id };
+async function env(t: Target = target()) {
+  const a = t.api('admin'), teacher = t.api('teacher');
+  await a.adminLogin({ nickname: 'admin', password: ADMIN_PW });
+  return { admin: a, teacher, adminId: (await a.adminMe()).id };
 }
 async function rejects(p: Promise<unknown>, status: number, code: string): Promise<ApiError> {
   try { await p; } catch (e) {
@@ -78,12 +74,13 @@ async function rejects(p: Promise<unknown>, status: number, code: string): Promi
 }
 const ALL = ['m1', 'm2', 'm3', 'm4'] as const;
 const ko = (patch: Partial<Input['translations']['ko']>): Input => ({ ...SEO, translations: { ...SEO.translations, ko: { ...SEO.translations.ko, ...patch } } });
+const statuses = (r: z.infer<typeof S.ReviewResult>) => Object.fromEntries(r.auto.map(c => [c.id, c.status]));
 
 describe('A-4 create and update', () => {
   it('createScenario → draft with a server slug and no compiled prompt; getScenario returns both editions', async () => {
     const { admin } = await env();
     const s = await admin.createScenario(SEO);
-    expect(S.ScenarioAdmin.strict().parse(s)).toMatchObject({ status: 'draft', groups: [], session_count: 0, created_at: T0 });
+    expect(S.ScenarioAdmin.strict().parse(s)).toMatchObject({ status: 'draft', groups: [], session_count: 0, created_at: expect.any(String) });
     expect(s.slug).toMatch(/^[a-z0-9-]+$/);
     expect((await admin.listScenarios()).map(x => x.slug)).not.toContain(undefined);
     expect(new Set((await admin.listScenarios()).map(x => x.slug)).size).toBe(6);
@@ -96,13 +93,12 @@ describe('A-4 create and update', () => {
     expect(await admin.listScenarios()).toHaveLength(5);
   });
   it('PUT on a published scenario → draft, compiled prompt dropped; the teacher can no longer start it (403) but the admin can', async () => {
-    const { admin, teacher, store } = await env();
+    const { admin, teacher } = await env();
     const id = (await admin.listScenarios()).find(s => s.slug === 'seoyeon')!.id;
     const me = await teacher.signup({ nickname: 'Haneul', password: PW });
     await admin.createGroup({ name: 'A', member_ids: [me.id], scenario_ids: [id] });
     const s = await admin.updateScenario(id, ko({ name: '서연이' }));
     expect([s.status, s.slug, s.translations.ko.name]).toEqual(['draft', 'seoyeon', '서연이']);
-    expect(store.db.scenarios.find(x => x.id === id)!.compiled_prompt).toBeNull();
     expect((await teacher.getPractice()).scenarios).toEqual([]);
     await rejects(teacher.startSession({ scenario_id: id }), 403, 'forbidden');
     expect((await admin.startSession({ scenario_id: id })).turns[0].text).toBe(SEO.translations.ko.greet);
@@ -111,7 +107,6 @@ describe('A-4 create and update', () => {
 });
 
 describe('A-4 review c1–c7 on the active edition', () => {
-  const statuses = (r: z.infer<typeof S.ReviewResult>) => Object.fromEntries(r.auto.map(c => [c.id, c.status]));
   it('Seoyeon passes all seven; no classification → c6 INFO and still publishable', async () => {
     const { admin } = await env();
     const r = await admin.reviewScenario((await admin.createScenario(SEO)).id);
@@ -135,12 +130,6 @@ describe('A-4 review c1–c7 on the active edition', () => {
       expect(r.publishable).toBe(false);
     });
   }
-  it('c7 FAIL when the two template editions differ in structure', async () => {
-    const broken = { ...TEMPLATES, mentor: { ...TEMPLATES.mentor, en: TEMPLATES.mentor.en + '\n{{EXTRA_KEY}}' } };
-    const { admin } = await env({ templates: broken });
-    const r = await admin.reviewScenario((await admin.createScenario(SEO)).id);
-    expect([statuses(r).c7, r.publishable]).toEqual(['fail', false]);
-  });
   it('judges the active edition: an empty English t1 fails c3 only once lang is en', async () => {
     const { admin } = await env();
     const enBroken = { ...SEO, translations: { ...SEO.translations, en: { ...SEO.translations.en, t1: '' } } };
@@ -162,13 +151,12 @@ describe('A-4 publish', () => {
     expect((await admin.getScenario(good.id)).status).toBe('draft');
     await rejects(admin.publishScenario(crypto.randomUUID(), { confirmed: [...ALL] }), 404, 'not_found');
   });
-  it('success → published, the compiled prompt is stored, getScenarioPrompt = compileScenario of the active edition', async () => {
-    const { admin, store } = await env();
+  it('success → published, getScenarioPrompt = compileScenario of the active edition', async () => {
+    const { admin } = await env();
     const en = { ...SEO, lang: 'en' as const };
     const s = await admin.publishScenario((await admin.createScenario(en)).id, { confirmed: [...ALL] });
     expect(S.ScenarioAdmin.strict().parse(s).status).toBe('published');
     const expected = compileScenario(SEO, SEO.translations.en, 'en', TEMPLATES);
-    expect(store.db.scenarios.find(x => x.id === s.id)!.compiled_prompt).toEqual(expected);
     expect(await admin.getScenarioPrompt(s.id)).toEqual(expected);
     expect(expected.student).toContain(SEO.translations.en.name);
   });
@@ -191,9 +179,26 @@ describe('A-4 delete', () => {
   });
 });
 
-describe('A-8 audit rows for scenario.*', () => {
+describeMock('A-4 stored compiled prompt, template injection', () => {
+  it('PUT on a published scenario stores null; publish stores compileScenario of the active edition', async () => {
+    const t = mockTarget(), { admin } = await env(t), row = (id: string) => t.store.db.scenarios.find(x => x.id === id)!;
+    const id = (await admin.listScenarios()).find(s => s.slug === 'seoyeon')!.id;
+    await admin.updateScenario(id, ko({ name: '서연이' }));
+    expect(row(id).compiled_prompt).toBeNull();
+    const s = await admin.publishScenario((await admin.createScenario({ ...SEO, lang: 'en' })).id, { confirmed: [...ALL] });
+    expect(row(s.id).compiled_prompt).toEqual(compileScenario(SEO, SEO.translations.en, 'en', TEMPLATES));
+  });
+  it('c7 FAIL when the two template editions differ in structure', async () => {
+    const broken = { ...TEMPLATES, mentor: { ...TEMPLATES.mentor, en: TEMPLATES.mentor.en + '\n{{EXTRA_KEY}}' } };
+    const { admin } = await env(mockTarget({ templates: broken }));
+    const r = await admin.reviewScenario((await admin.createScenario(SEO)).id);
+    expect([statuses(r).c7, r.publishable]).toEqual(['fail', false]);
+  });
+});
+
+describeMock('A-8 audit rows for scenario.*', () => {
   it('one row after each successful write with {slug} (publish adds lang); failed writes leave none', async () => {
-    const { admin, store, adminId } = await env();
+    const t = mockTarget(), { store } = t, { admin, adminId } = await env(t);
     const rows = () => store.db.audit_log.filter(r => r.action.startsWith('scenario.'));
     const s = await admin.createScenario(SEO);
     await rejects(admin.createScenario(ko({ misconceptions: [] })), 400, 'validation_failed');

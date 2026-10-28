@@ -26,6 +26,17 @@ npm run e2e           # Playwright in mock mode: walking skeleton (signup, admin
 npm run check:bundle  # production build has no mock storage key, mock marker or admin password; a mock build has all three
 ```
 
+### Seam A groups and targets
+
+The API-boundary suites in `client/src/api/mock/*.test.ts` reach the server only through a target from `client/src/api/seam.ts`: `api(realm)` is this browser, `browser()` another browser (own cookie jar) on the same server. The default target is the mock (`mockTarget`); `useTarget(make)` swaps in another one (the HTTP run). Groups named `[mock] …` (`describeMock`) are skipped on an injected target.
+
+| Target | Groups (file) |
+|---|---|
+| any (HTTP-runnable) | A-1 teacher exposure (exposure) · A-2 practice-session rules, A-2 turn rules, A-3 turn pipeline, A-6 admin state (sessions) · sample scenarios, A-4 create·update·review·publish·delete, A-10 providers (scenarios) · A-5 users, groups, getPractice (admin) · A-5 signup·validation, password change, logout·realms (mock) · A-7 sessions CSV, A-10 AI settings (logs) |
+| mock only | A-9 initial state, admin password from env, storage; A-8 audit helper (mock) · A-2 reload, `turnLimit` (sessions) · A-4 stored compiled prompt, `templates` c7 (scenarios) · A-10 stored keys, A-8 audit log (logs) · A-8 user·group rows (admin) · A-8 scenario rows (scenarios) |
+
+HTTP groups assert on `Api` results only: no store reads, and time values (`started_at`, `created_at`, …) only for presence and order. An injected target must be a server seeded like the mock (admin password `ADMIN_PW`, the five samples) and reset between tests.
+
 ## G2 demo checklist
 
 Mock mode (`npm run dev:mock -w client`, see Setup), in a fresh browser profile. Open `/admin`.
