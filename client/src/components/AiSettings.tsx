@@ -156,7 +156,7 @@ export function AiBotCard({ role, settings, providers, onSaved }: { role: Role; 
         ? hasKey && !editing
           ? <KeyBox s={s} providers={providers} onChange={() => setEditing(true)} />
           : <KeyInput value={key} providers={providers} onChange={setKey} onCancel={hasKey ? () => { setEditing(false); setKey(''); } : undefined} />
-        : <p className="hint">{provider ? <>{t('sharedFrom', t(NAME[src as Role]))} · <span className="mono">{shared!.key_masked}</span></> : t('sharedLost')}</p>}
+        : <p className="hint">{provider ? <>{t('sharedFrom', t(NAME[src as Role]))} · <span className="mono">{shared!.key_masked}</span></> : t('sharedNoKey', t(NAME[src as Role]))}</p>}
       {P && <>
         <ModelSelect provider={P} pick={isCustom ? CUSTOM : m!.id} custom={custom} onPick={v => { setPick(v); setEffort(undefined); }} onCustom={setCustom} />
         <EffortRadios efforts={efforts} value={eff} def={def} param={P.param} onChange={setEffort} />

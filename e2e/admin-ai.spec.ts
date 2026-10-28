@@ -65,3 +65,17 @@ test('scenario card "Chats CSV" downloads that scenario once it has a session', 
   const [download] = await Promise.all([page.waitForEvent('download'), gabriel.getByRole('button', { name: 'Chats CSV (1)' }).click()]);
   expect(download.suggestedFilename()).toMatch(/^remath_scenario_gabriel_\d{8}\.csv$/);
 });
+
+// #33: on a fresh state no key was ever registered, so the sharing bots name the bot that has no key yet (not "gone").
+test('AI settings, fresh state: the bots sharing the Student bot key say it has no key yet', async ({ page }) => {
+  await page.goto('/admin/ai');
+  for (const bot of ['Mentor bot', 'Analysis bot']) {
+    await expect(page.getByRole('article').filter({ has: page.getByRole('heading', { name: bot }) }))
+      .toContainText('Student bot has no key yet. Register a key there, or choose its own key.');
+  }
+  await expect(page.locator('body')).not.toContainText('gone');
+  await page.getByRole('group', { name: 'Interface language' }).getByRole('button', { name: '한' }).click();
+  await expect(page.getByRole('article').filter({ has: page.getByRole('heading', { name: '멘토 챗봇' }) }))
+    .toContainText('학생 챗봇에 아직 키가 없습니다. 그 봇에서 키를 등록하거나 자체 키를 선택하세요.');
+  await expect(page.locator('body')).not.toContainText('함께 쓰던 키가 없습니다');
+});
