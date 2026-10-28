@@ -13,6 +13,7 @@ import { ConfirmModal } from '../components/ConfirmModal.tsx';
 import { DataTable } from '../components/DataTable.tsx';
 import { ErrorLine } from '../components/ErrorLine.tsx';
 import { useDownloadCsv } from '../csv.ts';
+import { localDate } from '../time.ts';
 import { Field } from '../components/Field.tsx';
 import { Modal } from '../components/Modal.tsx';
 import { PageHead } from '../components/PageHead.tsx';
@@ -41,8 +42,8 @@ export function AdminUsersScreen() {
       u.groups.length ? u.groups.map(g => <Pill key={g.id}>{g.name}</Pill>) : <Pill tone="draft">{t('noGroups')}</Pill>,
       u.scenario_count ? t('scenN', String(u.scenario_count)) : <Pill tone="draft">{t('noAccessShort')}</Pill>,
       <span className="mono">{u.session_count}</span>,
-      <span className="mono">{u.created_at.slice(0, 10)}</span>,
-      <span className="mono">{u.pw_updated_at.slice(0, 10)}</span>,
+      <span className="mono">{localDate(u.created_at)}</span>,
+      <span className="mono">{localDate(u.pw_updated_at)}</span>,
       <div className="acts-cell">
         {/* eslint-disable-next-line no-restricted-syntax -- file format name */}
         <Button size="sm" disabled={!u.session_count} onClick={() => csv({ user_id: u.id }, 'user', u.nickname)} aria-label={`CSV · ${u.nickname}`}>CSV</Button>

@@ -16,10 +16,10 @@ import { TranscriptModal } from '../components/TranscriptModal.tsx';
 import { useDownloadCsv } from '../csv.ts';
 import { errorText, useT } from '../i18n/index.tsx';
 import { useMe } from '../session.tsx';
+import { localDateTime } from '../time.ts';
 
 type Filter = z.infer<typeof S.SessionFilter>;
 type Option = { id: string; label: string };
-const when = (iso: string) => iso.slice(0, 16).replace('T', ' ');
 
 /** 사용자·시나리오 select 두 개 + CSV 버튼. 빈 값 = 전체. */
 function LogFilters({ users, scenarios, filter, count, onChange, onCsv }: { users: Option[]; scenarios: Option[]; filter: Filter; count: number; onChange: (f: Filter) => void; onCsv: () => void }) {
@@ -66,7 +66,7 @@ export function AdminLogsScreen() {
       <LogFilters users={users} scenarios={scenarios} filter={filter} count={rows?.length ?? 0} onChange={setFilter} onCsv={download} />
       {err !== undefined && <ErrorLine message={errorText(t, err)} />}
       {rows && <SessionsTable admin rows={rows} label={t('logsTitle')} empty={t('noLogs')} onView={r => adminApi.getAdminSession(r.id).then(setOpen, setErr)} />}
-      <TranscriptModal open={!!open} title={s ? `${s.nickname} · ${s.scenario_name}` : ''} sub={s && `${when(s.started_at)} – ${s.ended_at ? when(s.ended_at) : '…'}`}
+      <TranscriptModal open={!!open} title={s ? `${s.nickname} · ${s.scenario_name}` : ''} sub={s && `${localDateTime(s.started_at)} – ${s.ended_at ? localDateTime(s.ended_at) : '…'}`}
         turns={open?.turns ?? []} onClose={() => setOpen(undefined)}
         report={open?.report ? <SessionReport report={open.report} /> : s?.ended_at && <SystemLine>{t('endNoCls')}</SystemLine>} />
     </AppShell>

@@ -2,6 +2,7 @@ import { useId } from 'react';
 import type * as S from '@remath/shared';
 import type { z } from 'zod';
 import { useT } from '../i18n/index.tsx';
+import { localDate } from '../time.ts';
 import { Button } from './Button.tsx';
 
 type Summary = z.infer<typeof S.ScenarioSummary>;
@@ -31,7 +32,7 @@ export function ScenarioCard({ s, onViewPrompt, onEdit, onCsv, onTestChat }: { s
         <span className="pill">{t('trig3')}</span>
         <span className={`pill ${cls.leverage ? '' : 'draft'}`}>{cls.leverage ? t('clsCount', `${cls.leverage}·${cls.object}`) : t('clsOff')}</span>
         <span className="pill lang">{s.lang === 'en' ? 'English' : '한국어'}</span>
-        <span className="mono">{t('updated', s.updated_at.slice(0, 10))}</span>
+        <span className="mono">{t('updated', localDate(s.updated_at))}</span>
       </div>
       <div className="acts">
         <Button size="sm" onClick={onEdit} disabled={!onEdit}>{t('edit')}</Button>
