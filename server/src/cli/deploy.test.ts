@@ -1,6 +1,7 @@
-// scripts/deploy.sh 의 순서와 5단계 전환(H-29 5)을 가짜 npm·docker·curl·psql 로 고정한다. 실 psql·Docker 는 수동(T-4).
+// scripts/deploy.sh 의 순서·멈춤과 deploy/compose.yaml 의 설정을 고정한다. npm·docker·curl·psql 은 가짜; 실 psql·Docker 는 수동(T-4).
+// env 파일 교체 자체는 env-swap.test.ts 가 본다.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,34 +10,29 @@ import { describe, expect, it } from 'vitest';
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const SCRIPT = join(ROOT, 'scripts/deploy.sh');
 
-// 가짜 도구는 받은 인자를 $LOG 에 한 줄씩 남긴다. docker run 은 --env-file 내용을 "컨테이너 env"로 보관한다(STALE=1 이면 보관하지 않음).
+// 가짜 도구는 받은 인자를 $LOG 에 남긴다. FAIL = 실패시킬 호출의 일부 문자열(예: db:smoke, "compose -f deploy/compose.yaml up").
 const STUBS: Record<string, string> = {
   node: 'exit 0', psql: 'exit 0',
-  npm: 'echo "npm $*" >> "$LOG"; case "$*" in *"$FAIL_STEP"*) [ -n "$FAIL_STEP" ] && exit 1 ;; esac; exit 0',
-  curl: 'for a; do url="$a"; done; case "$url" in */healthz) printf 200 ;; */api/auth/me) printf "${ME_CODE:-401}" ;; esac',
-  docker: `echo "docker $*" >> "$LOG"
-case "$1 $2" in
-  "inspect -f") case "$3" in *Image*) echo remath:old ;; *) cat "$STATE/container.env" ;; esac ;;
-  run*) [ -n "$STALE" ] && exit 0; while [ $# -gt 0 ]; do [ "$1" = --env-file ] && cp "$2" "$STATE/container.env"; shift; done ;;
-esac
-exit 0`,
+  npm: 'echo "npm $* REMATH_ENV_FILE=$REMATH_ENV_FILE" >> "$LOG"; case "$*" in *"$FAIL"*) [ -n "$FAIL" ] && exit 1 ;; esac; exit 0',
+  docker: 'echo "docker $*" >> "$LOG"; case "$*" in *"$FAIL"*) [ -n "$FAIL" ] && exit 1 ;; esac; exit 0',
+  curl: 'for a; do url="$a"; done; echo "curl $url" >> "$LOG"; case "$url" in */healthz) printf 200 ;; */api/auth/me) printf "${ME_CODE:-401}" ;; esac',
 };
-const OLD = 'MOCK_LLM=1\nSUPABASE_URL=https://old.supabase.co\nSUPABASE_SERVICE_KEY=old-service\nPORT=3000\nSUPABASE_ANON_KEY=old-anon\n';
 const NEW = { SUPABASE_URL: 'https://new.supabase.co', SUPABASE_SERVICE_KEY: 'new-service', SUPABASE_DB_URL: 'postgres://u:p@new:5432/postgres', SUPABASE_ANON_KEY: 'new-anon' };
 
 function deploy(args: string[] = [], extra: Record<string, string> = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'deploy-test-')), bin = join(dir, 'bin');
-  execFileSync('mkdir', [bin]);
+  mkdirSync(bin);
   for (const [name, body] of Object.entries(STUBS)) { writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`); chmodSync(join(bin, name), 0o755); }
-  const envFile = join(dir, 'server.env'), log = join(dir, 'log');
-  writeFileSync(envFile, OLD, { mode: 0o600 });
-  writeFileSync(join(dir, 'container.env'), OLD);
+  writeFileSync(join(dir, 'server.env'), 'MOCK_LLM=1\n', { mode: 0o600 });
+  const log = join(dir, 'log');
   writeFileSync(log, '');
+  // REMATH_ENV_FILE 는 상대 경로로 준다: deploy.sh 가 절대 경로로 바꿔 넘겨야 한다.
   const r = spawnSync('bash', [SCRIPT, ...args], {
-    encoding: 'utf8',
-    env: { PATH: `${bin}:/usr/bin:/bin`, LOG: log, STATE: dir, REMATH_ENV_FILE: envFile, ADMIN_INITIAL_PASSWORD: 'admin1234', ...NEW, ...extra },
+    cwd: dir, encoding: 'utf8',
+    env: { PATH: `${bin}:/usr/bin:/bin`, LOG: log, REMATH_ENV_FILE: 'server.env', ADMIN_INITIAL_PASSWORD: 'admin1234', ...NEW, ...extra },
   });
-  return { ...r, envFile, calls: readFileSync(log, 'utf8').trim().split('\n').filter(Boolean) };
+  const calls = readFileSync(log, 'utf8').trim().split('\n').filter(Boolean);
+  return { ...r, dir, calls, steps: calls.filter(c => !/^docker (info|compose version)|^curl/.test(c)) };
 }
 
 describe('scripts/deploy.sh', () => {
@@ -44,49 +40,67 @@ describe('scripts/deploy.sh', () => {
     expect(execFileSync('git', ['ls-files', '-s', 'scripts/deploy.sh'], { cwd: ROOT, encoding: 'utf8' })).toMatch(/^100755 /);
   });
 
-  it('migrate → seed → smoke, then swaps the four SUPABASE_* lines and recreates the container from the same image', () => {
+  it('migrate → seed → smoke → env:swap → compose up --force-recreate, then /healthz and the DB probe', () => {
     const r = deploy(['--with-samples']);
     expect(r.stderr).toBe('');
     expect(r.status).toBe(0);
-    expect(r.calls.filter(c => !c.startsWith('docker info') && !c.startsWith('docker container inspect') && !c.startsWith('docker inspect'))).toEqual([
-      'npm run --silent db:migrate -w server',
-      'npm run --silent db:seed -w server -- --with-samples',
-      'npm run --silent db:smoke -w server -- --with-samples',
-      'docker rm -f remath',
-      `docker run -d --name remath --restart unless-stopped --env-file ${r.envFile} -p 3000:3000 remath:old`,
+    const env = `REMATH_ENV_FILE=${join(r.dir, 'server.env')}`;
+    expect(r.steps).toEqual([
+      'docker compose -f deploy/compose.yaml config -q',
+      `npm run --silent db:migrate -w server ${env}`,
+      `npm run --silent db:seed -w server -- --with-samples ${env}`,
+      `npm run --silent db:smoke -w server -- --with-samples ${env}`,
+      `npm run --silent env:swap -w server ${env}`,
+      'docker compose -f deploy/compose.yaml up -d --force-recreate',
     ]);
-    // 다른 줄은 그대로, SUPABASE_* 4개만 새 값, 권한 600, 이전 판은 .prev
-    expect(readFileSync(r.envFile, 'utf8')).toBe('MOCK_LLM=1\nPORT=3000\n' + Object.entries(NEW).map(([k, v]) => `${k}=${v}\n`).join(''));
-    expect(statSync(r.envFile).mode & 0o777).toBe(0o600);
-    expect(readFileSync(r.envFile + '.prev', 'utf8')).toBe(OLD);
+    expect(r.calls.filter(c => c.startsWith('curl'))).toEqual(['curl http://127.0.0.1:3000/healthz', 'curl http://127.0.0.1:3000/api/auth/me']);
+    expect(r.stdout).toMatch(/new DB answers/);
   });
 
-  it('a failed smoke leaves the env file and the container alone', () => {
-    const r = deploy([], { FAIL_STEP: 'db:smoke' });
-    expect(r.status).not.toBe(0);
-    expect(readFileSync(r.envFile, 'utf8')).toBe(OLD);
-    expect(existsSync(r.envFile + '.prev')).toBe(false);
-    expect(r.calls.some(c => /^docker (rm|run|restart)/.test(c))).toBe(false);
+  it('checks the address compose binds to', () => {
+    expect(deploy([], { REMATH_BIND: '10.0.0.5', REMATH_PORT: '8080' }).calls.filter(c => c.startsWith('curl'))[0]).toBe('curl http://10.0.0.5:8080/healthz');
+    expect(deploy([], { REMATH_BIND: '0.0.0.0' }).calls.filter(c => c.startsWith('curl'))[0]).toBe('curl http://127.0.0.1:3000/healthz');
   });
 
-  it('fails when the recreated container does not carry the new SUPABASE_URL', () => {
-    const r = deploy([], { STALE: '1' });
-    expect(r.status).not.toBe(0);
-    expect(r.stderr).toMatch(/does not run with the new SUPABASE_URL; roll back by hand: mv .*server\.env\.prev/);
+  for (const step of ['db:migrate', 'db:seed', 'db:smoke', 'env:swap']) {
+    it(`a failed ${step} stops before the env swap or the container is touched`, () => {
+      const r = deploy([], { FAIL: step });
+      expect(r.status).not.toBe(0);
+      expect(r.steps.at(-1)).toMatch(step);
+      expect(r.calls.some(c => c.includes(' up '))).toBe(false);
+    });
+  }
+
+  it('a failed compose up or a server that cannot query the new DB fails with the rollback hint', () => {
+    const up = deploy([], { FAIL: 'compose -f deploy/compose.yaml up' });
+    expect(up.status).toBe(1);
+    expect(up.stderr).toMatch(/docker compose up failed; roll back by hand: mv .*server\.env\.prev .*server\.env && docker compose -f deploy\/compose\.yaml up -d --force-recreate/);
+    const db = deploy([], { ME_CODE: '500' });
+    expect(db.status).toBe(1);
+    expect(db.stderr).toMatch(/answered 500, want 401.*roll back by hand/);
   });
 
-  it('fails when the server cannot query the new DB (/api/auth/me with an unknown cookie is not 401)', () => {
-    const r = deploy([], { ME_CODE: '500' });
-    expect(r.status).not.toBe(0);
-    expect(r.stderr).toMatch(/answered 500, want 401/);
-  });
-
-  it('--new is refused until #48; a missing REMATH_ENV_FILE stops before any DB step', () => {
+  it('an invalid compose config, --new or a missing REMATH_ENV_FILE stop before any DB step', () => {
+    const c = deploy([], { FAIL: 'config -q' });
     const n = deploy(['--new']);
-    expect([n.status, n.calls]).toEqual([2, []]);
+    const m = deploy([], { REMATH_ENV_FILE: 'missing.env' });
+    expect([c.status, n.status, m.status]).toEqual([1, 2, 1]);
     expect(n.stderr).toMatch(/not supported until #48/);
-    const m = deploy([], { REMATH_ENV_FILE: '' });
-    expect(m.status).toBe(1);
-    expect(m.calls.some(c => c.startsWith('npm'))).toBe(false);
+    expect(m.stderr).toMatch(/REMATH_ENV_FILE missing\.env is not a file/);
+    for (const r of [c, n, m]) expect(r.calls.some(x => x.startsWith('npm'))).toBe(false);
+  });
+});
+
+describe('deploy/compose.yaml (the only container definition)', () => {
+  const y = readFileSync(join(ROOT, 'deploy/compose.yaml'), 'utf8').split('\n').filter(l => !l.trim().startsWith('#')).join('\n');
+  it('binds to 127.0.0.1 by default and reads the runtime env file', () => {
+    expect(y).toMatch(/^ {6}- "\$\{REMATH_BIND:-127\.0\.0\.1\}:\$\{REMATH_PORT:-3000\}:3000"$/m);
+    expect(y).toMatch(/^ {4}env_file: \$\{REMATH_ENV_FILE:\?/m);
+  });
+  it('fixes the image tag, restart policy, user and the backup volume', () => {
+    expect(y).toMatch(/^ {4}image: \$\{REMATH_IMAGE:-remath:latest\}$/m);
+    expect(y).toMatch(/^ {4}restart: unless-stopped$/m);
+    expect(y).toMatch(/^ {4}user: node$/m);
+    expect(y).toMatch(/^ {6}- "\$\{REMATH_BACKUP_DIR:-\.\.\/backup\}:\/app\/server\/backup"$/m);
   });
 });

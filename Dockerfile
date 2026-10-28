@@ -1,5 +1,5 @@
-# 배포 단위 = 이미지 1개: 서버 + client/dist (#35 A-4, B절). 비밀(env)은 이미지에 넣지 않고 실행 시 --env-file 로 준다.
-# docker build -t remath .   →   docker run -d --name remath --env-file server.env -p 3000:3000 remath
+# 배포 단위 = 이미지 1개: 서버 + client/dist (#35 A-4, B절). 비밀(env)은 이미지에 넣지 않고 실행 시 env_file(deploy/compose.yaml)로 준다.
+# docker build -t remath:latest .   →   컨테이너는 deploy/compose.yaml 로만 띄운다(scripts/deploy.sh 5단계).
 
 FROM node:24-bookworm-slim AS build
 WORKDIR /app
