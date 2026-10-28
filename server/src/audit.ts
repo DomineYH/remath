@@ -7,7 +7,7 @@ import type { Db } from './db.ts';
 
 export interface AuditInput { actor_id: string | null; action: z.infer<typeof AuditAction>; target: string; meta: Record<string, unknown> }
 
-export async function audit(db: Db, log: FastifyBaseLogger, e: AuditInput): Promise<void> {
+export async function audit(db: Db, log: Pick<FastifyBaseLogger, 'error'>, e: AuditInput): Promise<void> {
   const { error } = await db.from('audit_log').insert(e);
   if (error) log.error({ err: error, action: e.action }, 'audit insert failed');
 }
