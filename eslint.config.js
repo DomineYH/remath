@@ -3,6 +3,11 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
+// api/http or api/mock, with any extension (.ts .tsx .js .jsx) or `./` segments in between (A-3, C-11).
+const API_IMPL = '(^|/)api/(\\./)*(http|mock)(\\.[jt]sx?|/|$)';
+const IMPORT_MSG = 'Screens import only Api/ApiError/createApi from api/index (A-3, C-11).';
+const HTTP_MSG = 'HTTP goes through Api (A-3).';
+
 export default tseslint.config(
   { ignores: ['**/dist/**', '**/dist-mock/**', 'playwright-report/**', 'test-results/**', 'base_ui/**'] },
   js.configs.recommended,
@@ -20,10 +25,12 @@ export default tseslint.config(
     files: ['client/src/**/*.{ts,tsx}'],
     ignores: ['client/src/api/**'],
     rules: {
-      'no-restricted-imports': ['error', { patterns: [{ regex: '(^|/)api/(http|mock)(\\.ts|/|$)', message: 'Screens import only Api/ApiError/createApi from api/index (A-3, C-11).' }] }],
+      'no-restricted-imports': ['error', { patterns: [{ regex: API_IMPL, message: IMPORT_MSG }] }],
+      'no-restricted-syntax': ['error', { selector: `ImportExpression[source.value=/${API_IMPL.replaceAll('/', '\\/')}/]`, message: IMPORT_MSG }],
       'no-restricted-globals': ['error',
-        { name: 'fetch', message: 'HTTP goes through Api (A-3).' },
-        { name: 'EventSource', message: 'HTTP goes through Api (A-3).' }],
+        { name: 'fetch', message: HTTP_MSG },
+        { name: 'EventSource', message: HTTP_MSG }],
+      'no-restricted-properties': ['error', ...['globalThis', 'window', 'self'].flatMap(object => ['fetch', 'EventSource'].map(property => ({ object, property, message: HTTP_MSG })))],
     },
   },
 );

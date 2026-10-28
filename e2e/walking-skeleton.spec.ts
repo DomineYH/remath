@@ -9,6 +9,8 @@ test('teacher and admin walking skeleton', async ({ page }) => {
   await expect(page).toHaveURL('/');
   await page.goto('/admin/scenarios');
   await expect(page).toHaveURL('/admin');
+  await page.goto('/admin/nope');
+  await expect(page).toHaveURL('/admin');
 
   // 2. create account: live nickname error, live password rules, lands on /practice with the no-group notice
   await page.goto('/');
@@ -35,6 +37,21 @@ test('teacher and admin walking skeleton', async ({ page }) => {
   await page.getByRole('button', { name: 'Create account and start' }).click();
   await expect(page).toHaveURL('/practice');
   await expect(page.getByText(NO_GROUP)).toBeVisible();
+
+  // change-password modal: values typed then cancelled are not kept (a reopened form submits what it shows)
+  const openPw = async () => { await page.getByRole('button', { name: 'Account menu' }).click(); await page.getByRole('menuitem', { name: 'Change password' }).click(); };
+  await openPw();
+  const dialog = page.getByRole('dialog', { name: 'Change my password' });
+  await dialog.getByLabel('Current password').fill('abcd1234');
+  await dialog.getByLabel('New password').fill('efgh5678');
+  await dialog.getByLabel('Confirm password').fill('efgh5678');
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toBeHidden();
+  await openPw();
+  for (const label of ['Current password', 'New password', 'Confirm password']) await expect(dialog.getByLabel(label)).toHaveValue('');
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect(dialog.getByRole('alert')).toHaveText('Passwords need 8+ characters with both letters and numbers, and no spaces.');
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
 
   // 3. log out → log in again → logged-in visits to / bounce home; teacher login does not open admin
   await page.getByRole('button', { name: 'Account menu' }).click();
