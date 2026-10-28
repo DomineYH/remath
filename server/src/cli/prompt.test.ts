@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import { judge, readHidden } from './prompt.ts';
@@ -52,4 +53,57 @@ describe('admin:reset-password readHidden', () => {
     t.input.end('one1\r');
     await expect(lines).rejects.toThrow('aborted');
   });
+});
+
+describe('admin:reset-password readHidden cleanup', () => {
+  const listeners = (t: ReturnType<typeof tty>) =>
+    ['data', 'end', 'error'].map(e => t.input.listenerCount(e)).concat(['SIGHUP', 'SIGINT', 'SIGTERM'].map(s => process.listenerCount(s)));
+  it('a throwing output.write on the first prompt restores the terminal and removes every listener', async () => {
+    const t = tty(), before = listeners(t);
+    const output = { write: () => { throw new Error('output failed'); } };
+    await expect(readHidden(t.input, output, ['a: ', 'b: '])).rejects.toThrow('output failed');
+    expect(t.raw.at(-1)).toBe(false);
+    expect(listeners(t)).toEqual(before);
+  });
+  it('a throwing output.write after Enter does the same', async () => {
+    const t = tty(), before = listeners(t);
+    let n = 0;
+    const output = { write: () => { if (++n > 1) throw new Error('output failed'); return true; } };
+    const lines = readHidden(t.input, output, ['a: ', 'b: ']);
+    t.input.write('one1\r');
+    await expect(lines).rejects.toThrow('output failed');
+    expect(t.raw).toEqual([true, false]);
+    expect(listeners(t)).toEqual(before);
+  });
+  it('an input stream error restores the terminal and removes every listener', async () => {
+    const t = tty(), before = listeners(t);
+    const lines = readHidden(t.input, t.output, ['a: ', 'b: ']);
+    t.input.destroy(new Error('input failed'));
+    await expect(lines).rejects.toThrow('input failed');
+    expect(t.raw).toEqual([true, false]);
+    expect(listeners(t)).toEqual(before);
+  });
+
+  // 실제 PTY 위의 자식 node 가 READY 를 낸 뒤 SIGHUP → 터미널(ECHO·ICANON)이 되돌아오고 종료코드 128+1.
+  const hasPty = spawnSync('python3', ['-c', 'import os, pty, termios; os.close(pty.openpty()[0])']).status === 0;
+  const PY = String.raw`
+import json, os, pty, select, signal, subprocess, sys, termios, time
+m, s = pty.openpty()
+p = subprocess.Popen([sys.argv[1], '--input-type=module', '-e', sys.argv[2]], stdin=s, stdout=s, start_new_session=True)
+buf, end = b'', time.time() + 15
+while b'READY' not in buf and time.time() < end:
+    if select.select([m], [], [], 0.2)[0]: buf += os.read(m, 1024)
+raw = not termios.tcgetattr(s)[3] & termios.ECHO
+p.send_signal(signal.SIGHUP)
+code = p.wait(15)
+lf = termios.tcgetattr(s)[3]
+print(json.dumps({'ready': b'READY' in buf, 'raw': raw, 'code': code, 'echo': bool(lf & termios.ECHO), 'icanon': bool(lf & termios.ICANON)}))
+`;
+  it.skipIf(!hasPty)('SIGHUP on a real PTY restores ECHO and ICANON and exits 129 (skipped when python3/pty is unavailable)', () => {
+    const child = `import { readHidden } from ${JSON.stringify(new URL('./prompt.ts', import.meta.url).href)};
+readHidden(process.stdin, process.stdout, ['READY', 'NEXT']).catch(() => {});`;
+    const r = spawnSync('python3', ['-c', PY, process.execPath, child], { encoding: 'utf8', timeout: 30_000 });
+    expect(r.stderr).toBe('');
+    expect(JSON.parse(r.stdout)).toEqual({ ready: true, raw: true, code: 129, echo: true, icanon: true });
+  }, 40_000);
 });
