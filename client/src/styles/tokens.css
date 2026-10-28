@@ -1,0 +1,30 @@
+/* ReMath design tokens — 목업 `base_ui/ReMath 시뮬레이터.html` :root 블록 그대로 이식 (C4).
+   배포 위치: client/src/styles/tokens.css. 다크 모드는 [data-theme="dark"]; 속성이 없으면 OS 설정을 따른다.
+   간격 토큰은 목업에 없다(간격은 컴포넌트 CSS의 리터럴 px). 새 토큰을 만들지 않는다. */
+:root{
+  --bg:#FBFAF7; --surface:#FFFFFF; --surface-2:#F4F2ED; --line:#E6E3DC;
+  --fg:#16182D; --fg-2:#5B5F78; --fg-3:#8A8DA3;
+  --accent:#3B3FD8; --accent-soft:#ECEDFD; --accent-line:rgba(59,63,216,.28); --on-accent:#FFFFFF;
+  --orange:#E8743B; --orange-soft:#FDEEE4; --teal:#0F8C7E; --teal-soft:#E0F3F0;
+  --bad:#C2412D; --bad-soft:#FBE5E0;
+  --band:#3B3FD8; --on-band:#FFFFFF;
+  --display:'Fraunces','Noto Serif KR',Georgia,serif;
+  --body:'Geist','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;
+  --mono:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  --r:16px; --r-sm:10px;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#111222; --surface:#1A1B2E; --surface-2:#22243A; --line:#2F3150;
+  --fg:#ECEDF7; --fg-2:#A7AAC6; --fg-3:#7A7E9C;
+  --accent:#9497FF; --accent-soft:#25275A; --accent-line:rgba(148,151,255,.35); --on-accent:#111222;
+  --orange:#F59A66; --orange-soft:#3A2416; --teal:#4CCFBC; --teal-soft:#12302C;
+  --bad:#FF8C7A; --bad-soft:#3D1C17; --band:#3B3FD8; --on-band:#FFFFFF;
+  color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#111222; --surface:#1A1B2E; --surface-2:#22243A; --line:#2F3150;
+  --fg:#ECEDF7; --fg-2:#A7AAC6; --fg-3:#7A7E9C;
+  --accent:#9497FF; --accent-soft:#25275A; --accent-line:rgba(148,151,255,.35); --on-accent:#111222;
+  --orange:#F59A66; --orange-soft:#3A2416; --teal:#4CCFBC; --teal-soft:#12302C;
+  --bad:#FF8C7A; --bad-soft:#3D1C17; --band:#3B3FD8; --on-band:#FFFFFF;
+  color-scheme:dark }

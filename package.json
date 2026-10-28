@@ -11,7 +11,7 @@
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint . && npm run lint:env",
-    "lint:env": "! git grep -n VITE_MOCK_ADMIN_PASSWORD -- client/src client/index.html shared prompts ':(exclude)client/src/api/mock' ':(exclude)client/src/vite-env.d.ts'",
+    "lint:env": "! git grep --untracked -n VITE_MOCK_ADMIN_PASSWORD -- client/src client/index.html shared prompts ':(exclude)client/src/api/mock' ':(exclude)client/src/vite-env.d.ts'",
     "test": "vitest run",
     "e2e": "playwright test",
     "check:bundle": "node scripts/check-bundle.mjs"

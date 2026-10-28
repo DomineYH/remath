@@ -18,7 +18,7 @@ export function createHttpApi(o: HttpOptions): Api {
       const payload = args.shift() as Record<string, string> | undefined;
       if (route.query && payload) p += '?' + new URLSearchParams(Object.entries(payload).filter(([, v]) => v != null));
       const init: RequestInit = { method, credentials: 'same-origin', headers: { accept: route.response === 'sse' ? 'text/event-stream' : '*/*' } };
-      if (route.body) init.body = JSON.stringify(payload), (init.headers as Record<string, string>)['content-type'] = 'application/json'; // CSRF: JSON 강제(SPEC 2절)
+      if (route.body) { init.body = JSON.stringify(payload); (init.headers as Record<string, string>)['content-type'] = 'application/json'; } // CSRF: JSON 강제(SPEC 2절)
       if (route.realm === 'any') (init.headers as Record<string, string>)['x-remath-realm'] = o.realm;
       const res = f(base + p, init).then(async r => { if (!r.ok) throw new ApiError(r.status, S.ApiError.parse(await r.json())); return r; });
       if (route.response === 'sse') return sse(res, o.realm === 'admin' ? S.AdminSseEvent : S.SseEvent);
