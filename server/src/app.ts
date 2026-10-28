@@ -36,6 +36,7 @@ export async function buildApp(d: Pick<Deps, 'db' | 'config'> & Partial<Deps>, o
     const status = (err as { statusCode?: number }).statusCode ?? 500;
     if (status < 500) return reply.code(ERROR_STATUS.validation_failed).send({ error: { code: 'validation_failed', message: (err as Error).message } });   // 깨진 JSON·content-type 등
     req.log.error({ err }, 'unhandled error');
+    // Coordinator-approved transport fallback (#40 review): 'internal' is not an ErrorCode, it only keeps the {error} body shape for ApiError.
     return reply.code(500).send({ error: { code: 'internal', message: 'internal error' } });
   });
 
