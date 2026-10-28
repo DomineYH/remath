@@ -94,3 +94,18 @@ test('teacher and admin walking skeleton', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '시나리오 관리' })).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('data-theme', flipped);
 });
+
+test('loading / leaves no 404 in the console: the favicon is the brand-mark SVG', async ({ page }) => {
+  const missing: string[] = [];
+  page.on('response', r => { if (r.status() === 404) missing.push(r.url()); });
+  page.on('console', m => { if (m.type() === 'error') missing.push(m.text()); });
+  await page.goto('/');
+  await expect(page.getByLabel('Nickname')).toBeVisible();
+  const href = await page.locator('link[rel="icon"]').getAttribute('href');
+  expect(href).toBe('/favicon.svg');
+  const icon = await page.request.get(href!);
+  expect(icon.status()).toBe(200);
+  expect(await icon.text()).toContain('<svg');
+  await page.waitForLoadState('networkidle');
+  expect(missing).toEqual([]);
+});
