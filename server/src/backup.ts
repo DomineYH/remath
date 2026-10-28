@@ -60,15 +60,44 @@ const ymd = (d: Date) => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(
  * 그다음 BACKUP_KEEP 개를 넘는 remath-<YYYYMMDD>.sqlite 를 오래된 순으로 지운다. 실패하면 임시 파일을 지우고 throw.
  * 스냅숏이 아니므로(Data API 는 트랜잭션 없음, deploy.sh 6단계는 도는 서버를 백업) 부모를 읽은 뒤 커밋된 자식 행은 부모 없이 들어온다.
  * rename 전에 파일 안에서만 그 고아를 FKS 대로 정리해 FK 순서 복구(H-31)가 멈추지 않게 한다. pruned = 테이블별 정리 행 수.
- * ponytail: 도는 중 삽입·삭제되면 페이지 경계에서 행이 빠질 수 있다(중복은 PK 로 버림). 새벽 실행이라 받아들인다;
- * 정합이 꼭 필요해지면 pg_dump(O-5 B)로 바꾼다.
+ * 세션 정합(낙관적 검증): 발화는 record_turn·start_session 으로만 생기고 둘 다 sessions 행을 쓰며(updated_at 트리거, 0001),
+ * 발화 삭제는 세션 삭제(cascade)뿐이다. 그래서 다 읽은 뒤 sessions 의 (id, updated_at) 을 다시 읽어 파일과 같으면 세션마다
+ * 행과 발화가 같은 커밋 상태다(offset 페이지가 밀려 빠진 sessions·turns 행도 여기서 잡힌다). 다르면 파일을 버리고 처음부터
+ * 다시 읽는다(최대 ATTEMPTS 번, 그래도 바뀌면 파일 없이 throw).
+ * ponytail: 다른 테이블은 도는 중 삽입·삭제되면 페이지 경계에서 행이 빠질 수 있다(빠진 사용자의 세션은 pruned 로 정리됨). 새벽 실행이라
+ * 받아들인다; 정합이 꼭 필요해지면 pg_dump(O-5 B)로 바꾼다.
  */
 export async function backup(db: Db, o: { dir: string; keep: number; now?: Date; pageSize?: number }) {
   const pageSize = o.pageSize ?? 1000;
   mkdirSync(o.dir, { recursive: true });
   const file = join(o.dir, `remath-${ymd(o.now ?? new Date())}.sqlite`);
   const tmp = `${file}.${process.pid}.tmp`;   // CLI 와 서버 타이머가 겹쳐도 서로의 임시 파일을 건드리지 않는다
+  for (let attempt = 1; ; attempt++) {
+    const r = await readInto(db, tmp, pageSize);
+    if (!r) {
+      if (attempt === ATTEMPTS) throw new Error(`backup: sessions changed during the read ${ATTEMPTS} times in a row; no file written`);
+      continue;
+    }
+    renameSync(tmp, file);
+    for (const old of readdirSync(o.dir).filter(f => /^remath-\d{8}\.sqlite$/.test(f)).sort().slice(0, -o.keep)) rmSync(join(o.dir, old));
+    return { file, ...r };
+  }
+}
+const ATTEMPTS = 5;
+
+/** 모든 테이블을 tmp 에 읽어 fsync 까지. 그새 세션이 바뀌었으면 tmp 를 지우고 null. 실패하면 tmp 를 지우고 throw. */
+async function readInto(db: Db, tmp: string, pageSize: number) {
   const rows: Record<string, number> = {}, pruned: Record<string, number> = {};
+  const pages = async (table: string, cols: string, keys: string[], each: (page: Record<string, unknown>[]) => void) => {
+    for (let n = 0; ;) {
+      let query = db.from(table).select(cols);
+      for (const k of keys) query = query.order(k);
+      const page = must(await query.range(n, n + pageSize - 1)) as unknown as Record<string, unknown>[];
+      if (!page.length) return n;
+      each(page);
+      n += page.length;
+    }
+  };
   const sq = new Database(tmp);
   try {
     sq.pragma('journal_mode = OFF');   // 실패하면 파일째 버리므로 롤백 저널이 필요 없다
@@ -76,17 +105,14 @@ export async function backup(db: Db, o: { dir: string; keep: number; now?: Date;
       const keys = KEYS[table] ?? ['id'];
       sq.exec(`create table ${q(table)} (${cols.map(c => `${q(c.name)} ${SQL_TYPE[c.type]}`).join(', ')}, primary key (${keys.map(q).join(', ')}))`);
       const insert = sq.prepare(`insert or ignore into ${q(table)} values (${cols.map(() => '?').join(', ')})`);
-      const insertPage = sq.transaction((page: Record<string, unknown>[]) => { for (const r of page) insert.run(cols.map(c => toSql(c.type, r[c.name]))); });
-      rows[table] = 0;
-      for (;;) {
-        let query = db.from(table).select(cols.map(c => c.name).join(','));
-        for (const k of keys) query = query.order(k);
-        const page = must(await query.range(rows[table], rows[table] + pageSize - 1)) as unknown as Record<string, unknown>[];
-        if (!page.length) break;
-        insertPage(page);
-        rows[table] += page.length;
-      }
+      rows[table] = await pages(table, cols.map(c => c.name).join(','), keys,
+        sq.transaction((page: Record<string, unknown>[]) => { for (const r of page) insert.run(cols.map(c => toSql(c.type, r[c.name]))); }));
     }
+    // 고아 정리 전에 본다: 파일의 sessions 와 지금의 sessions 가 (id, updated_at) 까지 같아야 한다.
+    const read = new Map((sq.prepare('select id, updated_at from sessions').all() as { id: string; updated_at: string }[]).map(r => [r.id, r.updated_at]));
+    let same = true;
+    const seen = await pages('sessions', 'id,updated_at', ['id'], page => { for (const r of page) if (read.get(r.id as string) !== r.updated_at) same = false; });
+    if (!same || seen !== read.size) { sq.close(); rmSync(tmp, { force: true }); return null; }
     for (const f of FKS) {
       const orphan = `${q(f.col)} is not null and ${q(f.col)} not in (select ${q(f.refCol)} from ${q(f.ref)})`;
       const { changes } = sq.prepare(f.setNull ? `update ${q(f.table)} set ${q(f.col)} = null where ${orphan}` : `delete from ${q(f.table)} where ${orphan}`).run();
@@ -95,14 +121,12 @@ export async function backup(db: Db, o: { dir: string; keep: number; now?: Date;
     sq.close();
     const fd = openSync(tmp, 'r+');
     try { fsyncSync(fd); } finally { closeSync(fd); }
-    renameSync(tmp, file);
+    return { rows, pruned };
   } catch (err) {
     if (sq.open) sq.close();
     rmSync(tmp, { force: true });
     throw err;
   }
-  for (const old of readdirSync(o.dir).filter(f => /^remath-\d{8}\.sqlite$/.test(f)).sort().slice(0, -o.keep)) rmSync(join(o.dir, old));
-  return { file, rows, pruned };
 }
 
 /**

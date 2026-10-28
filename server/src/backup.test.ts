@@ -14,12 +14,14 @@ type Row = Record<string, unknown>;
 const TEN = ['users', 'groups', 'group_members', 'scenarios', 'scenario_translations', 'group_scenarios', 'sessions', 'turns', 'ai_settings', 'audit_log'];
 const D1 = new Date(2026, 9, 28, 3, 0);   // 서버 로컬 시각
 
-/** select·order·offset·limit 만 아는 PostgREST. maxRows = 서버의 db-max-rows(요청 limit 보다 작을 수 있다). fail = 실패시킬 테이블. */
-function fakeDb(data: Record<string, Row[]>, o: { maxRows?: number; fail?: string } = {}) {
+/** select·order·offset·limit 만 아는 PostgREST. maxRows = 서버의 db-max-rows(요청 limit 보다 작을 수 있다). fail = 실패시킬 테이블.
+ *  onRead = 요청에 답하기 직전(그 사이 커밋된 쓰기를 data 에 반영해 끼어들기를 재현한다). */
+function fakeDb(data: Record<string, Row[]>, o: { maxRows?: number; fail?: string; onRead?: (table: string, q: URLSearchParams) => void } = {}) {
   const requests: string[] = [];
   const fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input)), table = url.pathname.split('/').pop()!, q = url.searchParams;
     requests.push(`${table}?${q}`);
+    o.onRead?.(table, q);
     if (table === o.fail) return new Response(JSON.stringify({ message: 'injected failure' }), { status: 500 });
     const offset = Number(q.get('offset') ?? 0), limit = Math.min(Number(q.get('limit') ?? Infinity), o.maxRows ?? Infinity);
     const cols = q.get('select')!.split(',');
@@ -34,7 +36,7 @@ const turns = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `t${Stri
 const DATA: Record<string, Row[]> = {
   users: [{ id: 'u1', nickname: 'admin', password_hash: '$argon2id$x', role: 'admin' }],
   scenarios: [{ id: 'c1', slug: 's', internal: { a: [1, '둘'] }, classification: { leverage: [], object: [] }, compiled_prompt: null }],
-  sessions: [{ id: 's1', user_id: 'u1', scenario_id: 'c1', goal_reached: true, counts: {}, progress: { mis: [0, 2] }, report: null }],
+  sessions: [{ id: 's1', user_id: 'u1', scenario_id: 'c1', goal_reached: true, counts: {}, progress: { mis: [0, 2] }, report: null, updated_at: '2026-10-28T02:00:00+00:00' }],
   turns: turns(7),
   ai_settings: [{ role: 'student', key_source: 'own', key_ciphertext: 'SECRET', key_masked: 'sk-…abcd' }],
 };
@@ -125,6 +127,47 @@ describe('backup file (H-30, T-1 e)', () => {
     expect(ids('select id from scenario_translations')).toEqual(['tr1']);
     expect(s.prepare('select id, actor_id from audit_log order by id').all()).toEqual([{ id: 'a1', actor_id: 'u1' }, { id: 'a2', actor_id: null }, { id: 'a3', actor_id: null }]);
     s.close();
+  });
+
+  // record_turn 이 sessions 를 읽은 뒤·turns 를 읽기 전에 커밋한다: 새 발화 + 세션 상태(counts·progress·updated_at)가 함께 바뀐다.
+  const recordTurn = (d: Record<string, Row[]>, n: number) => {
+    d.turns = [...d.turns, { id: `t9${n}`, session_id: 's1', seq: 100 + n, speaker: 'teacher', text: `늦은 발화 ${n}`, trigger: null }];
+    d.sessions = d.sessions.map(s => s.id === 's1' ? { ...s, counts: { Eliciting: n }, progress: { mis: [n, 2] }, updated_at: `2026-10-28T03:00:0${n}+00:00` } : s);
+  };
+  it('a turn committed between the sessions and turns reads: the read is redone, the file holds one committed state per session', async () => {
+    const dir = tmp(), d = structuredClone(DATA);
+    let commits = 0;
+    const { db, requests } = fakeDb(d, { onRead: (table, q) => { if (table === 'turns' && !commits && q.get('offset') === '0') recordTurn(d, ++commits); } });
+    const r = await backup(db, { dir, keep: 3, now: D1 });
+    expect(requests.filter(q => q.startsWith('sessions?') && q.includes('counts') && q.includes('offset=0')).length).toBe(2);   // 첫 판은 버리고 다시 읽었다
+    const s = open(r.file);
+    expect(s.prepare('select counts, progress, updated_at from sessions').get()).toEqual({ counts: '{"Eliciting":1}', progress: '{"mis":[1,2]}', updated_at: '2026-10-28T03:00:01+00:00' });
+    expect(s.prepare(`select text from turns where id = 't91'`).pluck().get()).toBe('늦은 발화 1');
+    expect(r.rows.turns).toBe(8);
+    s.close();
+  });
+
+  it('sessions that keep changing exhaust the retries: error, no file, the previous backup is kept', async () => {
+    const dir = tmp();
+    await backup(fakeDb(DATA).db, { dir, keep: 3, now: D1 });
+    const before = readFileSync(join(dir, 'remath-20261028.sqlite'));
+    const d = structuredClone(DATA);
+    let commits = 0;
+    const { db, requests } = fakeDb(d, { onRead: (table, q) => { if (table === 'turns' && q.get('offset') === '0') recordTurn(d, ++commits); } });
+    await expect(backup(db, { dir, keep: 3, now: D1 })).rejects.toThrow(/sessions changed during the read/);
+    expect(commits).toBe(5);
+    expect(requests.filter(q => q.startsWith('sessions?') && q.includes('counts') && q.includes('offset=0')).length).toBe(5);
+    expect(readdirSync(dir)).toEqual(['remath-20261028.sqlite']);
+    expect(readFileSync(join(dir, 'remath-20261028.sqlite'))).toEqual(before);
+  });
+
+  it('a session started or deleted mid-read is caught too (the re-read id set differs)', async () => {
+    const dir = tmp(), d = structuredClone(DATA);
+    let done = false;
+    const { db, requests } = fakeDb(d, { onRead: table => { if (table === 'turns' && !done) { done = true; d.sessions = []; d.turns = []; } } });
+    const r = await backup(db, { dir, keep: 3, now: D1 });
+    expect(requests.filter(q => q.startsWith('sessions?') && q.includes('counts') && q.includes('offset=0')).length).toBe(2);
+    expect(r.rows).toMatchObject({ sessions: 0, turns: 0 });
   });
 
   it('leaves no file behind when a read fails, and keeps the previous backup', async () => {
