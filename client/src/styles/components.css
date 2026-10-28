@@ -7,9 +7,11 @@
 .brand .logo{width:32px;height:32px;flex:none;display:block}
 .brand b{font-family:var(--display);font-size:20px;font-weight:600;letter-spacing:-.02em}
 .brand .sub{font-size:13px;color:var(--fg-3)}
-/* the bar never wraps (#33): only the brand and the account button shrink, cut with an ellipsis */
+/* the bar never wraps (#33): only the brand and the account button shrink, cut with an ellipsis;
+   the account button takes nearly all of it so the brand keeps "ReMath" (the full nickname is in its title) */
 .top .in > *{flex:none}
-.top .in > .brand,.top .in > .acct{flex:0 1 auto}
+.top .in > .brand{flex:0 1 auto}
+.top .in > .acct{flex:0 1000 auto}
 .brand b,.acct-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media (max-width:640px){.brand .sub{display:none}}
 
