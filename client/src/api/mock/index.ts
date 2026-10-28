@@ -197,7 +197,7 @@ export function createMockApi(o: MockOptions): Api {
 
     listAdminSessions: async q => { who('admin'); return filtered(q).map(sessionRow); },
     getAdminSession: async id => { who('admin'); const s = db.sessions.find(x => x.id === id) ?? fail('not_found'); return { ...detail(s), state: adminState(s) }; }, downloadSessionsCsv: todo('downloadSessionsCsv', 27),
-    getAiSettings: async () => { who('admin'); return db.ai; },   // 읽기만(대화 테스트 ConnectedModels). 저장은 #27 updateAiRole: todo('updateAiRole', 27), getProviders: async () => { who('admin'); return S.ProvidersFile.parse(providers); },
+    getAiSettings: async () => { who('admin'); return db.ai; }, /* 읽기만(대화 테스트 ConnectedModels). 저장은 #27 */ updateAiRole: todo('updateAiRole', 27), getProviders: async () => { who('admin'); return S.ProvidersFile.parse(providers); },
   };
 
   // 본문·쿼리는 라우트 표의 zod 스키마로 검증한다(서버와 같은 400 validation_failed). 메서드마다 다시 쓰지 않도록 여기서 한 번 감싼다.
