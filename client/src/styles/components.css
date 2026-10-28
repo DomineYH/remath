@@ -185,3 +185,48 @@ pre.prompt{font-family:var(--mono);font-size:12px;line-height:1.6;background:var
 .rail-d summary{cursor:pointer;font-weight:600;font-size:14px}
 .rail-d[open] summary{margin-bottom:12px}
 .chat-h>div:nth-child(2){flex:1;min-width:0}
+
+/* practice home (I-49) */
+.band{background:var(--band);color:var(--on-band);border-radius:24px;padding:36px clamp(20px,4vw,44px);margin-bottom:28px;background-image:radial-gradient(circle at 92% 20%,rgba(255,255,255,.14),transparent 42%)}
+.band .eyebrow{color:rgba(255,255,255,.78)}
+.band h2{color:var(--on-band);font-size:clamp(28px,4vw,38px)}
+.band p{margin:10px 0 0;max-width:64ch;color:rgba(255,255,255,.86)}
+.band .hello{margin:16px 0 0;font-weight:600;color:rgba(255,255,255,.95);display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
+.band .hello a{color:var(--on-band)}
+@media (max-width:640px){.band{padding:24px}}
+.pick{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}
+.pick button{text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:24px;display:flex;flex-direction:column;gap:8px;color:var(--fg);min-width:0;font:inherit;cursor:pointer}
+.pick button:hover{border-color:var(--accent-line);box-shadow:0 6px 20px -12px rgba(59,63,216,.35)}
+.pick b{font-family:var(--display);font-size:19px;font-weight:600}
+.pick small{color:var(--fg-2);font-size:13.5px;line-height:1.5}
+.pick .tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+
+/* tables (I-45·I-53): scroll inside the wrapper only; .wide keeps the 7-column admin tables at 860px */
+.tbl-wrap{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
+table.tbl{width:100%;border-collapse:collapse;font-size:14px}
+table.tbl.wide{min-width:860px}
+.tbl th{text-align:left;font-size:12px;letter-spacing:.04em;color:var(--fg-3);font-weight:600;padding:12px 16px;border-bottom:1px solid var(--line);white-space:nowrap}
+.tbl td{padding:12px 16px;border-bottom:1px solid var(--line);vertical-align:top;line-height:1.5}
+.tbl tbody tr:last-child td{border-bottom:0}
+.tbl .pill{margin:0 4px 4px 0}
+.tbl .mono{font-size:13px;white-space:nowrap}
+.acts-cell{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+
+/* groups (I-46) */
+.gsec{display:flex;flex-direction:column;gap:6px}
+.gsec .eyebrow{margin:0;font-size:11px;color:var(--fg-3)}
+.pills{display:flex;gap:6px;flex-wrap:wrap}
+fieldset.field{border:0;padding:0;margin:0 0 14px;min-width:0}
+fieldset.field legend{font-weight:600;font-size:13.5px;padding:0;margin-bottom:6px}
+.ckl{display:flex;flex-direction:column;gap:6px;max-height:210px;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--bg)}
+.ckl label{display:flex;gap:8px;align-items:center;font-size:14px;font-weight:400}
+.ckl input{width:auto}
+
+/* transcript (I-47·I-53) */
+.tx{display:flex;flex-direction:column;gap:10px;max-height:52vh;overflow:auto;padding-right:4px;margin-bottom:14px}
+.tx .ln{font-size:14px;line-height:1.55;padding:8px 12px;border-radius:12px;background:var(--bg);border:1px solid var(--line);white-space:pre-line;overflow-wrap:anywhere}
+.tx .ln.teacher{background:var(--accent-soft);border-color:var(--accent-line)}
+.tx .sp{font-weight:600;font-size:12px;color:var(--fg-3);display:block;margin-bottom:2px}
+.tx .ln.teacher .sp{color:var(--accent)}
+.tx .ln.mentor .sp{color:var(--orange)}
+.tx .tag{font-family:var(--mono);font-size:11px;font-weight:500}
