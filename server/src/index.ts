@@ -23,6 +23,10 @@ await app.listen({ port: config.env.PORT, host: '0.0.0.0' });
 // 매일 SQLite 백업(H-30): 실패는 로그에만 남고 서비스는 그대로다.
 scheduleBackups({
   at: backupEnv.BACKUP_AT,
-  run: async () => app.log.info({ backup: await backup(db, { dir: backupEnv.BACKUP_DIR, keep: backupEnv.BACKUP_KEEP }) }, 'backup ok'),
+  run: async () => {
+    const r = await backup(db, { dir: backupEnv.BACKUP_DIR, keep: backupEnv.BACKUP_KEEP });
+    if (Object.keys(r.pruned).length) app.log.warn({ pruned: r.pruned }, 'backup pruned orphan rows written during the run');
+    app.log.info({ backup: r }, 'backup ok');
+  },
   log: err => app.log.error({ err }, 'backup failed'),
 });

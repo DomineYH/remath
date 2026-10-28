@@ -34,6 +34,20 @@ export const TABLES: Record<string, { name: string; type: Type }[]> = Object.fro
 // 페이지 순서 = 기본 키(없으면 offset 페이지가 요청마다 다른 행을 줄 수 있다).
 const KEYS: Record<string, string[]> = { group_members: ['group_id', 'user_id'], group_scenarios: ['group_id', 'scenario_id'], ai_settings: ['role'] };
 
+// 백업 테이블 사이의 FK(0001). 부모가 자식보다 TABLES 앞에 온다. 목록이 마이그레이션과 같은지는 backup.test.ts 가 PGlite 로 본다.
+// setNull = ON DELETE SET NULL(audit_log.actor_id): 행은 남기고 값만 비운다. 나머지(cascade·restrict)는 행을 버린다.
+export const FKS = [
+  { table: 'group_members', col: 'group_id', ref: 'groups', refCol: 'id', setNull: false },
+  { table: 'group_members', col: 'user_id', ref: 'users', refCol: 'id', setNull: false },
+  { table: 'scenario_translations', col: 'scenario_id', ref: 'scenarios', refCol: 'id', setNull: false },
+  { table: 'group_scenarios', col: 'group_id', ref: 'groups', refCol: 'id', setNull: false },
+  { table: 'group_scenarios', col: 'scenario_id', ref: 'scenarios', refCol: 'id', setNull: false },
+  { table: 'sessions', col: 'user_id', ref: 'users', refCol: 'id', setNull: false },
+  { table: 'sessions', col: 'scenario_id', ref: 'scenarios', refCol: 'id', setNull: false },
+  { table: 'turns', col: 'session_id', ref: 'sessions', refCol: 'id', setNull: false },
+  { table: 'audit_log', col: 'actor_id', ref: 'users', refCol: 'id', setNull: true },
+];
+
 const SQL_TYPE = { text: 'TEXT', json: 'TEXT', int: 'INTEGER', bool: 'INTEGER' };
 const toSql = (type: Type, v: unknown) => v === null || v === undefined ? null
   : type === 'json' ? JSON.stringify(v) : type === 'bool' ? (v ? 1 : 0) : v;
@@ -44,15 +58,17 @@ const ymd = (d: Date) => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(
  * 테이블마다 Data API range 페이지(기본 1000행 = Supabase db-max-rows 기본값)로 끝까지 읽는다. 받은 행 수만큼 넘기고
  * 빈 페이지에서 멈추므로 서버 max-rows 가 페이지보다 작아도 빠지지 않는다. 임시 파일에 쓰고 fsync → rename(같은 날짜는 덮어쓰기),
  * 그다음 BACKUP_KEEP 개를 넘는 remath-<YYYYMMDD>.sqlite 를 오래된 순으로 지운다. 실패하면 임시 파일을 지우고 throw.
- * ponytail: 스냅숏이 아니다(Data API 는 트랜잭션 없음). 도는 중 삽입·삭제되면 페이지 경계에서 행이 빠질 수 있다(중복은 PK 로 버림).
- * 새벽 실행이라 받아들인다; 정합이 꼭 필요해지면 pg_dump(O-5 B)로 바꾼다.
+ * 스냅숏이 아니므로(Data API 는 트랜잭션 없음, deploy.sh 6단계는 도는 서버를 백업) 부모를 읽은 뒤 커밋된 자식 행은 부모 없이 들어온다.
+ * rename 전에 파일 안에서만 그 고아를 FKS 대로 정리해 FK 순서 복구(H-31)가 멈추지 않게 한다. pruned = 테이블별 정리 행 수.
+ * ponytail: 도는 중 삽입·삭제되면 페이지 경계에서 행이 빠질 수 있다(중복은 PK 로 버림). 새벽 실행이라 받아들인다;
+ * 정합이 꼭 필요해지면 pg_dump(O-5 B)로 바꾼다.
  */
 export async function backup(db: Db, o: { dir: string; keep: number; now?: Date; pageSize?: number }) {
   const pageSize = o.pageSize ?? 1000;
   mkdirSync(o.dir, { recursive: true });
   const file = join(o.dir, `remath-${ymd(o.now ?? new Date())}.sqlite`);
   const tmp = `${file}.${process.pid}.tmp`;   // CLI 와 서버 타이머가 겹쳐도 서로의 임시 파일을 건드리지 않는다
-  const rows: Record<string, number> = {};
+  const rows: Record<string, number> = {}, pruned: Record<string, number> = {};
   const sq = new Database(tmp);
   try {
     sq.pragma('journal_mode = OFF');   // 실패하면 파일째 버리므로 롤백 저널이 필요 없다
@@ -71,6 +87,11 @@ export async function backup(db: Db, o: { dir: string; keep: number; now?: Date;
         rows[table] += page.length;
       }
     }
+    for (const f of FKS) {
+      const orphan = `${q(f.col)} is not null and ${q(f.col)} not in (select ${q(f.refCol)} from ${q(f.ref)})`;
+      const { changes } = sq.prepare(f.setNull ? `update ${q(f.table)} set ${q(f.col)} = null where ${orphan}` : `delete from ${q(f.table)} where ${orphan}`).run();
+      if (changes) pruned[f.table] = (pruned[f.table] ?? 0) + changes;
+    }
     sq.close();
     const fd = openSync(tmp, 'r+');
     try { fsyncSync(fd); } finally { closeSync(fd); }
@@ -81,7 +102,7 @@ export async function backup(db: Db, o: { dir: string; keep: number; now?: Date;
     throw err;
   }
   for (const old of readdirSync(o.dir).filter(f => /^remath-\d{8}\.sqlite$/.test(f)).sort().slice(0, -o.keep)) rmSync(join(o.dir, old));
-  return { file, rows };
+  return { file, rows, pruned };
 }
 
 /**

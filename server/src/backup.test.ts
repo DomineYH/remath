@@ -6,8 +6,8 @@ import { join } from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
 import { createClient } from '@supabase/supabase-js';
 import Database from 'better-sqlite3';
-import { describe, expect, it } from 'vitest';
-import { backup, BackupEnv, scheduleBackups, TABLES } from './backup.ts';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { backup, BackupEnv, FKS, scheduleBackups, TABLES } from './backup.ts';
 import type { Db } from './db.ts';
 
 type Row = Record<string, unknown>;
@@ -42,11 +42,16 @@ const tmp = () => mkdtempSync(join(tmpdir(), 'backup-test-'));
 const open = (file: string) => new Database(file, { readonly: true });
 
 describe('backup file (H-30, T-1 e)', () => {
-  it('has exactly the 10 tables, same column names as the migrations, no key_ciphertext, no auth_sessions/schema_migrations', async () => {
-    const pg = new PGlite();
+  // 마이그레이션 전부를 PGlite 에 올린 스키마가 기준이다: 새 열·새 FK 가 생기면 아래 두 테스트가 깨진다.
+  const pg = new PGlite();
+  beforeAll(async () => {
     await pg.exec('create role anon nologin; create role authenticated nologin; create role service_role nologin bypassrls;');
     const dir = new URL('../../db/migrations/', import.meta.url);
     for (const f of readdirSync(dir).filter(f => /^\d{4}_.*\.sql$/.test(f)).sort()) await pg.exec(readFileSync(new URL(f, dir), 'utf8'));
+  }, 60_000);
+  afterAll(() => pg.close());
+
+  it('has exactly the 10 tables, same column names as the migrations, no key_ciphertext, no auth_sessions/schema_migrations', async () => {
     const cols = (await pg.query<{ t: string; c: string }>(`select table_name t, column_name c from information_schema.columns
       where table_schema = 'public' and table_name in (select table_name from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE')
       order by table_name, ordinal_position`)).rows;
@@ -57,8 +62,21 @@ describe('backup file (H-30, T-1 e)', () => {
     expect(Object.keys(live).sort()).toEqual([...TEN, 'auth_sessions', 'schema_migrations'].sort());
     for (const t of TEN) expect(TABLES[t].map(c => c.name), t).toEqual(live[t].filter(c => !(t === 'ai_settings' && c === 'key_ciphertext')));
     expect(live.ai_settings).toContain('key_ciphertext');
-    await pg.close();
-  }, 60_000);
+  });
+
+  it('knows every foreign key between the backed-up tables, with its on-delete rule', async () => {
+    const fks = (await pg.query<{ t: string; n: number; col: string; ref: string; refcol: string; d: string }>(`
+      select c.conrelid::regclass::text t, array_length(c.conkey, 1) n, a.attname col, c.confrelid::regclass::text ref, af.attname refcol, c.confdeltype d
+        from pg_constraint c
+        join pg_attribute a on a.attrelid = c.conrelid and a.attnum = c.conkey[1]
+        join pg_attribute af on af.attrelid = c.confrelid and af.attnum = c.confkey[1]
+       where c.contype = 'f'`)).rows.filter(f => TEN.includes(f.t));
+    expect(fks.every(f => f.n === 1 && TEN.includes(f.ref))).toBe(true);
+    const key = (f: { table: string; col: string; ref: string; refCol: string; setNull: boolean }) => `${f.table}.${f.col} -> ${f.ref}.${f.refCol}${f.setNull ? ' set null' : ''}`;
+    expect(FKS.map(key).sort()).toEqual(fks.map(f => key({ table: f.t, col: f.col, ref: f.ref, refCol: f.refcol, setNull: f.d === 'n' })).sort());
+    // 부모가 자식보다 먼저 정리돼야 연쇄 고아(사라진 세션의 발화)까지 지워진다.
+    for (const f of FKS) expect(TEN.indexOf(f.ref), key(f)).toBeLessThan(TEN.indexOf(f.table));
+  });
 
   it('reads every page through the Data API and writes remath-<YYYYMMDD>.sqlite with JSONB as TEXT', async () => {
     const dir = tmp(), { db, requests } = fakeDb(DATA, { maxRows: 2 });   // 서버 max-rows(2) < 페이지(3) 여도 빠짐없이 읽는다
@@ -67,6 +85,7 @@ describe('backup file (H-30, T-1 e)', () => {
     expect(r.file).toBe(join(dir, 'remath-20261028.sqlite'));
     expect(readdirSync(dir)).toEqual(['remath-20261028.sqlite']);   // 임시 파일이 남지 않는다
     expect(r.rows).toMatchObject({ users: 1, turns: 7, ai_settings: 1, groups: 0 });
+    expect(r.pruned).toEqual({});   // 깨끗한 읽기는 아무것도 정리하지 않는다
     expect(requests.every(q => !q.includes('key_ciphertext'))).toBe(true);
     expect(requests.filter(q => q.startsWith('turns?'))).toEqual(
       [0, 2, 4, 6, 7].map(o => `turns?select=${TABLES.turns.map(c => c.name).join('%2C')}&order=id.asc&offset=${o}&limit=3`));
@@ -80,6 +99,31 @@ describe('backup file (H-30, T-1 e)', () => {
     expect(sc).toEqual({ internal: '{"a":[1,"둘"]}', classification: '{"leverage":[],"object":[]}', compiled_prompt: null, ty: 'text' });
     expect(JSON.parse(sc.internal as string)).toEqual(DATA.scenarios[0].internal);
     expect(s.prepare('select goal_reached, progress from sessions').get()).toEqual({ goal_reached: 1, progress: '{"mis":[0,2]}' });
+    s.close();
+  });
+
+  it('drops rows whose parent was not read (written mid-run) so the file restores in FK order; actor_id is nulled', async () => {
+    const dir = tmp();
+    // 부모 테이블을 읽은 뒤 커밋된 자식들: 새 사용자 u2 의 세션·발화·그룹 소속, 새 그룹 g9 의 시나리오 연결, 새 시나리오의 번역, 새 사용자의 감사 행.
+    const late = {
+      ...DATA,
+      sessions: [...DATA.sessions, { id: 's2', user_id: 'u2', scenario_id: 'c1', goal_reached: false, counts: {}, progress: { mis: [] } }],
+      turns: [...turns(2), { id: 't9', session_id: 's2', seq: 0, speaker: 'student', text: 'hi' }, { id: 't8', session_id: 's7', seq: 0, speaker: 'student', text: 'hi' }],
+      groups: [{ id: 'g1', name: 'A' }],
+      group_members: [{ group_id: 'g1', user_id: 'u1' }, { group_id: 'g1', user_id: 'u2' }],
+      group_scenarios: [{ group_id: 'g9', scenario_id: 'c1' }],
+      scenario_translations: [{ id: 'tr1', scenario_id: 'c1', lang: 'ko' }, { id: 'tr2', scenario_id: 'c2', lang: 'ko' }],
+      audit_log: [{ id: 'a1', actor_id: 'u1', action: 'x', meta: {} }, { id: 'a2', actor_id: 'u2', action: 'y', meta: {} }, { id: 'a3', actor_id: null, action: 'z', meta: {} }],
+    };
+    const r = await backup(fakeDb(late).db, { dir, keep: 3, now: D1 });
+    expect(r.pruned).toEqual({ sessions: 1, turns: 2, group_members: 1, group_scenarios: 1, scenario_translations: 1, audit_log: 1 });
+    const s = open(r.file), ids = (sql: string) => s.prepare(sql).pluck().all();
+    expect(ids('select id from sessions')).toEqual(['s1']);
+    expect(ids('select id from turns order by id')).toEqual(['t00', 't01']);
+    expect(ids('select user_id from group_members')).toEqual(['u1']);
+    expect(ids('select count(*) from group_scenarios')).toEqual([0]);
+    expect(ids('select id from scenario_translations')).toEqual(['tr1']);
+    expect(s.prepare('select id, actor_id from audit_log order by id').all()).toEqual([{ id: 'a1', actor_id: 'u1' }, { id: 'a2', actor_id: null }, { id: 'a3', actor_id: null }]);
     s.close();
   });
 

@@ -10,5 +10,7 @@ const Env = BackupEnv.extend({ SUPABASE_URL: z.url(), SUPABASE_SERVICE_KEY: z.st
 if (import.meta.main) main('backup', async () => {
   const env = readEnv(Env, process.env);
   const r = await backup(createDb(env.SUPABASE_URL, env.SUPABASE_SERVICE_KEY), { dir: env.BACKUP_DIR, keep: env.BACKUP_KEEP });
+  // rows = 읽은 행 수. pruned = 그중 도는 중 부모 없이 들어와 파일에서 정리한 행 수.
+  if (Object.keys(r.pruned).length) console.warn(`backup pruned orphan rows written during the run: ${JSON.stringify(r.pruned)}`);
   console.log(`backup ok ${r.file} ${JSON.stringify(r.rows)}`);
 });
