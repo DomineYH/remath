@@ -18,7 +18,7 @@ describe('app wiring (A-2, M-2, O-8)', () => {
   });
   it('table routes without a handler stay unregistered (Fastify 404)', async () => {
     const app = await buildApp({ db, config });
-    expect((await app.inject('/api/practice')).statusCode).toBe(404);
+    expect((await app.inject('/api/admin/ai/providers')).statusCode).toBe(404);
   });
   it('a zod failure is 400 validation_failed in the {error:{code,message,details}} shape', async () => {
     const app = await buildApp({ db, config });
@@ -31,6 +31,13 @@ describe('app wiring (A-2, M-2, O-8)', () => {
     const r = await app.inject({ method: 'PUT', url: '/api/admin/auth/password', payload: {} });
     expect(r.statusCode).toBe(401);
     expect(r.json().error.code).toBe('unauthorized');
+  });
+  it("'any' session routes resolve the realm before the DB: no cookie 401, both cookies without X-Remath-Realm 400 (C-9)", async () => {
+    const app = await buildApp({ db, config });
+    expect((await app.inject({ method: 'POST', url: '/api/sessions/x/turns', payload: { text: 'hi' } })).statusCode).toBe(401);
+    const both = await app.inject({ url: '/api/sessions/current', cookies: { remath_teacher: 't', remath_admin: 'a' } });
+    expect(both.statusCode).toBe(400);
+    expect(both.json().error.code).toBe('validation_failed');
   });
   it('request logs carry neither the body nor cookie values', async () => {
     let logs = '';
