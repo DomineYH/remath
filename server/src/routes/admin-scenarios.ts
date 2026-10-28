@@ -27,24 +27,19 @@ export function adminScenarioHandlers({ db, config }: Deps): Handlers {
     if (!s) throw new ApiFail('not_found');
     return s;
   };
-  const split = ({ translations, ...cols }: Input, id: string) =>
-    ({ cols, tr: (['ko', 'en'] as const).map(lang => ({ scenario_id: id, lang, ...translations[lang] })) });
+  /** 시나리오 행(draft + compiled_prompt null) + 번역 2행을 한 트랜잭션으로(0004). slug 가 있으면 생성. */
+  const save = async (id: string, slug: string | null, b: Input) =>
+    must(await db.rpc('save_scenario', { p_id: id, p_slug: slug, p_input: b })) === true;
   const actor = (req: FastifyRequest) => req.auth!.user.id;
 
   return {
     'GET /api/admin/scenarios': async () =>
       (must(await db.from('scenarios').select(SCENARIO_SELECT).order('updated_at', { ascending: false })) as unknown as ScenarioDbRow[]).map(toSummary),
 
-    /** 새 시나리오는 초안, slug 는 서버가 만든다. 어느 insert 든 실패하면 시나리오 행을 지운다(Data API 는 트랜잭션이 없다). */
+    /** 새 시나리오는 초안, slug 는 서버가 만든다. */
     'POST /api/admin/scenarios': async (req, reply) => {
-      const id = randomUUID(), slug = `scenario-${id.slice(0, 8)}`, { cols, tr } = split(req.body as Input, id);
-      try {
-        must(await db.from('scenarios').insert({ id, slug, status: 'draft', compiled_prompt: null, ...cols }));
-        must(await db.from('scenario_translations').insert(tr));
-      } catch (err) {   // 응답만 잃고 커밋된 insert 도 있다: id 로 지운다(없으면 no-op)
-        await db.from('scenarios').delete().eq('id', id);
-        throw err;
-      }
+      const id = randomUUID(), slug = `scenario-${id.slice(0, 8)}`;
+      await save(id, slug, req.body as Input);
       await audit(db, req.log, { actor_id: actor(req), action: 'scenario.create', target: id, meta: { slug } });
       reply.code(201);
       return toAdmin(await load(id));
@@ -52,14 +47,10 @@ export function adminScenarioHandlers({ db, config }: Deps): Handlers {
 
     'GET /api/admin/scenarios/:id': async req => toAdmin(await load(idParam(req))),
 
-    /**
-     * 초안 저장 = 항상 draft + compiled_prompt null(게시본은 내려간다). 시나리오 행을 먼저 내려서,
-     * 번역 upsert 가 실패해도 게시본이 새 번역과 어긋난 채 남지 않는다.
-     */
+    /** 초안 저장 = 항상 draft + compiled_prompt null(게시본은 내려간다). updated_at 이 옮겨져 진행 중인 게시를 무효로 한다. */
     'PUT /api/admin/scenarios/:id': async req => {
-      const id = idParam(req), s = await load(id), { cols, tr } = split(req.body as Input, id);
-      must(await db.from('scenarios').update({ ...cols, status: 'draft', compiled_prompt: null }).eq('id', id));
-      must(await db.from('scenario_translations').upsert(tr, { onConflict: 'scenario_id,lang' }));
+      const id = idParam(req), s = await load(id);
+      if (!(await save(id, null, req.body as Input))) throw new ApiFail('not_found');
       await audit(db, req.log, { actor_id: actor(req), action: 'scenario.update', target: id, meta: { slug: s.slug } });
       return toAdmin(await load(id));
     },
@@ -78,12 +69,16 @@ export function adminScenarioHandlers({ db, config }: Deps): Handlers {
 
     'GET /api/admin/scenarios/:id/review': async req => S.autoChecks(toInput(await load(idParam(req))), templatesOk),
 
-    /** 자동 점검 fail 이 있거나 확인 m1~m4 가 다 없으면 422(details = ReviewResult). 통과하면 컴파일본을 저장하고 게시. */
+    /**
+     * 자동 점검 fail 이 있거나 확인 m1~m4 가 다 없으면 422(details = ReviewResult). 통과하면 검수한 그 판의 컴파일본으로 게시하되,
+     * 읽은 뒤 저장이 끼어들었으면(updated_at 이 다름, 0004 publish_scenario) 게시하지 않고 지금 판의 검수 결과로 422.
+     * 409 코드들(session_active 등)은 화면에 엉뚱한 문구를 띄우므로 review_failed 를 쓴다.
+     */
     'POST /api/admin/scenarios/:id/publish': async req => {
       const id = idParam(req), s = await load(id), input = toInput(s), r = S.autoChecks(input, templatesOk);
       if (!r.publishable || new Set((req.body as z.infer<typeof S.PublishBody>).confirmed).size < 4) throw new ApiFail('review_failed', 'review failed', r);
-      // ponytail: 읽기와 쓰기 사이의 동시 초안 저장은 막지 않는다(관리자 1명). 필요해지면 updated_at 조건부 update.
-      must(await db.from('scenarios').update({ status: 'published', compiled_prompt: compile(input) }).eq('id', id));
+      const ok = must(await db.rpc('publish_scenario', { p_id: id, p_expected_updated_at: s.updated_at, p_compiled: compile(input) }));
+      if (ok !== true) throw new ApiFail('review_failed', 'scenario changed since review', S.autoChecks(toInput(await load(id)), templatesOk));
       await audit(db, req.log, { actor_id: actor(req), action: 'scenario.publish', target: id, meta: { slug: s.slug, lang: s.lang } });
       return toAdmin(await load(id));
     },

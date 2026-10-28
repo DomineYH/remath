@@ -1,4 +1,5 @@
 // 관리자 — 사용자·그룹 (C-12, G-27, USR-1, GRP-2). 목 admin.ts 와 같은 규칙·같은 감사 meta.
+import { randomUUID } from 'node:crypto';
 import type * as S from '@remath/shared';
 import argon2 from 'argon2';
 import type { FastifyRequest } from 'fastify';
@@ -25,27 +26,15 @@ export function adminUserHandlers({ db }: Deps): Handlers {
     return groupOut(g);
   };
 
-  /** 없는 id·관리자를 구성원으로 넣으면 400. 중복 id 는 하나로. */
-  const groupInput = async (b: GroupInput) => {
-    const member_ids = [...new Set(b.member_ids)], scenario_ids = [...new Set(b.scenario_ids)];
-    const [us, ss] = await Promise.all([
-      member_ids.length ? db.from('users').select('id').eq('role', 'teacher').in('id', member_ids).then(must) : [],
-      scenario_ids.length ? db.from('scenarios').select('id').in('id', scenario_ids).then(must) : [],
-    ]);
-    if (us!.length !== member_ids.length || ss!.length !== scenario_ids.length) throw new ApiFail('validation_failed', 'unknown member or scenario id');
-    return { name: b.name, member_ids, scenario_ids };
-  };
   /**
-   * 구성원·시나리오 전체 치환. 새 연결을 먼저 넣고 빠진 것을 지워, 남는 구성원의 접근이 중간에 끊기지 않는다.
-   * 중간에 실패하면 일부만 바뀐 채 500: 같은 요청을 다시 보내면 맞춰진다(멱등).
+   * 이름·구성원·시나리오를 한 트랜잭션으로 전체 치환(0004 set_group_links). 실패하면 아무것도 바뀌지 않는다.
+   * 없는 id·관리자 구성원은 함수가 22023 으로 거절한다 → 400. 중복 id 는 함수가 하나로 합친다. false = 그룹 없음.
    */
-  const link = async (gid: string, table: 'group_members' | 'group_scenarios', col: 'user_id' | 'scenario_id', ids: string[]) => {
-    if (ids.length) must(await db.from(table).upsert(ids.map(x => ({ group_id: gid, [col]: x })), { onConflict: `group_id,${col}`, ignoreDuplicates: true }));
-    const del = db.from(table).delete().eq('group_id', gid);
-    must(await (ids.length ? del.not(col, 'in', `(${ids.join(',')})`) : del));
+  const setLinks = async (id: string, b: GroupInput, create: boolean) => {
+    const r = await db.rpc('set_group_links', { p_group_id: id, p_member_ids: b.member_ids, p_scenario_ids: b.scenario_ids, p_name: b.name, p_create: create });
+    if (r.error?.code === '22023' || r.error?.code === '23503') throw new ApiFail('validation_failed', 'unknown member or scenario id');
+    if (must(r) !== true) throw new ApiFail('not_found');
   };
-  const links = (gid: string, g: Awaited<ReturnType<typeof groupInput>>) =>
-    Promise.all([link(gid, 'group_members', 'user_id', g.member_ids), link(gid, 'group_scenarios', 'scenario_id', g.scenario_ids)]);
   const groupAudit = (req: FastifyRequest, action: 'group.create' | 'group.update' | 'group.delete', id: string, g: z.infer<typeof S.Group>) =>
     audit(db, req.log, { actor_id: actor(req), action, target: id, meta: { name: g.name, member_count: g.members.length, scenario_count: g.scenarios.length } });
 
@@ -86,11 +75,9 @@ export function adminUserHandlers({ db }: Deps): Handlers {
     'GET /api/admin/groups': async () =>
       (must(await db.from('groups').select(GROUP_SELECT).order('created_at')) as unknown as GroupDbRow[]).map(groupOut),
 
-    /** 연결이 실패하면 방금 만든 그룹도 지운다. */
     'POST /api/admin/groups': async (req, reply) => {
-      const b = await groupInput(req.body as GroupInput);
-      const { id } = must(await db.from('groups').insert({ name: b.name }).select('id').single()) as { id: string };
-      try { await links(id, b); } catch (err) { await db.from('groups').delete().eq('id', id); throw err; }
+      const id = randomUUID();
+      await setLinks(id, req.body as GroupInput, true);
       const g = await group(id);
       await groupAudit(req, 'group.create', id, g);
       reply.code(201);
@@ -99,10 +86,7 @@ export function adminUserHandlers({ db }: Deps): Handlers {
 
     'PUT /api/admin/groups/:id': async req => {
       const id = idParam(req);
-      await group(id);
-      const b = await groupInput(req.body as GroupInput);
-      must(await db.from('groups').update({ name: b.name }).eq('id', id));
-      await links(id, b);
+      await setLinks(id, req.body as GroupInput, false);
       const g = await group(id);
       await groupAudit(req, 'group.update', id, g);
       return g;
