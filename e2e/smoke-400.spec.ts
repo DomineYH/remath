@@ -24,6 +24,7 @@ async function fits(page: Page, where: string) {
       const tallest = Math.max(...[...inner.children].map(e => e.getBoundingClientRect().height));
       return { height: top.getBoundingClientRect().height, oneLine: tallest + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) + parseFloat(getComputedStyle(top).borderBottomWidth) };
     })(),
+    brandCut: [...document.querySelectorAll('.brand b')].some(e => e.scrollWidth > e.clientWidth),
     demo: /\bdemo\b|데모/i.test(document.body.innerText),
     unlabelled: [...document.querySelectorAll<HTMLInputElement>('input, select, textarea')]
       .filter(e => !e.labels?.length && !e.getAttribute('aria-label') && !e.getAttribute('aria-labelledby')).map(e => e.outerHTML.slice(0, 80)),
@@ -31,6 +32,7 @@ async function fits(page: Page, where: string) {
   expect(m.sw, `${where}: scrollWidth`).toBeLessThanOrEqual(400);
   expect(Math.max(...m.mids) - Math.min(...m.mids), `${where}: top bar on one line`).toBeLessThan(4);
   expect(m.bar.height, `${where}: top bar height = one line`).toBeLessThanOrEqual(m.bar.oneLine + 0.5);
+  expect(m.brandCut, `${where}: the brand word "ReMath" is cut`).toBe(false);
   expect(m.demo, `${where}: mockup-only demo element (I-41)`).toBe(false);
   expect(m.unlabelled, `${where}: form controls without a label`).toEqual([]);
 }
