@@ -33,7 +33,7 @@ The API-boundary suites in `client/src/api/mock/*.test.ts` reach the server only
 | Target | Groups (file) |
 |---|---|
 | any (HTTP-runnable) | A-1 teacher exposure (exposure) · A-2 practice-session rules, A-2 turn rules, A-3 turn pipeline, A-6 admin state (sessions) · sample scenarios, A-4 create·update·review·publish·delete, A-10 providers (scenarios) · A-5 users, groups, getPractice (admin) · A-5 signup·validation, password change, logout·realms (mock) · A-7 sessions CSV, A-10 AI settings (logs) |
-| mock only | A-9 initial state, admin password from env, storage; A-8 audit helper (mock) · A-2 reload, `turnLimit` (sessions) · A-4 stored compiled prompt, `templates` c7 (scenarios) · A-10 stored keys, A-8 audit log (logs) · A-8 user·group rows (admin) · A-8 scenario rows (scenarios) |
+| mock only | A-9 initial state, admin password from env, storage; A-8 audit helper (mock) · A-2 turn rules mid-stream (409 while streaming, dropped stream), A-2 reload, `turnLimit` (sessions) · A-4 stored compiled prompt, `templates` c7 (scenarios) · A-10 stored keys, A-8 audit log (logs) · A-8 user·group rows (admin) · A-8 scenario rows (scenarios) |
 
 HTTP groups assert on `Api` results only: no store reads, and time values (`started_at`, `created_at`, …) only for presence and order. An injected target must be a server seeded like the mock (the five samples), reset between tests, and passes its admin password to `useTarget` (it becomes `ADMIN_PW`).
 
