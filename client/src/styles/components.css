@@ -87,3 +87,31 @@ dialog.modal::backdrop{background:rgba(17,18,34,.45)}
 .m-acts{display:flex;justify-content:flex-end;gap:8px;margin-top:18px;flex-wrap:wrap}
 
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));z-index:60;background:var(--fg);color:var(--bg);padding:10px 18px;border-radius:999px;font-size:14px;max-width:calc(100% - 32px);box-shadow:0 10px 30px -12px rgba(0,0,0,.4)}
+
+/* scenario list (I-43): workflow strip, cards, prompt view */
+.flow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;margin:0 0 40px;padding:0;list-style:none}
+.flow li{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:20px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.flow li i{font-style:normal;font-family:var(--display);font-weight:600;font-size:14px;width:34px;height:34px;border-radius:50%;border:1.6px solid var(--accent);color:var(--accent);display:grid;place-items:center;margin-bottom:8px}
+.flow li:nth-child(3n+2) i{border-color:var(--orange);color:var(--orange)}
+.flow li:nth-child(3n+3) i{border-color:var(--teal);color:var(--teal)}
+.flow li b{font-size:15px;font-weight:600}
+.flow li small{color:var(--fg-2);font-size:13px;line-height:1.5}
+@media (max-width:900px){.flow{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:640px){.flow{display:none}}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(310px,100%),1fr));gap:16px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:24px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.card .who{display:flex;align-items:center;gap:12px}
+.av{width:44px;height:44px;border-radius:50%;background:var(--surface-2);display:grid;place-items:center;font-size:24px;flex:none}
+.card .who h3{font-size:19px}
+.card .who small{display:block;color:var(--fg-3);font-size:13px}
+.card .prob{color:var(--fg-2);font-size:14px;line-height:1.55;overflow-wrap:anywhere;margin:0}
+.card .meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--fg-3)}
+.card .acts{display:flex;gap:6px;margin-top:auto;padding-top:6px;flex-wrap:wrap}
+.pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:500;background:var(--surface-2);color:var(--fg-2)}
+.pill.pub{background:var(--teal-soft);color:var(--teal)}
+.pill.draft{background:var(--orange-soft);color:var(--orange)}
+.pill.lang{background:var(--accent-soft);color:var(--accent)}
+.access{font-size:13px;color:var(--fg-2);display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.access .eyebrow{margin:0;font-size:11px;color:var(--accent)}
+.prompt-part h4{font-size:15px;margin:16px 0 8px}
+pre.prompt{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:16px;overflow-x:auto;max-height:540px;white-space:pre-wrap;overflow-wrap:anywhere;margin:0}

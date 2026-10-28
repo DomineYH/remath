@@ -9,6 +9,8 @@
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
+    "@remath/prompts": "*",
+    "@remath/seed": "*",
     "@remath/shared": "*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

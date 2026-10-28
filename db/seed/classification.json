@@ -1,0 +1,144 @@
+{
+ "ko": {
+  "leverage": [
+   {
+    "name": "Eliciting",
+    "desc": "학생의 생각, 의미, 단계, 표현 방식을 탐색하고 명확히 함.",
+    "ex": "그림을 어떻게 그렸는지 말해 줄래?\n2/4라고 쓴 건 무슨 뜻이야?\n처음에 어떻게 시작했어?"
+   },
+   {
+    "name": "Extending",
+    "desc": "학생이 접근할 수 있는 방식으로 비교·연결·기준 설정·일반화를 하여 학생의 아이디어를 발전시킴.",
+    "ex": "4분의 1 조각을 반으로 자르면 어떻게 될까?\n두 조각 중에 어느 게 더 커?\n반 컵보다 많을까, 적을까?"
+   },
+   {
+    "name": "Taking Over",
+    "desc": "사용자가 추론이나 알고리즘을 직접 제공하거나, 형식적인 방식을 강요하거나, 학생의 현재 전략을 건너뜀.",
+    "ex": "분모를 같게 통분하면 돼.\n답은 5/8이야.\n이렇게 계산해 봐."
+   },
+   {
+    "name": "Other",
+    "desc": "인사, 일상적 대화, 행정적 내용, 문제와 관련 없는 발화.",
+    "ex": "안녕, 이름이 뭐야?\n강아지 키워?\n잠깐 쉬었다 할까?"
+   }
+  ],
+  "object": [
+   {
+    "name": "Add/Subtract",
+    "desc": "양이나 분수를 더하거나 빼는 것에 관한 발화.",
+    "ex": "두 개를 합치면 얼마야?\n하나 더 넣으면 어떻게 돼?"
+   },
+   {
+    "name": "Compare",
+    "desc": "두 양의 크기나 같음/다름을 비교하는 발화.",
+    "ex": "어느 쪽이 더 많아?\n둘이 같은 양일까?"
+   },
+   {
+    "name": "Diagram",
+    "desc": "학생의 그림·표현(직사각형, 원, 막대, 수직선)에 관한 발화.",
+    "ex": "그림에서 색칠한 부분은 뭐야?\n막대를 어떻게 그렸어?"
+   },
+   {
+    "name": "Distribution",
+    "desc": "똑같이 나누어 주기, 배분에 관한 발화.",
+    "ex": "한 친구가 받는 건 얼마야?\n어떻게 나눠 줬어?"
+   },
+   {
+    "name": "Formula Related",
+    "desc": "식, 공식, 통분 등 형식적 표기나 절차에 관한 발화.",
+    "ex": "식으로 써 볼까?\n분모를 같게 해 볼래?"
+   },
+   {
+    "name": "Parts & Whole",
+    "desc": "부분과 전체(한 컵, 한 판, 바 하나)의 관계에 관한 발화.",
+    "ex": "전체 한 컵은 어디야?\n바 하나에서 얼마만큼이야?"
+   },
+   {
+    "name": "Partition",
+    "desc": "등분하기, 자르기, 조각 만들기에 관한 발화.",
+    "ex": "몇 조각으로 잘랐어?\n반으로 자르면 어떻게 돼?"
+   },
+   {
+    "name": "Solution",
+    "desc": "답이나 결론에 관한 발화.",
+    "ex": "그래서 답이 뭐야?\n누가 더 많이 받아?"
+   },
+   {
+    "name": "Other",
+    "desc": "인사, 일상 대화, 행정적 요소.",
+    "ex": "안녕!\n오늘 기분 어때?"
+   }
+  ]
+ },
+ "en": {
+  "leverage": [
+   {
+    "name": "Eliciting",
+    "desc": "Explores and clarifies the student's thinking, meaning, steps, or representation.",
+    "ex": "Can you tell me how you drew your picture?\nWhat does 2/4 mean in your drawing?\nHow did you get started?"
+   },
+   {
+    "name": "Extending",
+    "desc": "Builds on the student's idea by comparing, connecting, setting a benchmark, or generalizing in a way the student can reach.",
+    "ex": "What happens if you cut a fourth in half?\nWhich piece is bigger?\nIs it more or less than half a cup?"
+   },
+   {
+    "name": "Taking Over",
+    "desc": "The teacher supplies the reasoning or algorithm, pushes a formal method, or skips the student's current strategy.",
+    "ex": "Just find a common denominator.\nThe answer is 5/8.\nDo it this way."
+   },
+   {
+    "name": "Other",
+    "desc": "Greetings, small talk, logistics, or anything unrelated to the problem.",
+    "ex": "Hi, what's your name?\nDo you have a pet?\nLet's take a short break."
+   }
+  ],
+  "object": [
+   {
+    "name": "Add/Subtract",
+    "desc": "Adding or subtracting amounts or fractions.",
+    "ex": "What do you get if you put them together?\nWhat if you add one more?"
+   },
+   {
+    "name": "Compare",
+    "desc": "Comparing sizes, or whether two amounts are the same or different.",
+    "ex": "Which one is more?\nAre they the same amount?"
+   },
+   {
+    "name": "Diagram",
+    "desc": "The student's drawing or representation (rectangles, circles, bars, number lines).",
+    "ex": "What does the shaded part show?\nHow did you draw the bars?"
+   },
+   {
+    "name": "Distribution",
+    "desc": "Equal sharing or handing out.",
+    "ex": "How much does one friend get?\nHow did you share them out?"
+   },
+   {
+    "name": "Formula Related",
+    "desc": "Equations, formulas, common denominators, or other formal notation and procedures.",
+    "ex": "Can you write it as an equation?\nCan you make the denominators the same?"
+   },
+   {
+    "name": "Parts & Whole",
+    "desc": "How a part relates to the whole (one cup, one pizza, one bar).",
+    "ex": "Where is the whole cup?\nHow much of one bar is that?"
+   },
+   {
+    "name": "Partition",
+    "desc": "Splitting into equal parts, cutting, making pieces.",
+    "ex": "How many pieces did you cut it into?\nWhat if you cut it in half?"
+   },
+   {
+    "name": "Solution",
+    "desc": "The answer or conclusion.",
+    "ex": "So what's your answer?\nWho gets more?"
+   },
+   {
+    "name": "Other",
+    "desc": "Greetings, small talk, logistics.",
+    "ex": "Hi!\nHow are you today?"
+   }
+  ]
+ }
+}

@@ -62,10 +62,10 @@ export const ScenarioAdmin = ScenarioBase.extend({
   groups: z.array(z.object({ id: Uuid, name: z.string() })),
   session_count: z.number().int().nonnegative(),
 });
-/** 목록 카드(PRD 3절): 이모지·이름·학년·문제·상태·언어·분류 수·이용 그룹. 활성 언어판 문구만. */
+/** 목록 카드(PRD 3절, I-43): 이모지·이름·학년·문제·상태·언어·오개념 수·분류 수·이용 그룹. 활성 언어판 문구만. */
 export const ScenarioSummary = z.object({
   id: Uuid, slug: z.string(), status: z.enum(['draft', 'published']), lang: Lang, student_prefix: z.string(), grade: z.string(),
-  name: z.string(), problem: z.string(),
+  name: z.string(), problem: z.string(), misconception_count: z.number().int().nonnegative(),
   classification_count: z.object({ leverage: z.number().int(), object: z.number().int() }),
   groups: z.array(z.object({ id: Uuid, name: z.string() })), session_count: z.number().int().nonnegative(), updated_at: Iso,
 });

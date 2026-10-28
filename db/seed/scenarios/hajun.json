@@ -1,0 +1,109 @@
+{
+ "lang": "ko",
+ "student_prefix": "🐼",
+ "mentor_prefix": "🦉",
+ "grade": "4학년 · 단위분수 크기 비교",
+ "internal": {
+  "baseline": "- \"8이 4보다 크니까 1/8이 1/4보다 크다\"고 추론하여 동생이 더 많이 먹었다고 답함.\n- 분모를 자연수처럼 비교함(큰 수 = 큰 양).\n- 피자를 4조각, 8조각으로 나눈 그림을 그렸지만 조각 크기를 비교하지는 않음.",
+  "drawing": "- 원 2개. 첫 원은 십자로 4등분하고 1조각 색칠, \"1/4\" 표기.\n- 둘째 원은 8등분하고 1조각 색칠, \"1/8\" 표기. 옆에 \"8>4\"라고 씀.",
+  "reasoning": "- 전체를 똑같이 나누는 것과 분수 표기는 이해함.\n- 조각 수(분모)와 조각 크기가 반대로 움직인다는 것을 아직 모름.\n- 그림을 나란히 놓고 조각 크기를 비교하도록 유도하면 깨달을 수 있음.",
+  "never": "- 분수를 통분하거나 소수로 바꿔 비교하는 형식적 방법\n- \"분모가 클수록 작다\"는 규칙을 암기식으로 제시하는 것",
+  "goal": "내부 도달점: 하준이는 같은 피자를 더 많은 조각으로 나눌수록 한 조각이 작아지므로 1/4 > 1/8임을 깨닫고, 자기가 더 많이 먹었다고 답을 바꿈.",
+  "prog": "- 각 오개념은 해당 오개념에 대한 개념적 발문 2회 후에만 교정됨(1회: 망설임, 2회: 교정).\n- 세 오개념이 모두 교정되면 \"아하!\"와 함께 답을 바꿈.\n- \"분모가 크면 작다\"는 규칙을 직접 알려주면 하준이는 혼란스러워하며 \"왜요?\"만 반복함.",
+  "misconceptions": [
+   {
+    "text": "분모를 \"조각 수\"가 아닌 \"양\"으로 읽음"
+   },
+   {
+    "text": "조각 수와 조각 크기의 역관계를 모름"
+   },
+   {
+    "text": "두 그림을 나란히 놓고 비교하지 않음"
+   }
+  ]
+ },
+ "classification": {
+  "leverage": [],
+  "object": []
+ },
+ "translations": {
+  "ko": {
+   "name": "하준",
+   "description": "분모가 클수록 분수도 크다고 믿는, 피자 그림으로 생각하는 가상의 초등학교 4학년 남학생",
+   "problem": "하준이는 피자 한 판의 1/4을 먹었고, 동생은 같은 피자의 1/8을 먹었습니다. 누가 피자를 더 많이 먹었을까요?",
+   "chars": "- 자신감 있고 말이 빠름. 틀려도 잘 웃음.\n- 야구, 종이접기, 강아지(이름: 콩이)를 좋아함.",
+   "greet": "안녕하세요! 저 하준이에요. 피자 문제요? 쉬워요, 동생이 더 많이 먹었어요. 8이 4보다 크잖아요!",
+   "aha": "아하! 8조각으로 자르면 한 조각이 더 작아지니까… 1/8이 1/4보다 작아요! 그러면 제가 더 많이 먹은 거네요! 콩이한테 자랑해야지.",
+   "t1": "규칙을 알려주면 하준이는 외우기만 해요. 하준이가 그린 두 피자에서 \"8은 무엇을 나타내는지\", \"한 조각 크기가 어떻게 다른지\" 물어보세요.",
+   "t2": "하준아, 1/8에서 8은 피자의 무엇을 말하는 거야?\n4조각으로 자른 피자 한 조각이랑 8조각으로 자른 한 조각 중 어느 게 더 커?\n두 그림을 겹쳐 놓으면 어떻게 보일까?",
+   "t3": "좋은 발문이었어요. 하준이가 그림을 겹쳐 보며 스스로 답을 바꿨네요. 이 비교 방법을 학급에서 발표해 보도록 제안해 보세요.",
+   "confused": [
+    "분모가 크면 작다고요? 왜요? 8이 더 큰데… 모르겠어요.",
+    "소수로 바꿔요? 0.25? 그게 뭐예요…",
+    "통분이요? 저 그거 아직 안 배웠어요."
+   ],
+   "elicit": [
+    "첫 번째 피자는 십자로 잘라서 4조각이요. 한 조각 색칠했어요. 두 번째는 8조각으로 잘랐어요.",
+    "8이 4보다 크니까 1/8이 더 큰 거 아니에요? 큰 수가 큰 거잖아요.",
+    "동생이 1/8 먹었으니까 동생이 더 많이 먹었어요. 분한데요.",
+    "그림은 그냥 피자 두 개 그리고 선 그었어요. 옆에 8>4라고 썼어요."
+   ],
+   "misconceptions": [
+    {
+     "kw": "8등분|4등분|몇 조각으로|등분|조각 수|몇 조각|나누면|분모가 뭘|8은 뭘|4는 뭘|무엇을 나타",
+     "h": "8은… 피자를 8조각으로 나눈 거예요. 4는 4조각이고요. 어? 그럼 8이 피자 양은 아니네요.",
+     "c": "맞다, 분모는 피자를 몇 조각으로 잘랐는지예요. 많이 자른 거지 피자가 많은 게 아니에요."
+    },
+    {
+     "kw": "조각이 더 크|한 조각 크기|크기|작아|커져|더 많이 자르|더 잘게|어느 조각이 더|어떤 조각이 더",
+     "h": "한 조각 크기요? 음… 8조각으로 자르면… 한 조각이 좀 작긴 해요.",
+     "c": "많이 자를수록 한 조각이 작아져요! 그러니까 1/8 조각이 1/4 조각보다 작아요."
+    },
+    {
+     "kw": "그림|그려|겹쳐|나란히|비교해 보|두 피자를 같이|옆에 놓|포개",
+     "h": "그림을 겹쳐요? 어… 1/4 조각 위에 1/8 조각 놓으면… 작네요?",
+     "c": "1/4 조각 안에 1/8 조각이 두 개 들어가요! 그림으로 보니까 확실해요."
+    }
+   ]
+  },
+  "en": {
+   "name": "Hajun",
+   "description": "A fictional 4th-grade student who thinks in pizza drawings and believes a bigger denominator means a bigger fraction",
+   "problem": "Hajun ate 1/4 of a pizza, and his little brother ate 1/8 of the same pizza. Who ate more pizza?",
+   "chars": "- Confident and talks fast. Laughs even when he is wrong.\n- Likes baseball, origami, and his dog Kongi.",
+   "greet": "Hi! I'm Hajun. The pizza problem? Easy, my brother ate more. 8 is bigger than 4!",
+   "aha": "Aha! If you cut it into 8, each piece gets smaller… so 1/8 is smaller than 1/4! That means I ate more! I gotta tell Kongi.",
+   "t1": "If you hand Hajun the rule, he will just memorize it. Ask about his two pizzas: what the 8 stands for, and how the size of one piece changes.",
+   "t2": "Hajun, what does the 8 in 1/8 tell us about the pizza?\nWhich is bigger, one piece of a pizza cut into 4 or one piece of a pizza cut into 8?\nWhat would it look like if you put your two drawings on top of each other?",
+   "t3": "Nice questioning. Hajun compared his drawings and changed his answer on his own. Invite him to present this comparison to the class.",
+   "confused": [
+    "Bigger denominator means smaller? Why? 8 is bigger… I don't get it.",
+    "Change it to a decimal? 0.25? What's that…",
+    "Common denominator? I haven't learned that yet."
+   ],
+   "elicit": [
+    "The first pizza I cut with a cross, so 4 pieces. I shaded one. The second one I cut into 8.",
+    "8 is bigger than 4, so isn't 1/8 bigger? Bigger number means bigger.",
+    "My brother ate 1/8, so he ate more. Not fair.",
+    "I just drew two pizzas and drew lines. I wrote 8>4 next to them."
+   ],
+   "misconceptions": [
+    {
+     "kw": "cut into 8|cut into 4|how many pieces|what does the 8|what does 8|what does the 4|stand for|mean",
+     "h": "The 8… that's the pizza cut into 8 pieces. 4 is 4 pieces. Huh? So 8 isn't how much pizza.",
+     "c": "Right, the bottom number is how many pieces you cut the pizza into. More cuts, not more pizza."
+    },
+    {
+     "kw": "size|bigger piece|smaller piece|which piece|one piece|more cuts|smaller",
+     "h": "The size of one piece? Um… if you cut it into 8… one piece is kinda smaller.",
+     "c": "The more you cut, the smaller each piece gets! So a 1/8 piece is smaller than a 1/4 piece."
+    },
+    {
+     "kw": "drawing|picture|draw|overlap|side by side|on top|put them together",
+     "h": "Put the pictures on top of each other? Uh… if I put a 1/8 piece on a 1/4 piece… it's smaller?",
+     "c": "Two 1/8 pieces fit inside one 1/4 piece! Now I can see it in the picture."
+    }
+   ]
+  }
+ }
+}

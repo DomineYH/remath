@@ -1,0 +1,26 @@
+{
+  "openai": { "name": "OpenAI", "param": "reasoning.effort",
+    "efforts": ["none","minimal","low","medium","high","xhigh","max"],
+    "models": [
+      { "id": "gpt-6-astra",   "efforts": ["low","medium","high","xhigh","max"], "recommended": true },
+      { "id": "gpt-6.1-sol",   "efforts": ["low","medium","high","xhigh","max"], "default_effort": "medium" },
+      { "id": "gpt-6-sol",     "efforts": ["none","low","medium","high","xhigh","max"], "default_effort": "medium" },
+      { "id": "gpt-6-luna",    "efforts": ["none","low","medium","high","xhigh","max"], "default_effort": "medium" },
+      { "id": "gpt-5.6-terra", "efforts": ["none","low","medium","high","xhigh","max"], "default_effort": "medium" },
+      { "id": "gpt-5.6-luna",  "efforts": ["none","low","medium","high","xhigh","max"], "default_effort": "medium" },
+      { "id": "gpt-5.5",       "efforts": ["none","low","medium","high","xhigh"], "default_effort": "medium" } ] },
+  "anthropic": { "name": "Anthropic", "param": "output_config.effort",
+    "efforts": ["low","medium","high","xhigh","max"],
+    "models": [
+      { "id": "claude-fable-5-1",  "efforts": ["low","medium","high","xhigh","max"], "default_effort": "high", "recommended": true },
+      { "id": "claude-opus-5-5",   "efforts": ["low","medium","high","xhigh","max"], "default_effort": "medium" },
+      { "id": "claude-sonnet-5-5", "efforts": ["low","medium","high","xhigh","max"], "default_effort": "high" },
+      { "id": "claude-haiku-5-5",  "efforts": ["low","medium","high","xhigh","max"], "default_effort": "medium" } ] },
+  "gemini": { "name": "Google Gemini", "param": "generation_config.thinking_level",
+    "efforts": ["minimal","low","medium","high"],
+    "models": [
+      { "id": "gemini-4-argon",       "efforts": ["low","medium","high"], "default_effort": "medium", "recommended": true },
+      { "id": "gemini-3.8-flash",     "efforts": ["low","medium","high"], "default_effort": "medium" },
+      { "id": "gemini-3.6-flash",     "efforts": ["minimal","low","medium","high"], "default_effort": "medium" },
+      { "id": "gemini-3.5-flash-lite","efforts": ["minimal","low","medium","high"], "default_effort": "minimal" } ] }
+}

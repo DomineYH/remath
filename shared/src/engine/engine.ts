@@ -1,0 +1,71 @@
+// 서버 규칙 엔진 (ADR-0002, 목업 engineTurn 이식). MOCK·실 LLM 경로가 같은 함수를 쓴다. 어댑터가 아니다.
+import type { z } from 'zod';
+import type { SessionReport as SessionReportSchema } from '../api/schemas.ts';
+import type { ClassificationRow, Lang, ReportInput, TurnDirective } from './adapter.ts';
+import type { Classification } from './classification.ts';
+
+export interface Misconception { kw: string; h: string; c: string }
+export interface StudentLines { misconceptions: Misconception[]; confused: string[]; aha: string }
+/** sessions.progress.mis · counts · goal_reached + turns 집계(trigger=1 횟수). 회전 인덱스는 저장하지 않는다. */
+export interface SessionState { mis: number[]; counts: Record<string, number>; goalReached: boolean; takeOverCount: number }
+
+export const END_SESSION_RE = /^end session$/i;
+/** 도움 요청은 시나리오 데이터가 아니라 서버 상수(ADR-0002). 목업 detectStd/detectEn 의 help 패턴. */
+export const HELP_RE: Record<Lang, RegExp> = { ko: /도와|힌트|어떻게 물어|어떤 질문|뭐라고 물|질문 추천/, en: /\bhelp\b|\bhint\b|what should i ask|which question|suggest a question/i };
+
+/** 목업 kwTest: 정규식으로 해석되지 않으면 부분 문자열. */
+export function kwTest(kw: string, m: string): boolean {
+  try { return new RegExp(kw, 'i').test(m); } catch { return m.toLowerCase().includes(kw.toLowerCase()); }
+}
+
+export type Judgement =
+  | { kind: 'end' }
+  | { kind: 'help'; state: SessionState }
+  | { kind: 'turn'; directive: TurnDirective | null; trigger: 1 | 3 | null; state: SessionState };
+
+/** 한 턴의 서버 판정(ADR-0002 순서 1→6). cls 는 분석 챗봇 결과(분류 기준이 없으면 null). 입력 state 를 바꾸지 않는다. */
+export function judgeTurn(text: string, lang: Lang, cls: Classification | null, lines: StudentLines, prev: SessionState): Judgement {
+  const t = text.trim();
+  if (END_SESSION_RE.test(t)) return { kind: 'end' };
+  const state: SessionState = { ...prev, mis: [...prev.mis], counts: { ...prev.counts } };
+  if (cls) state.counts[cls.leverage] = (state.counts[cls.leverage] ?? 0) + 1;
+  if (HELP_RE[lang].test(t)) return { kind: 'help', state };
+  if (state.goalReached) return { kind: 'turn', directive: null, trigger: null, state };
+  if (cls?.leverage === 'Taking Over') {
+    const n = state.takeOverCount++;
+    return { kind: 'turn', directive: { kind: 'confused', text: lines.confused[n % lines.confused.length] }, trigger: 1, state };
+  }
+  const idx = lines.misconceptions.findIndex((mi, i) => state.mis[i] < 2 && mi.kw && kwTest(mi.kw, t));
+  if (idx < 0) return { kind: 'turn', directive: null, trigger: null, state };
+  const n = ++state.mis[idx], mi = lines.misconceptions[idx];
+  if (n === 1) return { kind: 'turn', directive: { kind: 'hesitation', text: mi.h }, trigger: null, state };
+  if (state.mis.every(x => x >= 2)) { state.goalReached = true; return { kind: 'turn', directive: { kind: 'aha', text: `${mi.c}\n${lines.aha}` }, trigger: 3, state }; }
+  return { kind: 'turn', directive: { kind: 'correction', text: mi.c }, trigger: null, state };
+}
+
+/** 세션 종료 판정(목업 engineEnd). 리포트 전체 스키마는 티켓 14. 여기서는 분석 챗봇 입력에 필요한 부분만. */
+export function reportInput(names: string[], counts: Record<string, number>, reached: boolean): ReportInput {
+  const good = (counts.Eliciting ?? 0) + (counts.Extending ?? 0), bad = counts['Taking Over'] ?? 0;
+  const std = names.some(n => ['Eliciting', 'Extending', 'Taking Over'].includes(n));
+  const verdict = !std ? 'dist' : good === 0 && bad === 0 ? 'none' : bad === 0 ? 'clean' : bad > good ? 'heavy' : 'mixed';
+  return { names, counts, verdict, reached };
+}
+
+/** ADR-0002 런타임 블록. 학생 system 뒤에 호출마다 덧붙인다. */
+export function runtimeBlock(state: SessionState, directive: TurnDirective | null, lang: Lang): string {
+  const prog = state.mis.map((n, i) => `${i + 1}) ${n >= 2 ? (lang === 'ko' ? '교정됨' : 'corrected') : n === 1 ? (lang === 'ko' ? '망설임(1/2)' : 'hesitating (1/2)') : (lang === 'ko' ? '미교정(0/2)' : 'uncorrected (0/2)')}`).join('  ');
+  const goal = lang === 'ko' ? `도달점: ${state.goalReached ? '도달' : '미도달'}` : `Goal: ${state.goalReached ? 'reached' : 'not reached'}`;
+  const dir = directive
+    ? (lang === 'ko' ? `이번 턴 지시: 반드시 다음 취지로, 네 말투로 답하십시오 — "${directive.text}"` : `This turn: you must answer with exactly this gist, in your own voice — "${directive.text}"`)
+    : (lang === 'ko' ? '이번 턴 지시: 없음. 현재 오개념 상태를 유지하고 질문받은 것만 답하십시오.' : 'This turn: none. Keep your current misconceptions and answer only what was asked.');
+  const head = lang === 'ko' ? 'H) 이번 턴 (서버 주입)' : 'H) This turn (server-injected)';
+  return `\n========================================================\n${head}\n========================================================\n${lang === 'ko' ? '오개념 진행' : 'Misconceptions'}: ${prog}\n${goal}\n${dir}\n`;
+}
+
+/** 종료 리포트(D-17, 티켓 14): 분류 기준 순서의 rows(설명·발화 스냅샷) + total + 판정. 레버리지 기준이 없으면 null. summary 는 분석 챗봇 문장(실패 시 null). */
+export function sessionReport(leverage: ClassificationRow[], turns: { seq: number; speaker: string; text: string; leverage: string | null }[], reached: boolean, summary: string | null): z.infer<typeof SessionReportSchema> | null {
+  if (!leverage.length) return null;
+  const rows = leverage.map(r => { const ts = turns.filter(t => t.speaker === 'teacher' && t.leverage === r.name).map(t => ({ seq: t.seq, text: t.text })); return { name: r.name, desc: r.desc ?? '', count: ts.length, turns: ts }; });
+  const { verdict } = reportInput(rows.map(r => r.name), Object.fromEntries(rows.map(r => [r.name, r.count])), reached);
+  return { total: rows.reduce((n, r) => n + r.count, 0), reached, verdict, rows, summary };
+}

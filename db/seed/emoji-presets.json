@@ -1,0 +1,111 @@
+{
+ "student": [
+  {
+   "emoji": "🦊",
+   "ko": "여우",
+   "en": "Fox"
+  },
+  {
+   "emoji": "🐻",
+   "ko": "곰",
+   "en": "Bear"
+  },
+  {
+   "emoji": "🐰",
+   "ko": "토끼",
+   "en": "Rabbit"
+  },
+  {
+   "emoji": "🐼",
+   "ko": "판다",
+   "en": "Panda"
+  },
+  {
+   "emoji": "🐱",
+   "ko": "고양이",
+   "en": "Cat"
+  },
+  {
+   "emoji": "🐶",
+   "ko": "강아지",
+   "en": "Puppy"
+  },
+  {
+   "emoji": "🐯",
+   "ko": "호랑이",
+   "en": "Tiger"
+  },
+  {
+   "emoji": "🐨",
+   "ko": "코알라",
+   "en": "Koala"
+  },
+  {
+   "emoji": "🐸",
+   "ko": "개구리",
+   "en": "Frog"
+  },
+  {
+   "emoji": "🐧",
+   "ko": "펭귄",
+   "en": "Penguin"
+  },
+  {
+   "emoji": "🐹",
+   "ko": "햄스터",
+   "en": "Hamster"
+  },
+  {
+   "emoji": "🦁",
+   "ko": "사자",
+   "en": "Lion"
+  },
+  {
+   "emoji": "🐥",
+   "ko": "병아리",
+   "en": "Chick"
+  }
+ ],
+ "mentor": [
+  {
+   "emoji": "🦉",
+   "ko": "부엉이",
+   "en": "Owl"
+  },
+  {
+   "emoji": "🧭",
+   "ko": "나침반",
+   "en": "Compass"
+  },
+  {
+   "emoji": "💡",
+   "ko": "전구",
+   "en": "Light bulb"
+  },
+  {
+   "emoji": "🌱",
+   "ko": "새싹",
+   "en": "Sprout"
+  },
+  {
+   "emoji": "📘",
+   "ko": "책",
+   "en": "Book"
+  },
+  {
+   "emoji": "🎓",
+   "ko": "학사모",
+   "en": "Graduation cap"
+  },
+  {
+   "emoji": "⭐",
+   "ko": "별",
+   "en": "Star"
+  },
+  {
+   "emoji": "🔭",
+   "ko": "망원경",
+   "en": "Telescope"
+  }
+ ]
+}

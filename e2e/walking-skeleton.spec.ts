@@ -78,7 +78,7 @@ test('teacher and admin walking skeleton', async ({ page }) => {
   const subnav = page.getByRole('navigation', { name: 'Admin menu' });
   await expect(subnav.getByRole('link')).toHaveText(['Scenarios', 'Users', 'Groups', 'Conversations', 'AI settings']);
   await expect(subnav.getByRole('link', { name: 'Scenarios' })).toHaveAttribute('aria-current', 'page');
-  await expect(page.getByText('No scenarios yet.')).toBeVisible();
+  await expect(page.getByRole('article')).toHaveCount(5);
   await page.goto('/admin');
   await expect(page).toHaveURL('/admin/scenarios');
 
