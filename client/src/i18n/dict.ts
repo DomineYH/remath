@@ -1,0 +1,100 @@
+// 화면 언어 사전 (B-8). 문구는 목업 그대로, 비밀번호 규칙만 PRD 9절(8자 이상 · 영문+숫자 · 공백 불가 — 목업의 4~8자는 옛 규칙).
+// err.<code> = 오류 코드 → 문구. 서버 message 는 화면에 내지 않는다.
+import type { ErrorCode } from '@remath/shared';
+
+type Text = string | ((n: string) => string);
+type Entry = { ko: Text; en: Text };
+
+const errors = {
+  'err.validation_failed': { ko: '입력값을 확인해 주세요.', en: 'Please check what you entered.' },
+  'err.invalid_effort': { ko: '이 모델에서 쓸 수 없는 추론 강도입니다.', en: 'That effort level is not available for this model.' },
+  'err.unauthorized': { ko: '로그인이 필요합니다.', en: 'Please sign in.' },
+  'err.invalid_credentials': { ko: '닉네임 또는 비밀번호가 맞지 않습니다.', en: 'Nickname or password is incorrect.' },
+  'err.forbidden': { ko: '이 작업을 할 권한이 없습니다.', en: 'You are not allowed to do that.' },
+  'err.not_found': { ko: '찾을 수 없습니다.', en: 'Not found.' },
+  'err.nickname_taken': { ko: '이미 쓰고 있는 닉네임입니다.', en: 'That nickname is already taken.' },
+  'err.session_active': { ko: '진행 중인 연습 세션이 있습니다.', en: 'A practice session is already in progress.' },
+  'err.session_ended': { ko: '이미 끝난 연습 세션입니다.', en: 'This practice session has ended.' },
+  'err.turn_in_progress': { ko: '이전 발화를 처리하는 중입니다.', en: 'The previous turn is still being processed.' },
+  'err.scenario_has_sessions': { ko: '대화 기록이 있는 시나리오는 삭제할 수 없습니다.', en: 'A scenario with conversation records cannot be deleted.' },
+  'err.review_failed': { ko: '검수를 통과하지 못했습니다.', en: 'The review did not pass.' },
+  'err.turn_limit_reached': { ko: '발화 수 상한에 닿았습니다. 세션을 종료해 주세요.', en: 'The turn limit has been reached. Please end the session.' },
+  'err.too_many_attempts': { ko: '시도가 너무 많습니다. 잠시 뒤 다시 해 주세요.', en: 'Too many attempts. Please try again shortly.' },
+  'err.provider_rejected': { ko: 'AI 공급자가 요청을 거부했습니다.', en: 'The AI provider rejected the request.' },
+  'err.provider_unavailable': { ko: 'AI 공급자에 연결할 수 없습니다.', en: 'The AI provider is unavailable.' },
+  'err.unknown': { ko: '문제가 생겼습니다. 다시 시도해 주세요.', en: 'Something went wrong. Please try again.' },
+} satisfies Record<`err.${ErrorCode}` | 'err.unknown', Entry>;
+
+export const dict = {
+  ...errors,
+  brandSub: { ko: '오개념 발문 코칭 시뮬레이터', en: 'Misconception questioning simulator' },
+  uiAria: { ko: '화면 언어', en: 'Interface language' },
+  themeDark: { ko: '다크 모드', en: 'Dark mode' },
+  themeLight: { ko: '라이트 모드', en: 'Light mode' },
+  // 로그인 / 계정 만들기
+  authTag: { ko: '발문으로 오개념을 풀어 가는 연습', en: 'Practice resolving misconceptions through questioning' },
+  loginTitle: { ko: '로그인', en: 'Sign in' },
+  loginLead: { ko: '닉네임과 비밀번호로 로그인하세요.', en: 'Sign in with your nickname and password.' },
+  signupTitle: { ko: '계정 만들기', en: 'Create an account' },
+  signupLead: { ko: '닉네임과 비밀번호만 있으면 됩니다. 이메일·전화번호·실명은 받지 않습니다.', en: 'All you need is a nickname and a password. We never ask for an email, phone number or real name.' },
+  authTabsAria: { ko: '로그인 또는 계정 만들기', en: 'Sign in or create an account' },
+  tabLogin: { ko: '로그인', en: 'Sign in' },
+  tabSignup: { ko: '계정 만들기', en: 'Create account' },
+  nick: { ko: '닉네임', en: 'Nickname' },
+  nickH: { ko: '2~16자 · 한글·영문·숫자·_ . - · 실명이나 연락처는 쓰지 마세요', en: '2–16 characters · letters, Hangul, digits, _ . - · don’t use your real name or contact details' },
+  pw: { ko: '비밀번호', en: 'Password' },
+  pw2: { ko: '비밀번호 확인', en: 'Confirm password' },
+  curPw: { ko: '현재 비밀번호', en: 'Current password' },
+  newPw: { ko: '새 비밀번호', en: 'New password' },
+  r1: { ko: '8자 이상', en: '8+ characters' },
+  r2: { ko: '영문과 숫자 모두 포함', en: 'Letters and numbers' },
+  r3: { ko: '공백 불가', en: 'No spaces' },
+  loginBtn: { ko: '로그인', en: 'Sign in' },
+  signupBtn: { ko: '계정 만들고 시작하기', en: 'Create account and start' },
+  noPII: { ko: '🔒 ReMath는 닉네임과 비밀번호 외에 어떤 개인정보도 받지 않습니다. 비밀번호는 해시로만 보관합니다.', en: '🔒 ReMath collects no personal information beyond a nickname and password. Passwords are kept only as a hash.' },
+  toAdmin: { ko: '관리자 로그인 →', en: 'Admin sign-in →' },
+  errNick: { ko: '닉네임은 2~16자의 한글·영문·숫자·_ . - 만 쓸 수 있습니다.', en: 'Nicknames are 2–16 characters: letters, Hangul, digits, _ . - only.' },
+  errNickPII: { ko: '이메일이나 전화번호처럼 보이는 닉네임은 쓸 수 없습니다. 개인정보가 드러나지 않는 닉네임을 정해 주세요.', en: 'Nicknames that look like an email or phone number aren’t allowed. Pick one that doesn’t reveal personal information.' },
+  errPw: { ko: '비밀번호는 8자 이상이며 영문과 숫자를 모두 포함해야 합니다. 공백은 쓸 수 없습니다.', en: 'Passwords need 8+ characters with both letters and numbers, and no spaces.' },
+  errPw2: { ko: '두 비밀번호가 다릅니다.', en: 'The passwords do not match.' },
+  welcome: { ko: n => `${n}님, 환영합니다.`, en: n => `Welcome, ${n}.` },
+  // 관리자 로그인
+  aLoginEyebrow: { ko: 'ReMath · Admin', en: 'ReMath · Admin' },
+  aLoginTitle: { ko: '관리자 로그인', en: 'Admin sign-in' },
+  aLoginLead: { ko: '관리자 전용 화면입니다. 배포 환경에서는 주소 끝에 /admin을 붙여 바로 들어올 수 있습니다.', en: 'Admin-only screen. Once deployed, adding /admin to the end of the address opens it directly.' },
+  aId: { ko: '관리자 아이디', en: 'Admin ID' },
+  aLoginBtn: { ko: '관리자로 로그인', en: 'Sign in as admin' },
+  errAdminFail: { ko: '아이디 또는 비밀번호가 맞지 않습니다.', en: 'ID or password is incorrect.' },
+  toUser: { ko: '← 예비교사 로그인으로', en: '← Teacher sign-in' },
+  // 계정 메뉴
+  acctAria: { ko: '계정 메뉴', en: 'Account menu' },
+  adminAcct: { ko: '관리자', en: 'Admin' },
+  changePw: { ko: '비밀번호 변경', en: 'Change password' },
+  logout: { ko: '로그아웃', en: 'Sign out' },
+  loggedOut: { ko: '로그아웃했습니다.', en: 'Signed out.' },
+  mSelfPw: { ko: '내 비밀번호 변경', en: 'Change my password' },
+  errCurPw: { ko: '현재 비밀번호가 맞지 않습니다.', en: 'Your current password is incorrect.' },
+  selfPwDone: { ko: '비밀번호를 변경했습니다.', en: 'Password changed.' },
+  cancel: { ko: '취소', en: 'Cancel' },
+  save: { ko: '저장', en: 'Save' },
+  // 학생 선택
+  pickEyebrow: { ko: 'Practice · 예비교사', en: 'Practice · Preservice teacher' },
+  pickTitle: { ko: '연습할 학생 선택', en: 'Choose a student to practice with' },
+  pickLead: { ko: '가상 학생의 오개념을 발문으로 해결해 보세요. 설명하거나 정답을 알려주는 대신, 학생의 생각을 끌어내고(Eliciting) 확장하는(Extending) 질문을 연습합니다.', en: "Resolve a virtual student's misconception through questioning. Instead of explaining or giving the answer, practice questions that draw out (Eliciting) and build on (Extending) the student's thinking." },
+  noAccessNoGroup: { ko: n => `${n}님은 어떤 그룹에도 속해 있지 않아 이용할 수 있는 시나리오가 없습니다. 관리자에게 그룹 배정을 요청하세요.`, en: n => `${n} is not in any group, so no scenarios are available. Ask an admin to add them to a group.` },
+  noAccessNoScen: { ko: n => `${n}님의 그룹에 할당된 시나리오가 없습니다. 관리자에게 시나리오 할당을 요청하세요.`, en: n => `No scenarios are assigned to ${n}'s groups. Ask an admin to assign one.` },
+  // 관리자
+  subnavAria: { ko: '관리자 메뉴', en: 'Admin menu' },
+  tabScen: { ko: '시나리오', en: 'Scenarios' },
+  tabUsers: { ko: '사용자', en: 'Users' },
+  tabGroups: { ko: '그룹', en: 'Groups' },
+  tabLogs: { ko: '대화 기록', en: 'Conversations' },
+  tabAI: { ko: 'AI 설정', en: 'AI settings' },
+  adminEyebrow: { ko: 'Scenario Studio · 관리자', en: 'Scenario Studio · Admin' },
+  listTitle: { ko: '시나리오 관리', en: 'Scenarios' },
+  listLead: { ko: '각 시나리오는 가상 학생 1명 + 오개념 세트 + 멘토 트리거로 구성됩니다. 게시된 시나리오만 예비교사에게 노출됩니다.', en: 'Each scenario combines one virtual student, a set of misconceptions, and mentor triggers. Only published scenarios are shown to preservice teachers.' },
+  noScenarios: { ko: '아직 시나리오가 없습니다.', en: 'No scenarios yet.' },
+  comingSoon: { ko: '이 화면은 다음 단계에서 채워집니다.', en: 'This screen is filled in a later step.' },
+} satisfies Record<string, Entry>;
+
+export type DictKey = keyof typeof dict;

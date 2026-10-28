@@ -129,5 +129,7 @@ export function createMockApi(o: MockOptions): Api {
   }
   return impl;
 }
+// SSE 메서드는 스트림 시작 전 오류를 첫 next() 에서 던진다(Api.sendTurn 계약). 그래서 yield 없는 generator.
+// eslint-disable-next-line require-yield
 const rejected = (issues: unknown, isSse: boolean) => { const e = () => fail('validation_failed', 'validation failed', issues); return isSse ? (async function* () { e(); })() : Promise.reject(tryErr(e)); };
 const tryErr = (f: () => never) => { try { f(); } catch (e) { return e; } };

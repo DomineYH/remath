@@ -1,0 +1,15 @@
+/* Global rules from the mockup (`base_ui/ReMath 시뮬레이터.html`), copied after its :root block. */
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+button{font:inherit;cursor:pointer}
+input,textarea,select{font:inherit;font-size:14px;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);padding:9px 12px;width:100%}
+input:focus,textarea:focus,select:focus,button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+textarea{resize:vertical;min-height:76px;line-height:1.55}
+h1,h2,h3,h4{margin:0;text-wrap:balance;font-family:var(--display);font-weight:600;letter-spacing:-.02em;color:var(--fg)}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.muted{color:var(--fg-3)}
+.eyebrow{margin:0 0 6px;font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--orange);font-weight:600}
+.hint{font-size:12px;color:var(--fg-3);font-weight:400}
+[hidden]{display:none!important}

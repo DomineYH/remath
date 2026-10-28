@@ -12,6 +12,7 @@ const mockOrThrow = () => mock ?? (() => { throw new Error('mock API not bundled
 
 export function createApi(realm: 'teacher', env?: Env): Api;
 export function createApi(realm: 'admin', env?: Env): AdminApi;
-export function createApi(realm: ClientRealm, env: Env = import.meta.env): Api | AdminApi {
+// Default reads the one key only: a bare `import.meta.env` would make Vite inline every VITE_* value (the mock admin password) into the bundle.
+export function createApi(realm: ClientRealm, env: Env = { VITE_MOCK_API: import.meta.env.VITE_MOCK_API }): Api | AdminApi {
   return env.VITE_MOCK_API === '1' ? mockOrThrow().createMockApi({ realm }) : createHttpApi({ realm });
 }
