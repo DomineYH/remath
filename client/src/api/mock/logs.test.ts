@@ -83,7 +83,7 @@ describe('A-10 AI settings', () => {
     const { admin } = await setup();
     const a = await admin.updateAiRole('student', { key_source: 'own', api_key: ANT, model: 'claude-haiku-5-5', effort: 'low' });
     expect(S.AiRoleSetting.strict().parse(a)).toMatchObject({ role: 'student', key_source: 'own', provider: 'anthropic', key_masked: 'sk-ant-…WXYZ', model: 'claude-haiku-5-5', effort: 'low' });
-    expect(a.key_added_at).toEqual(expect.any(String));
+    S.Iso.parse(a.key_added_at);
     expect((await admin.updateAiRole('analysis', { key_source: 'own', api_key: OAI, model: 'gpt-6-astra', effort: 'high' })).key_masked).toBe('sk-proj-…9876');
     expect((await admin.updateAiRole('mentor', { key_source: 'own', api_key: GEM, model: 'gemini-4-argon', effort: null })).provider).toBe('gemini');
     expect((await admin.updateAiRole('mentor', { key_source: 'own', api_key: 'sk-plainopenai0000LAST', model: 'gpt-5.5', effort: null })).provider).toBe('openai');
@@ -129,7 +129,7 @@ describe('A-10 AI settings', () => {
 describeMock('A-10 stored keys', () => {
   it('only the masked key and its date reach the store, never the key', async () => {
     const m = mockTarget({ now: ticking() }), { admin } = await setup(m);
-    await admin.updateAiRole('student', { key_source: 'own', api_key: ANT, model: 'claude-haiku-5-5', effort: 'low' });
+    expect((await admin.updateAiRole('student', { key_source: 'own', api_key: ANT, model: 'claude-haiku-5-5', effort: 'low' })).key_added_at).toMatch(/^2026-10-28T/);
     await admin.updateAiRole('analysis', { key_source: 'own', api_key: OAI, model: 'gpt-6-astra', effort: 'high' });
     await admin.updateAiRole('mentor', { key_source: 'own', api_key: GEM, model: 'gemini-4-argon', effort: null });
     await admin.updateAiRole('mentor', { key_source: 'own', api_key: 'sk-plainopenai0000LAST', model: 'gpt-5.5', effort: null });

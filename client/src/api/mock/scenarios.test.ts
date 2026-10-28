@@ -180,12 +180,14 @@ describe('A-4 delete', () => {
 });
 
 describeMock('A-4 stored compiled prompt, template injection', () => {
-  it('PUT on a published scenario stores null; publish stores compileScenario of the active edition', async () => {
+  it('PUT on a published scenario stores null; create stamps the injected clock; publish stores compileScenario of the active edition', async () => {
     const t = mockTarget(), { admin } = await env(t), row = (id: string) => t.store.db.scenarios.find(x => x.id === id)!;
     const id = (await admin.listScenarios()).find(s => s.slug === 'seoyeon')!.id;
     await admin.updateScenario(id, ko({ name: '서연이' }));
     expect(row(id).compiled_prompt).toBeNull();
-    const s = await admin.publishScenario((await admin.createScenario({ ...SEO, lang: 'en' })).id, { confirmed: [...ALL] });
+    const created = await admin.createScenario({ ...SEO, lang: 'en' });
+    expect(created.created_at).toBe(T0);
+    const s = await admin.publishScenario(created.id, { confirmed: [...ALL] });
     expect(row(s.id).compiled_prompt).toEqual(compileScenario(SEO, SEO.translations.en, 'en', TEMPLATES));
   });
   it('c7 FAIL when the two template editions differ in structure', async () => {

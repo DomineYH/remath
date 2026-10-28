@@ -172,6 +172,7 @@ describe('A-2 turn rules', () => {
     await it1.next();   // the stream has started
     const e = await rejects(firstNext(env.admin.sendTurn(sid, { text: '왜?' })), 409, 'turn_in_progress');
     expect(e.body.error.details).toEqual({ turn_started_at: expect.any(String) });
+    S.Iso.parse((e.body.error.details as { turn_started_at: unknown }).turn_started_at);
     await rejects(env.admin.endSession(sid), 409, 'turn_in_progress');
     await it1.return?.(undefined);   // client went away mid-stream: nothing recorded, lock released
     expect((await env.admin.getSession(sid)).turns).toHaveLength(1);
@@ -200,6 +201,7 @@ describeMock('A-2 turn rules: reload, turnLimit', () => {
     const env = await setup(mockTarget({ store: new Store(storage, () => seedDb(T0)) }));
     const sid = (await env.admin.startSession({ scenario_id: env.ids.gabriel })).session.id;
     await env.admin.sendTurn(sid, { text: '어떻게 풀었는지 말해 줄래?' })[Symbol.asyncIterator]().next();   // tab closes mid-stream
+    expect((await rejects(firstNext(env.admin.sendTurn(sid, { text: '왜?' })), 409, 'turn_in_progress')).body.error.details).toEqual({ turn_started_at: T0 });
     const admin2 = createMockApi({ realm: 'admin', store: new Store(storage, () => seedDb(T0)), now: () => T0, adminPassword: ADMIN_PW }) as unknown as AdminApi;
     expect((await drain(admin2.sendTurn(sid, { text: '왜?' }))).at(-1)?.type).toBe('done');
     expect(await admin2.endSession(sid)).not.toBeUndefined();

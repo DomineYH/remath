@@ -148,6 +148,7 @@ describeMock('A-8 audit rows for user.* and group.*', () => {
     const m = mockTarget(), { store } = m, { admin, ids, adminId, browser } = await setup(m);
     const rows = () => store.db.audit_log.filter(r => r.action.startsWith('user.') || r.action.startsWith('group.'));
     const u = await admin.createUser({ nickname: 'Haneul', password: PW });
+    expect(u).toMatchObject({ created_at: T0, pw_updated_at: T0 });
     await rejects(admin.createUser({ nickname: 'haneul', password: PW }), 409, 'nickname_taken');
     await admin.resetUserPassword(u.id, { password: 'efgh5678' });
     await rejects(admin.resetUserPassword(crypto.randomUUID(), { password: 'efgh5678' }), 404, 'not_found');
