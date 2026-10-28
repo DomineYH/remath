@@ -79,6 +79,11 @@ describe('mockup replays through runTurn', () => {
     expect(student(r.log[1])).toBe(en.elicit[0]);
     expect(r.state.counts).toEqual({});
   });
+  it('empty elicit (en, no criteria): an eliciting question gets the idk line, not undefined', async () => {
+    const tr = { ...gabriel.translations.en, elicit: [] };
+    const evs = await events(runTurn({ bots, compiled, criteria: null, tr, lang: 'en', state: fresh(), history: [{ speaker: 'student', text: tr.greet }], text: 'Can you tell me how you solved it?' }));
+    expect(student(evs)).toBe(TXT.en.idk);
+  });
   it('after the goal: no directive or trigger, only the leverage count rises', () => {
     const st: SessionState = { mis: [2, 2, 2], counts: {}, goalReached: true, takeOverCount: 0 };
     expect(judgeTurn('Just add them, the answer is 5/8.', 'en', { leverage: 'Taking Over', object: null }, gabriel.translations.en, st))
