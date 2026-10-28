@@ -69,7 +69,6 @@ export function createMockApi(o: MockOptions): Api {
     issue(realm, u); save(); return me(u);
   };
   const logoutOf = (realm: ClientRealm) => {
-    who(realm);
     db.auth_sessions = db.auth_sessions.filter(a => !(a.realm === realm && a.token_hash === jar[realm]));
     jar[realm] = null; save();
   };
@@ -233,14 +232,14 @@ export function createMockApi(o: MockOptions): Api {
     } as Api['sendTurn'],
     endSession: async id => end(sessionOf(id)),
 
-    listScenarios: async () => { who('admin'); return [...db.scenarios].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).map(toSummary); },
+    listScenarios: async () => { return [...db.scenarios].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).map(toSummary); },
     /** 새 시나리오는 초안, slug 는 서버가 만든다. */
     createScenario: async b => {
       const a = who('admin'), t = now(), id = uuid(), s: ScenarioRow = { ...b, id, slug: `scenario-${id.slice(0, 8)}`, status: 'draft', compiled_prompt: null, created_at: t, updated_at: t };
       db.scenarios.push(s); audit(db, t, { actor_id: a.id, action: 'scenario.create', target: id, meta: { slug: s.slug } }); save();
       return toAdmin(s);
     },
-    getScenario: async id => { who('admin'); return toAdmin(scenario(id)); },
+    getScenario: async id => { return toAdmin(scenario(id)); },
     /** 초안 저장 = 항상 draft + compiled_prompt null: 게시본은 내려간다(G-34, 사용자 스토리 52). */
     updateScenario: async (id, b) => {
       const a = who('admin'), s = scenario(id);
@@ -256,7 +255,7 @@ export function createMockApi(o: MockOptions): Api {
       for (const g of db.groups) g.scenario_ids = g.scenario_ids.filter(x => x !== id);
       audit(db, now(), { actor_id: a.id, action: 'scenario.delete', target: id, meta: { slug: s.slug } }); save();
     },
-    reviewScenario: async id => { who('admin'); return review(scenario(id)); }, 
+    reviewScenario: async id => review(scenario(id)),
     /** 자동 점검 fail 이 있거나 확인 m1~m4 가 다 없으면 422(details = ReviewResult). 통과하면 게시와 같은 compileScenario 로 컴파일해 저장(F-31). */
     publishScenario: async (id, b) => {
       const a = who('admin'), s = scenario(id), r = review(s);
@@ -267,9 +266,9 @@ export function createMockApi(o: MockOptions): Api {
       return toAdmin(s);
     },
     // 저장된 컴파일(게시본) 또는 초안을 활성 언어판으로 컴파일한 전문(F-31).
-    getScenarioPrompt: async id => { who('admin'); const s = scenario(id); return s.compiled_prompt ?? compile(s); },
+    getScenarioPrompt: async id => { const s = scenario(id); return s.compiled_prompt ?? compile(s); },
 
-    listUsers: async () => { who('admin'); return db.users.filter(u => u.role === 'teacher').map(userRow); },
+    listUsers: async () => { return db.users.filter(u => u.role === 'teacher').map(userRow); },
     createUser: async b => {
       const a = who('admin');
       if (db.users.some(u => u.nickname.toLowerCase() === b.nickname.toLowerCase())) fail('nickname_taken');
@@ -294,7 +293,7 @@ export function createMockApi(o: MockOptions): Api {
       for (const g of db.groups) g.member_ids = g.member_ids.filter(m => m !== id);
       audit(db, now(), { actor_id: a.id, action: 'user.delete', target: id, meta: { nickname: u.nickname, session_count: sids.size } }); save();
     },
-    listGroups: async () => { who('admin'); return db.groups.map(groupOut); },
+    listGroups: async () => { return db.groups.map(groupOut); },
     createGroup: async b => {
       const a = who('admin'), t = now(), g: GroupRow = { id: uuid(), ...groupInput(b), created_at: t, updated_at: t };
       db.groups.push(g); groupAudit(a, 'group.create', g); save(); return groupOut(g);
@@ -309,22 +308,26 @@ export function createMockApi(o: MockOptions): Api {
       db.groups = db.groups.filter(x => x.id !== id); groupAudit(a, 'group.delete', g); save();
     },
 
-    listAdminSessions: async q => { who('admin'); return filtered(q).map(sessionRow); },
-    getAdminSession: async id => { who('admin'); const s = db.sessions.find(x => x.id === id) ?? fail('not_found'); return { ...detail(s), state: adminState(s) }; }, 
-    downloadSessionsCsv: async q => { who('admin'); return new Blob([csv(filtered(q))], { type: 'text/csv;charset=utf-8' }); },
-    getAiSettings: async () => { who('admin'); return structuredClone(db.ai); },
-    updateAiRole: async (role, b) => updateAi(role, b), getProviders: async () => { who('admin'); return providersFile; },
+    listAdminSessions: async q => { return filtered(q).map(sessionRow); },
+    getAdminSession: async id => { const s = db.sessions.find(x => x.id === id) ?? fail('not_found'); return { ...detail(s), state: adminState(s) }; }, 
+    downloadSessionsCsv: async q => { return new Blob([csv(filtered(q))], { type: 'text/csv;charset=utf-8' }); },
+    getAiSettings: async () => { return structuredClone(db.ai); },
+    updateAiRole: async (role, b) => updateAi(role, b), getProviders: async () => { return providersFile; },
   };
 
-  // 본문·쿼리는 라우트 표의 zod 스키마로 검증한다(서버와 같은 400 validation_failed). 메서드마다 다시 쓰지 않도록 여기서 한 번 감싼다.
+  // 라우트 표의 realm 으로 로그인을 먼저 확인하고(401), 본문·쿼리를 zod 스키마로 검증한다(400 validation_failed) — 서버 미들웨어 순서.
+  // 메서드마다 다시 쓰지 않도록 여기서 한 번 감싼다. SSE 메서드는 스트림 시작 전 오류를 첫 next() 에서 던진다(Api.sendTurn 계약).
   for (const [name, key] of Object.entries(API_ROUTES) as [keyof Api, string][]) {
-    const [method, path] = key.split(' '), route = routes.find(r => r.method === method && r.path === path)!, schema = route.body ?? route.query, hasParam = path.includes(':');
+    const [method, path] = key.split(' '), route = routes.find(r => r.method === method && r.path === path)!, schema = route.body ?? route.query, i = path.includes(':') ? 1 : 0;
     const fn = impl[name] as (...a: unknown[]) => unknown;
-    if (schema) (impl as unknown as Record<string, unknown>)[name] = (...a: unknown[]) => { const i = hasParam ? 1 : 0, r = schema.safeParse(a[i]); if (!r.success) return rejected(r.error.issues, route.response === 'sse'); a[i] = r.data; return fn(...a); };
+    const guarded = (a: unknown[]) => {
+      if (route.realm !== 'none') who(route.realm === 'any' ? o.realm : route.realm);
+      if (schema) { const r = schema.safeParse(a[i]); if (!r.success) fail('validation_failed', 'validation failed', r.error.issues); a[i] = r.data; }
+      return fn(...a);
+    };
+    (impl as unknown as Record<string, unknown>)[name] = route.response === 'sse'
+      ? async function* (...a: unknown[]) { yield* guarded(a) as AsyncIterable<unknown>; }
+      : async (...a: unknown[]) => guarded(a);
   }
   return impl;
 }
-// SSE 메서드는 스트림 시작 전 오류를 첫 next() 에서 던진다(Api.sendTurn 계약). 그래서 yield 없는 generator.
-// eslint-disable-next-line require-yield
-const rejected = (issues: unknown, isSse: boolean) => { const e = () => fail('validation_failed', 'validation failed', issues); return isSse ? (async function* () { e(); })() : Promise.reject(tryErr(e)); };
-const tryErr = (f: () => never) => { try { f(); } catch (e) { return e; } };
