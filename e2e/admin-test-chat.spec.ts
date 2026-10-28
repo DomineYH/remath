@@ -95,3 +95,28 @@ test('admin test chat: panel per turn, goal → report, reload keeps it, recover
   await expect(page.getByText('Session ended · leverage analysis only')).toBeVisible();
   await expect(input).toBeDisabled();
 });
+
+test('I-51: a stream that drops after the turn was recorded keeps it; one that drops before restores the input', async ({ page }) => {
+  await page.goto('/admin');
+  await page.getByLabel('Admin ID').fill('admin');
+  await page.getByLabel('Password', { exact: true }).fill('E2eAdmin123');
+  await page.getByRole('button', { name: 'Sign in as admin' }).click();
+  await openGabrielTest(page);
+  const log = page.getByRole('log'), input = page.getByRole('textbox', { name: 'Message' });
+  const failed = page.getByText('No response was received.', { exact: false });
+
+  await page.evaluate(() => { (globalThis as { __remathMockDrop?: string }).__remathMockDrop = 'after'; });
+  await input.fill('어떻게 풀었는지 말해 줄래?');
+  await input.press('Enter');
+  await expect(log.locator('.msg.student')).toHaveCount(2);
+  await expect(log.locator('.msg.me')).toHaveCount(1);
+  await expect(input).toHaveValue('');
+  await expect(failed).toBeHidden();
+
+  await page.evaluate(() => { (globalThis as { __remathMockDrop?: string }).__remathMockDrop = 'before'; });
+  await input.fill('왜 그렇게 생각했어?');
+  await input.press('Enter');
+  await expect(failed).toBeVisible();
+  await expect(input).toHaveValue('왜 그렇게 생각했어?');
+  await expect(log.locator('.msg.me')).toHaveCount(1);
+});

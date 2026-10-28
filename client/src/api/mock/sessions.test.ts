@@ -1,6 +1,6 @@
 // A-2 (practice-session rules), A-3 (L1·L2 replays through sendTurn), A-6 (admin `state`), against the mock API only.
 import * as S from '@remath/shared';
-import { TXT } from '@remath/shared/engine';
+import { HELP_LINE, TXT } from '@remath/shared/engine';
 import gabriel from '@remath/seed/scenarios/gabriel.json';
 import { describe, expect, it } from 'vitest';
 import { ApiError, type AdminApi, type AdminSseEvent, type Api } from '../types.ts';
@@ -142,7 +142,7 @@ describe('A-3 turn pipeline through sendTurn', () => {
     const env = await setup(), noah = (await env.admin.getScenario(env.ids.noah)).translations.en;
     const sid = (await env.admin.startSession({ scenario_id: env.ids.noah })).session.id;
     const [evs] = await replay(env.admin, sid, ['Help'], S.AdminSseEvent);
-    expect(student(evs)).toBe(TXT.en.help);
+    expect(student(evs)).toBe(HELP_LINE.en);
     expect(trigger(evs)).toBe(2);
     expect(pick(evs, 'mentor')?.text).toBe(`${TXT.en.helpLead}\n${noah.t2.split('\n').filter(Boolean).map(x => '· ' + x).join('\n')}`);
   });
@@ -179,6 +179,15 @@ describe('A-2 turn rules', () => {
     await it1.return?.(undefined);   // client went away mid-stream: nothing recorded, lock released
     expect((await env.admin.getSession(sid)).turns).toHaveLength(1);
     expect((await drain(env.admin.sendTurn(sid, { text: '왜?' }))).at(-1)?.type).toBe('done');
+  });
+  it('a reload mid-turn leaves no stuck turn_started_at: the reloaded store can send and end', async () => {
+    const storage = memoryStorage();
+    const env = await setup({ store: new Store(storage, () => seedDb(T0)) });
+    const sid = (await env.admin.startSession({ scenario_id: env.ids.gabriel })).session.id;
+    await env.admin.sendTurn(sid, { text: '어떻게 풀었는지 말해 줄래?' })[Symbol.asyncIterator]().next();   // tab closes mid-stream
+    const admin2 = createMockApi({ realm: 'admin', store: new Store(storage, () => seedDb(T0)), now: () => T0, adminPassword: ADMIN_PW }) as unknown as AdminApi;
+    expect((await drain(admin2.sendTurn(sid, { text: '왜?' }))).at(-1)?.type).toBe('done');
+    expect(await admin2.endSession(sid)).not.toBeUndefined();
   });
   it('422 turn_limit_reached + details at the limit; END SESSION still ends the session', async () => {
     const env = await setup({ turnLimit: 2 });

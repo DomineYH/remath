@@ -1,5 +1,6 @@
 // 공급자 어댑터 인터페이스 (티켓 12). 서버 턴 파이프라인이 보는 유일한 LLM 경계.
 // 실 어댑터 3종(3단계)과 MOCK_LLM 어댑터가 모두 이 인터페이스를 구현한다.
+import type { Trigger } from '../leverage.ts';
 
 export type ProviderId = 'openai' | 'anthropic' | 'gemini' | 'mock';
 export type Lang = 'ko' | 'en';
@@ -64,4 +65,4 @@ export type MockContext =
   | { role: 'student'; lang: Lang; teacherText: string; leverage: string | null; directive: TurnDirective | null; goalReached: boolean; lines: { greet: string; chars: string; elicit: string[] } }
   | { role: 'analysis'; lang: Lang; purpose: 'turn'; teacherText: string; criteria: Criteria }
   | { role: 'analysis'; lang: Lang; purpose: 'report'; report: ReportInput }
-  | { role: 'mentor'; lang: Lang; trigger: 1 | 2 | 3; lines: { t1: string; t2: string; t3: string } };
+  | { role: 'mentor'; lang: Lang; trigger: Trigger; lines: { t1: string; t2: string; t3: string } };

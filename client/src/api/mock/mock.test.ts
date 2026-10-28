@@ -174,6 +174,12 @@ describe('logout and realm separation (C-10)', () => {
     await rejects(teacher.getPractice(), 401, 'unauthorized');
     await rejects(teacher.me(), 401, 'unauthorized');
   });
+  it('auth (401) comes before body validation (400), as the server middleware orders them', async () => {
+    const { teacher, admin } = setup();
+    await rejects(admin.createUser({ nickname: '', password: '' }), 401, 'unauthorized');
+    await rejects(teacher.changePassword({ current: '', next: '' }), 401, 'unauthorized');
+    await rejects(teacher.sendTurn('x', { text: '' })[Symbol.asyncIterator]().next() as Promise<unknown>, 401, 'unauthorized');
+  });
 });
 
 describe('audit helper (D-21)', () => {

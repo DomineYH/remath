@@ -1,5 +1,6 @@
 // 내부 상태 패널(I-52, 관리자 대화 테스트 전용). 상태는 `state` 이벤트·getAdminSession 에서만, 문구는 관리자 시나리오 응답에서 온다.
 import { useEffect, useId, useState, type ReactNode } from 'react';
+import { TRIGGER } from '@remath/shared';
 import type * as S from '@remath/shared';
 import type { z } from 'zod';
 import { adminApi } from '../apis.ts';
@@ -9,7 +10,7 @@ import { LeverageBar } from './SessionReport.tsx';
 type AdminState = z.infer<typeof S.AdminState>;
 type Row = z.infer<typeof S.ClassificationRow>;
 
-export const triggerText = (t: T, n: AdminState['last_trigger']) => t(n === 1 ? 'trig1' : n === 2 ? 'trig2' : n === 3 ? 'trig3hit' : 'none');
+export const triggerText = (t: T, n: AdminState['last_trigger']) => t(n === TRIGGER.takingOver ? 'trig1' : n === TRIGGER.help ? 'trig2' : n === TRIGGER.goal ? 'trig3hit' : 'none');
 
 function Box({ title, extra, children }: { title: string; extra?: string; children: ReactNode }) {
   const id = useId();

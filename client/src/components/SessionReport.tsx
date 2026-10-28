@@ -1,4 +1,5 @@
 import { useId } from 'react';
+import { LEVERAGE } from '@remath/shared';
 import type * as S from '@remath/shared';
 import type { z } from 'zod';
 import { useT } from '../i18n/index.tsx';
@@ -6,7 +7,7 @@ import { useT } from '../i18n/index.tsx';
 /** 분류 하나의 막대. Taking Over 는 orange(I-50). */
 export function LeverageBar({ name, count, max, title }: { name: string; count: number; max: number; title?: string }) {
   return (
-    <div className={`bar ${name === 'Taking Over' ? 'to' : ''}`}>
+    <div className={`bar ${name === LEVERAGE.takingOver ? 'to' : ''}`}>
       <span title={title}>{name}</span>
       <div className="t"><i style={{ width: `${(count / Math.max(1, max)) * 100}%` }} /></div>
       <span className="v">{count}</span>
