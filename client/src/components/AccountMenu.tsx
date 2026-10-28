@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Password } from '@remath/shared';
 import { ApiError } from '../api/index.ts';
@@ -9,6 +9,7 @@ import { ErrorLine } from './ErrorLine.tsx';
 import { Modal } from './Modal.tsx';
 import { PasswordFields, type PasswordValue } from './PasswordFields.tsx';
 import { toast } from './Toast.tsx';
+import { useDismiss } from './useDismiss.ts';
 
 /** 닉네임 버튼 하나 + 드롭다운(비밀번호 변경·로그아웃). Esc·바깥 클릭으로 닫힌다(티켓 17 #3). */
 export function AccountMenu({ kind, nickname }: { kind: 'teacher' | 'admin'; nickname: string }) {
@@ -16,13 +17,7 @@ export function AccountMenu({ kind, nickname }: { kind: 'teacher' | 'admin'; nic
   const [open, setOpen] = useState(false), [pwOpen, setPwOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null), btn = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const away = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
-    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') { setOpen(false); btn.current?.focus(); } };
-    document.addEventListener('mousedown', away); document.addEventListener('keydown', esc);
-    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc); };
-  }, [open]);
+  useDismiss(open, useCallback(() => setOpen(false), []), box, btn);
 
   const logout = async () => {
     setOpen(false);

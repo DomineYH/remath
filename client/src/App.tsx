@@ -5,6 +5,7 @@ import { LangProvider } from './i18n/index.tsx';
 import { AdminLoginScreen } from './screens/AdminLoginScreen.tsx';
 import { AdminPlaceholderScreen } from './screens/AdminPlaceholderScreen.tsx';
 import { AdminScenariosScreen } from './screens/AdminScenariosScreen.tsx';
+import { ChatScreen } from './screens/ChatScreen.tsx';
 import { LoginScreen } from './screens/LoginScreen.tsx';
 import { PracticeHomeScreen } from './screens/PracticeHomeScreen.tsx';
 import { LoginGate, RequireRealm } from './session.tsx';
@@ -20,6 +21,7 @@ export function App() {
           <Route path="/admin" element={<LoginGate realm="admin"><AdminLoginScreen /></LoginGate>} />
           <Route path="/practice" element={<RequireRealm realm="teacher"><PracticeHomeScreen /></RequireRealm>} />
           <Route path="/admin/scenarios" element={admin(<AdminScenariosScreen />)} />
+          <Route path="/admin/scenarios/:id/test" element={admin(<ChatScreen isAdminTest />)} />
           <Route path="/admin/users" element={admin(<AdminPlaceholderScreen title="tabUsers" />)} />
           <Route path="/admin/groups" element={admin(<AdminPlaceholderScreen title="tabGroups" />)} />
           <Route path="/admin/logs" element={admin(<AdminPlaceholderScreen title="tabLogs" />)} />

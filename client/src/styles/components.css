@@ -115,3 +115,73 @@ dialog.modal::backdrop{background:rgba(17,18,34,.45)}
 .access .eyebrow{margin:0;font-size:11px;color:var(--accent)}
 .prompt-part h4{font-size:15px;margin:16px 0 8px}
 pre.prompt{font-family:var(--mono);font-size:12px;line-height:1.6;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:16px;overflow-x:auto;max-height:540px;white-space:pre-wrap;overflow-wrap:anywhere;margin:0}
+
+/* chat (I-50): copied from the mockup; ⋯ menu, error line and the panel <details> are new */
+.chat-grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:20px;align-items:start}
+@media (max-width:900px){.chat-grid{grid-template-columns:1fr}}
+.chat{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);display:flex;flex-direction:column;min-height:580px;max-height:calc(100vh - 140px);overflow:hidden}
+.chat-h{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.chat-h b{font-family:var(--display);font-size:18px;font-weight:600}
+.chat-h small{display:block;color:var(--fg-3);font-size:12.5px}
+.chat-h .tools{margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.toggle{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--fg-2)}
+.toggle input{width:auto}
+.problem{margin:14px 18px 0;background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:14px;padding:14px 18px}
+.problem .eyebrow{color:var(--accent);font-size:11.5px;margin-bottom:4px}
+.problem p{margin:0;font-family:var(--display);font-size:16px;line-height:1.45;color:var(--fg)}
+.log{flex:1;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:14px}
+.msg{display:flex;gap:10px;max-width:86%}
+.msg.me{align-self:flex-end;flex-direction:row-reverse}
+.msg .pf{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;font-size:17px;flex:none;background:var(--surface-2)}
+.msg .b{display:flex;flex-direction:column;gap:6px;min-width:0}
+.msg.me .b{align-items:flex-end}
+.bub{padding:10px 14px;border-radius:16px;line-height:1.55;overflow-wrap:anywhere;white-space:pre-line;font-size:14.5px}
+.msg.student .bub{background:var(--surface);border:1px solid var(--line);color:var(--fg);border-top-left-radius:4px}
+.msg.mentor .bub{background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--fg);border-top-left-radius:4px}
+.msg.mentor .nm{color:var(--accent)}
+.msg.me .bub{background:var(--accent);color:var(--on-accent);border-top-right-radius:4px}
+.msg .nm{font-size:12px;color:var(--fg-3);font-weight:600}
+.cls{font-family:var(--mono);font-size:11px;color:var(--fg-3);background:var(--bg);border:1px solid var(--line);padding:6px 10px;border-radius:8px;white-space:pre}
+.cls .k{color:var(--accent)}
+.sys{align-self:center;font-size:12px;color:var(--fg-3);background:var(--surface-2);padding:4px 12px;border-radius:999px;text-align:center}
+.compose{display:flex;gap:8px;padding:12px 18px 16px;border-top:1px solid var(--line)}
+.compose input{flex:1;border-radius:999px;padding-inline:16px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;padding:10px 18px 0;border-top:1px solid var(--line)}
+.chips button{border:1px solid var(--line);background:var(--surface);color:var(--fg-2);font-size:12.5px;padding:5px 12px;border-radius:999px}
+.chips button:hover{border-color:var(--accent-line);color:var(--accent);background:var(--accent-soft)}
+.chips + .compose{border-top:0}
+/* observer rail */
+.rail{display:flex;flex-direction:column;gap:12px}
+.rbox{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px}
+.rbox h4{margin:0 0 12px;font-size:16px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.rbox p{margin:0;font-size:13px;color:var(--fg-2)}
+.bar{display:grid;grid-template-columns:96px 1fr 28px;gap:8px;align-items:center;font-size:12.5px;margin-bottom:7px}
+.bar>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar .t{height:8px;background:var(--surface-2);border-radius:999px;overflow:hidden}
+.bar .t i{display:block;height:100%;background:var(--accent);border-radius:999px}
+.bar.to .t i{background:var(--orange)}
+.bar .v{font-family:var(--mono);text-align:right;color:var(--fg-2)}
+.mlist{display:flex;flex-direction:column;gap:8px;margin:0;padding:0;list-style:none}
+.mitem{display:flex;gap:8px;align-items:flex-start;font-size:13px;line-height:1.45}
+.dot{width:30px;height:20px;border-radius:999px;flex:none;font-family:var(--mono);font-size:10.5px;display:grid;place-items:center;background:var(--surface-2);color:var(--fg-3)}
+.dot.half{background:var(--orange-soft);color:var(--orange)}.dot.full{background:var(--teal-soft);color:var(--teal)}
+.rail .secret{font-size:12px;color:var(--orange);background:var(--orange-soft);padding:8px 12px;border-radius:12px}
+/* session report */
+.report{align-self:stretch;border:1px solid var(--line);border-radius:var(--r);padding:18px 20px;background:var(--surface)}
+.report .rh{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:8px}
+.report .rh b{font-family:var(--display);font-size:17px;font-weight:600}
+.report .rrow{display:flex;flex-direction:column;gap:3px;padding:10px 0;border-top:1px solid var(--line)}
+.report .rdesc{font-size:12.5px;color:var(--fg-3)}
+.report ul{margin:2px 0 0;padding-left:18px;font-size:13px;color:var(--fg-2)}
+.ai-mini-row{display:flex;flex-direction:column;gap:1px;margin-bottom:8px}
+.ai-mini-row span{color:var(--fg-3);font-size:11.5px;font-weight:600}
+.ai-mini-row b{font-weight:500;font-size:12px;overflow-wrap:anywhere}
+.report .rsum{margin:12px 0 0;padding-top:10px;border-top:1px solid var(--line);font-size:13.5px;color:var(--fg-2);white-space:pre-line}
+.chat>.err{padding:0 18px}
+.chips button:disabled{opacity:.45;cursor:not-allowed}
+.chat-h .more{display:none;margin-left:auto;position:relative}
+@media (max-width:640px){.chat-h .tools{display:none}.chat-h .more{display:block}}
+.rail-d{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 16px}
+.rail-d summary{cursor:pointer;font-weight:600;font-size:14px}
+.rail-d[open] summary{margin-bottom:12px}
+.chat-h>div:nth-child(2){flex:1;min-width:0}
