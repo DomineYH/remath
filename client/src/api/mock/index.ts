@@ -93,7 +93,6 @@ export function createMockApi(o: MockOptions): Api {
   // ---- 투영 (예비교사용은 scenarios_public 뷰 열만) ------------------------------------------
   const groupsOf = (pred: (g: Db['groups'][number]) => boolean) => db.groups.filter(pred).map(g => ({ id: g.id, name: g.name }));
   const tr = (s: ScenarioRow) => s.translations[s.lang];
-  const toPublic = (s: ScenarioRow) => { const t = tr(s); return { id: s.id, slug: s.slug, status: 'published' as const, lang: s.lang, student_prefix: s.student_prefix, mentor_prefix: s.mentor_prefix, grade: s.grade, classification: s.classification, name: t.name, description: t.description, problem: t.problem, chars: t.chars, greet: t.greet, elicit: t.elicit, created_at: s.created_at, updated_at: s.updated_at }; };
   const sessionCount = (sid: string) => db.sessions.filter(x => x.scenario_id === sid).length;
   const scenario = (id: string) => db.scenarios.find(s => s.id === id) ?? fail('not_found');
   const toAdmin = ({ compiled_prompt: _, ...s }: ScenarioRow): z.infer<typeof S.ScenarioAdmin> => ({ ...s, groups: groupsOf(g => g.scenario_ids.includes(s.id)), session_count: sessionCount(s.id) });
@@ -220,7 +219,7 @@ export function createMockApi(o: MockOptions): Api {
     getPractice: async () => {
       const u = who('teacher'), mine = db.groups.filter(g => g.member_ids.includes(u.id));
       const scenarios = db.scenarios.filter(s => s.status === 'published' && mine.some(g => g.scenario_ids.includes(s.id)));
-      return { groups: groupsOf(g => mine.includes(g)), scenarios: scenarios.map(s => ({ ...toPublic(s), group_ids: mine.filter(g => g.scenario_ids.includes(s.id)).map(g => g.id) })) };
+      return { groups: groupsOf(g => mine.includes(g)), scenarios: scenarios.map(s => ({ ...S.scenarioPublic(s), group_ids: mine.filter(g => g.scenario_ids.includes(s.id)).map(g => g.id) })) };
     },
     listSessions: async () => { const u = who('teacher'); return filtered({ user_id: u.id }).map(sessionRow); },
     getCurrentSession: async () => { const s = current(who(o.realm)); return s ? detail(s) : null; },

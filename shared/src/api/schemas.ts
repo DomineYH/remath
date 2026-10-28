@@ -85,6 +85,13 @@ export const ScenarioPublic = z.object({
   name: z.string(), description: z.string(), problem: z.string(), chars: z.string(), greet: z.string(), elicit: z.array(z.string()),
   created_at: Iso, updated_at: Iso,
 });
+type ScenarioCols = z.infer<typeof ScenarioBase> & { id: string; slug: string; created_at: string; updated_at: string };
+/** scenarios_public 뷰의 한 행: 시나리오 열 + 한 언어판의 공개 문구(기본은 활성 언어판). 내부 설정·나머지 대사는 빠진다. status 는 뷰가 게시본만 담아 상수. */
+export function scenarioPublic(s: ScenarioCols, lang: z.infer<typeof Lang> = s.lang): z.infer<typeof ScenarioPublic> {
+  const t = s.translations[lang];
+  return { id: s.id, slug: s.slug, status: 'published', lang, student_prefix: s.student_prefix, mentor_prefix: s.mentor_prefix, grade: s.grade, classification: s.classification,
+    name: t.name, description: t.description, problem: t.problem, chars: t.chars, greet: t.greet, elicit: t.elicit, created_at: s.created_at, updated_at: s.updated_at };
+}
 export const PracticeHome = z.object({
   groups: z.array(z.object({ id: Uuid, name: z.string() })),              // 0개면 "그룹 없음" 안내
   scenarios: z.array(ScenarioPublic.extend({ group_ids: z.array(Uuid) })), // groups 가 있는데 0개면 "할당 없음" 안내

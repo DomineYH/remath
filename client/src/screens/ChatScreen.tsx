@@ -3,7 +3,7 @@
 // 예비교사가 진행 중 세션과 다른 학생을 고르면 종료 안내만 그린다(세션은 사용자당 하나, session_active).
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
-import type * as S from '@remath/shared';
+import * as S from '@remath/shared';
 import type { z } from 'zod';
 import { ApiError, type AdminApi, type Api } from '../api/index.ts';
 import { adminApi, teacherApi } from '../apis.ts';
@@ -30,7 +30,7 @@ const narrowQuery = '(max-width:900px)';
 const useNarrow = () => useSyncExternalStore(cb => { const m = matchMedia(narrowQuery); m.addEventListener('change', cb); return () => m.removeEventListener('change', cb); }, () => matchMedia(narrowQuery).matches);
 
 async function loadView(isAdminTest: boolean, scenarioId: string, lang: 'ko' | 'en'): Promise<View> {
-  if (isAdminTest) { const s = await adminApi.getScenario(scenarioId); return { ...s, ...s.translations[lang], lang }; }
+  if (isAdminTest) { const s = await adminApi.getScenario(scenarioId); return { ...S.scenarioPublic(s, lang), internal: s.internal }; }
   const s = (await teacherApi.getPractice()).scenarios.find(x => x.id === scenarioId);
   if (!s) throw new ApiError(404, { error: { code: 'not_found', message: 'scenario not found' } });
   return s;
