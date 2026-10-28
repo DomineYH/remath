@@ -13,7 +13,8 @@
     "db:migrate": "node --import ./src/raw-hooks.ts src/cli/migrate.ts",
     "db:seed": "node --import ./src/raw-hooks.ts src/cli/seed.ts",
     "db:smoke": "node --import ./src/raw-hooks.ts src/cli/smoke.ts",
-    "env:swap": "node --import ./src/raw-hooks.ts src/cli/env-swap.ts"
+    "env:swap": "node --import ./src/raw-hooks.ts src/cli/env-swap.ts",
+    "test:http": "vitest run --config vitest.http.config.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.5",
