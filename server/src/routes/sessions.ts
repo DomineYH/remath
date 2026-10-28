@@ -7,36 +7,22 @@ import type { z } from 'zod';
 import type { Deps, Handlers } from '../app.ts';
 import { must } from '../db.ts';
 import { ApiFail } from '../errors.ts';
+import { SESSION_DETAIL_SELECT, SESSION_SELECT, sessionDetail, sessionRow, type SessionDbRow } from '../projection.ts';
 import { frame, withTurn } from '../turn.ts';
 
 type Lang = z.infer<typeof S.Lang>;
-interface SessionCols {
-  id: string; user_id: string; scenario_id: string; lang: Lang; started_at: string; ended_at: string | null; goal_reached: boolean;
-  report: z.infer<typeof S.SessionReport> | null; user: { nickname: string };
-  scenario: { scenario_translations: { lang: Lang; name: string }[] }; turns: z.infer<typeof S.Turn>[];
-}
-// scenario_name 은 세션 lang 스냅샷 판(M-9): 두 판 이름을 받아 고른다.
-const SESSION = 'id, user_id, scenario_id, lang, started_at, ended_at, goal_reached, report, user:users!inner(nickname), scenario:scenarios!inner(scenario_translations(lang, name))';
-const DETAIL = `${SESSION}, turns(seq, speaker, text, leverage, object, trigger, created_at)`;
-
 export function sessionHandlers({ db, config, now }: Deps): Handlers {
   const turnLimit = config.env.MAX_TURNS;
   const turnOpts = { db, maxTurns: turnLimit, timeoutMs: config.env.TURN_TIMEOUT_MS, templates: config.templates, now };
 
-  /** E-19: 목 projection.ts 의 sessionRow 와 같은 모양. turn_count = 예비교사 발화 수. */
-  const row = (s: SessionCols): z.infer<typeof S.SessionRow> => ({
-    id: s.id, scenario_id: s.scenario_id, scenario_name: s.scenario.scenario_translations.find(t => t.lang === s.lang)?.name ?? '', lang: s.lang,
-    user_id: s.user_id, nickname: s.user.nickname, started_at: s.started_at, ended_at: s.ended_at, goal_reached: s.goal_reached,
-    turn_count: s.turns.filter(t => t.speaker === 'teacher').length,
-  });
-  const detail = (s: SessionCols): z.infer<typeof S.SessionDetail> => ({ session: row(s), turns: s.turns, report: s.report, turn_limit: turnLimit });
+  const detail = (s: SessionDbRow) => sessionDetail(s, turnLimit);
   const mine = (req: FastifyRequest, cols: string) => db.from('sessions').select(cols).eq('user_id', req.auth!.user.id);
   /** 남의 세션·없는 세션·uuid 가 아닌 id 는 모두 404(C-10, 목 sessionOf). */
-  const load = async (q: ReturnType<typeof mine>) => must(await q.order('seq', { referencedTable: 'turns' }).maybeSingle()) as unknown as SessionCols | null;
-  const sessionOf = async (req: FastifyRequest, light?: 'light'): Promise<SessionCols> => {
+  const load = async (q: ReturnType<typeof mine>) => must(await q.order('seq', { referencedTable: 'turns' }).maybeSingle()) as unknown as SessionDbRow | null;
+  const sessionOf = async (req: FastifyRequest, light?: 'light'): Promise<SessionDbRow> => {
     const { id } = req.params as { id: string };
-    const q = S.Uuid.safeParse(id).success ? mine(req, light ? 'id, ended_at' : DETAIL).eq('id', id) : null;
-    const s = !q ? null : light ? must(await q.maybeSingle()) as unknown as SessionCols | null : await load(q);
+    const q = S.Uuid.safeParse(id).success ? mine(req, light ? 'id, ended_at' : SESSION_DETAIL_SELECT).eq('id', id) : null;
+    const s = !q ? null : light ? must(await q.maybeSingle()) as unknown as SessionDbRow | null : await load(q);
     if (!s) throw new ApiFail('not_found', 'session not found');
     return s;
   };
@@ -57,9 +43,9 @@ export function sessionHandlers({ db, config, now }: Deps): Handlers {
     },
     /** 내 기록, 최신순(M-13: 예비교사 쿠키만). */
     'GET /api/sessions': async req =>
-      (must(await mine(req, `${SESSION}, turns(speaker)`).order('started_at', { ascending: false })) as unknown as SessionCols[]).map(row),
+      (must(await mine(req, `${SESSION_SELECT}, turns(speaker)`).order('started_at', { ascending: false })) as unknown as SessionDbRow[]).map(sessionRow),
     'GET /api/sessions/current': async req => {
-      const s = await load(mine(req, DETAIL).is('ended_at', null));
+      const s = await load(mine(req, SESSION_DETAIL_SELECT).is('ended_at', null));
       return s ? detail(s) : null;
     },
     'GET /api/sessions/:id': async req => detail(await sessionOf(req)),
@@ -86,7 +72,7 @@ export function sessionHandlers({ db, config, now }: Deps): Handlers {
       }
       const id = must(r) as string;
       reply.code(201);
-      return detail((await load(mine(req, DETAIL).eq('id', id)))!);
+      return detail((await load(mine(req, SESSION_DETAIL_SELECT).eq('id', id)))!);
     },
 
     /**
