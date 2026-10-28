@@ -44,6 +44,7 @@ export function AdminUsersScreen() {
       <span className="mono">{u.created_at.slice(0, 10)}</span>,
       <span className="mono">{u.pw_updated_at.slice(0, 10)}</span>,
       <div className="acts-cell">
+        {/* eslint-disable-next-line no-restricted-syntax -- file format name */}
         <Button size="sm" disabled={!u.session_count} onClick={() => csv({ user_id: u.id }, 'user', u.nickname)} aria-label={`CSV · ${u.nickname}`}>CSV</Button>
         <Button size="sm" onClick={() => setPwFor(u)} aria-label={`${t('pwBtn')} · ${u.nickname}`}>{t('pwBtn')}</Button>
         <Button size="sm" variant="danger" onClick={() => setDelFor(u)} aria-label={`${t('del')} · ${u.nickname}`}>{t('del')}</Button>

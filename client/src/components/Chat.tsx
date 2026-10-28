@@ -73,9 +73,11 @@ export function Message({ speaker, avatar, name, text, children }: { speaker: Sp
 export function ClassificationBlock({ leverage, object, show }: { leverage: string; object: string | null; show: boolean }) {
   return (
     <div className="cls" hidden={!show}>
+      {/* eslint-disable no-restricted-syntax -- the [CLASSIFICATION] block is machine format, not copy */}
       {'[CLASSIFICATION]\n{\n  '}<span className="k">"leverage"</span>{`: "${leverage}"`}
       {object !== null && <>{',\n  '}<span className="k">"object"</span>{`: "${object}"`}</>}
       {'\n}'}
+      {/* eslint-enable no-restricted-syntax */}
     </div>
   );
 }
