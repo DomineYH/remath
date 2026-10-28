@@ -1,4 +1,4 @@
-// 목 구현 — 서버 핸들러를 브라우저 안에서 흉내 낸다. 1차(#22): 인증 9개·저장소·감사 helper와 빈 목록들. 나머지는 #23~#27 이 채운다.
+// 목 구현 — 서버 핸들러를 브라우저 안에서 흉내 낸다. #22~#27 이 라우트 표 38개를 모두 채웠다.
 // 규칙(400 검증·409 중복·401 구분 없음·비밀번호 변경 = 다른 로그인 종료·세션 409/422)은 서버와 같다. 턴은 공유 runTurn + mockProvider 를 그대로 돌린다(#24). 서버가 생기면 이 폴더만 버린다.
 import { checkTemplates, compileScenario, TEMPLATES, type Templates } from '@remath/prompts';
 import { ERROR_STATUS, routes, type ErrorCode } from '@remath/shared';
@@ -31,7 +31,6 @@ export interface MockOptions {
 }
 
 const fail = (code: ErrorCode, message: string = code, details?: unknown): never => { throw new ApiError(ERROR_STATUS[code], { error: { code, message, details } }); };
-const todo = (name: string, issue: number) => (): never => { throw new Error(`mock: ${name} lands in #${issue}`); };
 
 let shared: Store | undefined;
 export function createMockApi(o: MockOptions): Api {
