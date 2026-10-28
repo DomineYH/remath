@@ -10,6 +10,8 @@ import { authenticate, COOKIE, createLimiter, resolveRealm, type Auth } from './
 import type { Config } from './config.ts';
 import type { Db } from './db.ts';
 import { ApiFail } from './errors.ts';
+import { adminScenarioHandlers } from './routes/admin-scenarios.ts';
+import { adminUserHandlers } from './routes/admin-users.ts';
 import { authHandlers } from './routes/auth.ts';
 
 declare module 'fastify' { interface FastifyRequest { auth?: Auth } }
@@ -40,7 +42,7 @@ export async function buildApp(d: Pick<Deps, 'db' | 'config'> & Partial<Deps>, o
     return reply.code(500).send({ error: { code: 'internal', message: 'internal error' } });
   });
 
-  const handlers: Handlers = { ...authHandlers(deps) };
+  const handlers: Handlers = { ...authHandlers(deps), ...adminScenarioHandlers(deps), ...adminUserHandlers(deps) };
   const table = new Set(routes.map(r => `${r.method} ${r.path}`));
   for (const k of Object.keys(handlers)) if (!table.has(k)) throw new Error(`handler ${k} is not in the route table`);
 
