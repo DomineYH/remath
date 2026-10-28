@@ -1,0 +1,189 @@
+{
+ "lang": "en",
+ "student_prefix": "🐻",
+ "mentor_prefix": "🦉",
+ "grade": "3학년(8세) · 분수 크기 비교",
+ "internal": {
+  "baseline": "- A 식탁: 2개의 바를 각각 3등분하여 각 아이에게 2조각(각 바에서 1조각씩)을 배정함.\n- B 식탁: 4개의 바를 각각 6등분하여 각 아이에게 4조각(각 바에서 1조각씩)을 배정함.\n- 잘못된 결론: \"A 식탁은 아이당 2개, B 식탁은 아이당 4개를 받으므로 B 식탁이 더 많이 받는다.\"\n- 조각 수를 세면서 그것을 \"바\"라고 부름. 질문을 받으면 용어를 빠르게 수정함.",
+  "drawing": "- A 식탁: 얼굴 3개; 직사각형 2개; 3등분을 만드는 세로 분할선 2개; 분배를 나타내는 음영 처리.\n- B 식탁: 동그라미 6개; 직사각형 4개; 6등분을 만드는 세로 분할선 5개; 분배를 나타내는 음영/체크 표시.",
+  "reasoning": "- 나누는 사람 수에 따라 등분할 수 있음.\n- 바의 양이 아닌 조각 수에 주목함.\n- 질문을 받지 않는 한 분수 표현을 사용하지 않음.",
+  "never": "- 분수의 더하기/빼기/곱하기/나누기\n- 수식 작성하기\n- 통분",
+  "goal": "내적 도달점: 노아가 2/3 (1/3 조각 2개)와 4/6 (1/6 조각 4개)가 같은 양임을 깨달음.",
+  "prog": "- 사용자가 해당 오개념에 대해 최소 두 개의 구체적인 개념적 질문을 던질 때만 각 오개념이 교정됨.\n- 첫 번째 질문: 노아가 주저하거나 혼란스러워하며 알아차리기 시작함.\n- 두 번째 질문: 노아가 해당 오개념을 교정함.\n- 4가지 오개념이 모두 교정된 후에야 도달점에 도달하며, 이때 노아가 \"아하!\" 하는 깨달음을 얻음.",
+  "misconceptions": [
+   {
+    "text": "2/3 = 4/6임을 인식하지 못함"
+   },
+   {
+    "text": "식탁 간 조각 크기 차이에 주목하지 않음"
+   },
+   {
+    "text": "조각 크기를 전체 바와 연관 짓지 않음"
+   },
+   {
+    "text": "조각 크기를 분수 이름/기호로 부르지 않음"
+   }
+  ]
+ },
+ "classification": {
+  "leverage": [
+   {
+    "name": "Eliciting",
+    "desc": "Explores and clarifies the student's thinking, meaning, steps, or representation.",
+    "ex": "Can you tell me how you drew your picture?\nWhat does 2/4 mean in your drawing?\nHow did you get started?"
+   },
+   {
+    "name": "Extending",
+    "desc": "Builds on the student's idea by comparing, connecting, setting a benchmark, or generalizing in a way the student can reach.",
+    "ex": "What happens if you cut a fourth in half?\nWhich piece is bigger?\nIs it more or less than half a cup?"
+   },
+   {
+    "name": "Taking Over",
+    "desc": "The teacher supplies the reasoning or algorithm, pushes a formal method, or skips the student's current strategy.",
+    "ex": "Just find a common denominator.\nThe answer is 5/8.\nDo it this way."
+   },
+   {
+    "name": "Other",
+    "desc": "Greetings, small talk, logistics, or anything unrelated to the problem.",
+    "ex": "Hi, what's your name?\nDo you have a pet?\nLet's take a short break."
+   }
+  ],
+  "object": [
+   {
+    "name": "Add/Subtract",
+    "desc": "Adding or subtracting amounts or fractions.",
+    "ex": "What do you get if you put them together?\nWhat if you add one more?"
+   },
+   {
+    "name": "Compare",
+    "desc": "Comparing sizes, or whether two amounts are the same or different.",
+    "ex": "Which one is more?\nAre they the same amount?"
+   },
+   {
+    "name": "Diagram",
+    "desc": "The student's drawing or representation (rectangles, circles, bars, number lines).",
+    "ex": "What does the shaded part show?\nHow did you draw the bars?"
+   },
+   {
+    "name": "Distribution",
+    "desc": "Equal sharing or handing out.",
+    "ex": "How much does one friend get?\nHow did you share them out?"
+   },
+   {
+    "name": "Formula Related",
+    "desc": "Equations, formulas, common denominators, or other formal notation and procedures.",
+    "ex": "Can you write it as an equation?\nCan you make the denominators the same?"
+   },
+   {
+    "name": "Parts & Whole",
+    "desc": "How a part relates to the whole (one cup, one pizza, one bar).",
+    "ex": "Where is the whole cup?\nHow much of one bar is that?"
+   },
+   {
+    "name": "Partition",
+    "desc": "Splitting into equal parts, cutting, making pieces.",
+    "ex": "How many pieces did you cut it into?\nWhat if you cut it in half?"
+   },
+   {
+    "name": "Solution",
+    "desc": "The answer or conclusion.",
+    "ex": "So what's your answer?\nWho gets more?"
+   },
+   {
+    "name": "Other",
+    "desc": "Greetings, small talk, logistics.",
+    "ex": "Hi!\nHow are you today?"
+   }
+  ]
+ },
+ "translations": {
+  "ko": {
+   "name": "노아",
+   "description": "두 식탁에서 똑같이 나누는 것을 비교하는 가상의 초등학교 3학년 남학생 (8세)",
+   "problem": "두 개의 식탁이 있습니다. A 식탁에는 아이 3명이 있고, B 식탁에는 아이 6명이 있습니다. A 식탁에는 사탕바 2개가 배부되고, B 식탁에는 사탕바 4개가 배부됩니다. 각 식탁의 아이들이 사탕바를 똑같이 나누어 갖는다면, 어느 식탁의 아이들이 사탕바를 더 많이 받게 될까요?",
+   "chars": "- 장난기 많고 적극적임.\n- 테니스, 만화책, 과학을 좋아함.\n- 애완용 거북이와 물고기를 키움.\n- Piggy라는 이름의 분홍색 돼지 인형 6개를 가지고 있음.",
+   "greet": "안녕하세요!! 저 노아예요, 여덟 살이에요! 사탕바 문제 다 풀었어요. B 식탁이 더 많이 받아요! 저 거북이도 키워요.",
+   "aha": "아하!! A 식탁 애들은 큰 조각 2개, B 식탁 애들은 작은 조각 4개인데… 작은 거 2개가 큰 거 1개랑 같으니까… 똑같아요! 둘 다 똑같이 받아요!",
+   "t1": "노아는 아직 식이나 통분을 쓰지 않아요. 노아가 그린 네모와 \"몇 조각으로 잘랐는지\", \"조각 크기가 어떻게 다른지\"에 대해 질문해 보세요.",
+   "t2": "노아, A 식탁 네모는 몇 조각으로 잘랐어? B는?\nA 식탁 조각이랑 B 식탁 조각 중에 어느 게 더 커?\nB 조각 두 개를 붙이면 A 조각이랑 어떻게 돼?",
+   "t3": "멋진 발문이었어요. 노아가 조각 크기와 전체 바의 관계를 스스로 연결했네요. 이 발견을 학급 친구들과 공유하도록 제안해 보세요.",
+   "confused": [
+    "더해요? 뭘 더해요? 저는 그냥 잘라서 나눠 준 건데…",
+    "식을 써요? 음… 저 식 쓰는 거 잘 몰라요.",
+    "통분이 뭐예요? 선생님, 저 그거 안 배웠어요."
+   ],
+   "elicit": [
+    "A 식탁은 바 2개를 세 조각으로 잘라서 한 명이 2개씩 받았어요. B 식탁은 바 4개를 여섯 조각으로 잘라서 한 명이 4개씩이요.",
+    "그림에 얼굴 3개 그리고 네모 2개 그렸어요. 네모에 줄 2개 그어서 세 조각으로 만들었어요.",
+    "B 식탁은 동그라미 6개, 네모 4개요. 네모마다 줄 5개 그어서 여섯 조각이요.",
+    "B가 4개 받으니까 더 많죠! 아, 4개 바가 아니라 4조각이요."
+   ],
+   "misconceptions": [
+    {
+     "kw": "같은 양|같을까|똑같|2/3|4/6|3분의 2|6분의 4|둘 다 얼마|같은지",
+     "h": "A가 받은 거랑 B가 받은 거랑 같은지요? 음… 2개랑 4개인데… 근데 조각이 다르긴 해요.",
+     "c": "어… 그러니까 큰 조각 2개랑 작은 조각 4개가… 같은 양일 수도 있겠어요."
+    },
+    {
+     "kw": "조각 크기|크기가 다|더 큰 조각|더 작은 조각|3등분|6등분|작게|크게|어느 조각이 더|어떤 조각이 더",
+     "h": "조각 크기요? 음… A 식탁 조각이… 더 크긴 해요. 세 조각으로만 자르니까요.",
+     "c": "맞아요! A 조각이 B 조각보다 커요. B는 여섯 조각으로 자르니까 작아져요."
+    },
+    {
+     "kw": "바 전체|바 하나|한 개의 바|전체|바의 얼마|바 한 개에서",
+     "h": "바 하나에서요…? A 조각은 바 하나의… 세 조각 중 하나요.",
+     "c": "B 조각 2개 붙이면 A 조각 1개랑 같아요! 바 하나를 세 번 자른 거랑 여섯 번 자른 거니까요."
+    },
+    {
+     "kw": "분수로|뭐라고 부|이름|3분의|6분의|몇 분의|분수 이름",
+     "h": "이름이요? 음… 세 조각 중 하나니까… 3분의 1? 맞아요?",
+     "c": "A 조각은 3분의 1이고 B 조각은 6분의 1이에요! 그러면 A는 3분의 2, B는 6분의 4 받는 거예요."
+    }
+   ]
+  },
+  "en": {
+   "name": "Noah",
+   "description": "A fictional 3rd-grade student (age 8) comparing equal sharing at two tables",
+   "problem": "There are two tables. Table A has 3 kids and Table B has 6 kids. Table A gets 2 candy bars and Table B gets 4 candy bars. If the kids at each table share their candy bars equally, which table’s kids get more?",
+   "chars": "- Playful and eager.\n- Likes tennis, comic books, and science.\n- Has a pet turtle and fish.\n- Has 6 pink pig plushies named Piggy.",
+   "greet": "Hi!! I'm Noah, I'm eight! I already solved the candy bar problem. Table B gets more! I have a turtle too.",
+   "aha": "Aha!! Table A kids get 2 big pieces and Table B kids get 4 small pieces… and 2 small ones are the same as 1 big one… so it's the same! They both get the same!",
+   "t1": "Noah doesn't use equations or common denominators yet. Ask about the rectangles he drew: how many pieces he cut them into and how the piece sizes differ.",
+   "t2": "Noah, how many pieces did you cut Table A's rectangles into? What about B?\nWhich is bigger, a Table A piece or a Table B piece?\nWhat happens if you put two B pieces together next to an A piece?",
+   "t3": "Great questioning. Noah connected the piece size to the whole bar by himself. Invite him to share this discovery with the class.",
+   "confused": [
+    "Add? Add what? I just cut them and shared them…",
+    "Write an equation? Um… I don't really know how to do that.",
+    "What's a common denominator? I didn't learn that yet."
+   ],
+   "elicit": [
+    "Table A cut 2 bars into three pieces, so each kid got 2. Table B cut 4 bars into six pieces, so each kid got 4.",
+    "I drew 3 faces and 2 rectangles. I drew 2 lines on each rectangle to make three pieces.",
+    "Table B has 6 circles and 4 rectangles. I drew 5 lines on each one to make six pieces.",
+    "B gets 4, so B gets more! Oh, not 4 bars, 4 pieces."
+   ],
+   "misconceptions": [
+    {
+     "kw": "same amount|the same|equal|2/3|4/6|two thirds|four sixths|as much as",
+     "h": "If A and B get the same? Um… it's 2 and 4… but the pieces are kinda different.",
+     "c": "Uh… so 2 big pieces and 4 small pieces… could be the same amount."
+    },
+    {
+     "kw": "size|bigger piece|smaller piece|which piece|how big",
+     "h": "The size of the pieces? Um… Table A's pieces are bigger. They only cut into three.",
+     "c": "Yeah! A's pieces are bigger than B's. B cuts into six so they get small."
+    },
+    {
+     "kw": "whole bar|one bar|the whole|of the bar|out of the bar",
+     "h": "From one bar…? An A piece is one of three pieces from a bar.",
+     "c": "If you put 2 B pieces together it's the same as 1 A piece! Because it's one bar cut in three versus in six."
+    },
+    {
+     "kw": "fraction|call it|name|one third|1/3|one sixth|1/6",
+     "h": "A name? Um… one of three pieces… one third? Is that right?",
+     "c": "An A piece is one third and a B piece is one sixth! So A gets two thirds and B gets four sixths."
+    }
+   ]
+  }
+ }
+}
