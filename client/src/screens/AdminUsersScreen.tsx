@@ -1,4 +1,4 @@
-// 사용자 탭(I-45): UsersTable 7열 + 사용자 추가·비밀번호 재설정·삭제 모달. 사용자 CSV 는 대화 기록 탭(#27)과 함께 연다.
+// 사용자 탭(I-45): UsersTable 7열 + 사용자별 CSV + 사용자 추가·비밀번호 재설정·삭제 모달.
 import { useCallback, useEffect, useId, useState } from 'react';
 import { Password } from '@remath/shared';
 import type * as S from '@remath/shared';
@@ -12,6 +12,7 @@ import { CheckList } from '../components/CheckList.tsx';
 import { ConfirmModal } from '../components/ConfirmModal.tsx';
 import { DataTable } from '../components/DataTable.tsx';
 import { ErrorLine } from '../components/ErrorLine.tsx';
+import { useDownloadCsv } from '../csv.ts';
 import { Field } from '../components/Field.tsx';
 import { Modal } from '../components/Modal.tsx';
 import { PageHead } from '../components/PageHead.tsx';
@@ -28,7 +29,7 @@ type Group = z.infer<typeof S.Group>;
 const pwError = (t: T, v: PasswordValue) => !Password.safeParse(v.next).success ? t('errPw') : v.next !== v.confirm ? t('errPw2') : '';
 
 export function AdminUsersScreen() {
-  const t = useT(), me = useMe();
+  const t = useT(), me = useMe(), csv = useDownloadCsv();
   const [users, setUsers] = useState<User[]>(), [groups, setGroups] = useState<Group[]>([]), [err, setErr] = useState<unknown>();
   const [adding, setAdding] = useState(false), [pwFor, setPwFor] = useState<User>(), [delFor, setDelFor] = useState<User>();
   const load = useCallback(() => Promise.all([adminApi.listUsers(), adminApi.listGroups()]).then(([u, g]) => { setUsers(u); setGroups(g); }, setErr), []);
@@ -43,7 +44,7 @@ export function AdminUsersScreen() {
       <span className="mono">{u.created_at.slice(0, 10)}</span>,
       <span className="mono">{u.pw_updated_at.slice(0, 10)}</span>,
       <div className="acts-cell">
-        <Button size="sm" disabled title={t('csvLater')}>CSV</Button>
+        <Button size="sm" disabled={!u.session_count} onClick={() => csv({ user_id: u.id }, 'user', u.nickname)} aria-label={`CSV · ${u.nickname}`}>CSV</Button>
         <Button size="sm" onClick={() => setPwFor(u)} aria-label={`${t('pwBtn')} · ${u.nickname}`}>{t('pwBtn')}</Button>
         <Button size="sm" variant="danger" onClick={() => setDelFor(u)} aria-label={`${t('del')} · ${u.nickname}`}>{t('del')}</Button>
       </div>,
@@ -106,9 +107,9 @@ function ChangePasswordModal({ user, onClose, onDone }: { user?: User; onClose: 
   );
 }
 
-/** 대화 기록 건수를 보여 주고, 건수가 있으면 "CSV 먼저 내려받기"(대화 기록 탭과 함께 열림). */
+/** 대화 기록 건수를 보여 주고, 건수가 있으면 "CSV 먼저 내려받기"(그 사용자 필터 CSV). */
 function DeleteUserModal({ user, onClose, onDone }: { user?: User; onClose: () => void; onDone: () => void }) {
-  const t = useT(), [err, setErr] = useState('');
+  const t = useT(), csv = useDownloadCsv(), [err, setErr] = useState('');
   const close = () => { setErr(''); onClose(); };
   const confirm = async () => {
     if (!user) return;
@@ -117,6 +118,6 @@ function DeleteUserModal({ user, onClose, onDone }: { user?: User; onClose: () =
   return (
     <ConfirmModal open={!!user} title={t('mDelUser', user?.nickname)} body={t('delUserBody', String(user?.session_count ?? 0))} confirmLabel={t('delConfirm')}
       onConfirm={confirm} onClose={close} error={err}
-      extraAction={user?.session_count ? <Button disabled title={t('csvLater')}>{t('dlFirst')}</Button> : undefined} />
+      extraAction={user?.session_count ? <Button onClick={() => csv({ user_id: user.id }, 'user', user.nickname)}>{t('dlFirst')}</Button> : undefined} />
   );
 }

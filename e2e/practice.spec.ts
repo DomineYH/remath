@@ -1,5 +1,6 @@
 // #25 · B-1 (no group → no scenario → visible), B-2 (account → chat → report → My history shows the same report),
 // B-3 (no internal panel DOM on the teacher chat). Both realms are signed in side by side in one browser (separate cookies).
+import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 
 const PW = 'abcd1234';
@@ -189,4 +190,29 @@ test('B-2/B-3: create account → chat → goal → end → report; reload keeps
   expect(await dialog.getByRole('region', { name: 'Session analysis · question types' }).innerText()).toBe(shown);
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
+
+  // B-2 tail (#27): admin Conversations → View shows the same transcript and report; the CSV file keeps the BOM and the C13 header
+  await page.goto('/admin/logs');
+  const logs = page.getByRole('table', { name: 'Conversation logs' }).getByRole('row');
+  await expect(logs).toHaveCount(2);
+  await expect(logs.nth(1)).toContainText('Haneul');
+  await expect(logs.nth(1)).toContainText('한국어');
+  await page.getByLabel('Scenario').selectOption({ label: '하준' });
+  await expect(logs.nth(1)).toContainText('No conversations match these filters.');
+  await expect(page.getByRole('button', { name: 'Download CSV (0)' })).toBeDisabled();
+  await page.getByLabel('Scenario').selectOption({ label: '가브리엘' });
+  await page.getByLabel('User').selectOption({ label: 'Haneul' });
+  await logs.nth(1).getByRole('button', { name: /^View/ }).click();
+  const adminView = page.getByRole('dialog', { name: 'Haneul · 가브리엘' });
+  await expect(adminView.locator('.tx .ln')).toHaveCount(18);
+  await expect(adminView.locator('.tx .ln.teacher').first()).toContainText('[Other');
+  expect(await adminView.getByRole('region', { name: 'Session analysis · question types' }).innerText()).toBe(shown);
+  await page.keyboard.press('Escape');
+  const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Download CSV (1)' }).click()]);
+  expect(download.suggestedFilename()).toMatch(/^remath_conversations_Haneul_gabriel_\d{8}\.csv$/);
+  const file = readFileSync((await download.path())!);
+  expect([...file.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+  const csvLines = file.subarray(3).toString('utf8').split('\r\n');
+  expect(csvLines[0]).toBe('session_id,started_at,nickname,scenario,lang,seq,speaker,text,leverage,object,trigger');
+  expect(csvLines).toHaveLength(1 + 18);
 });

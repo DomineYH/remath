@@ -231,6 +231,37 @@ fieldset.field legend{font-weight:600;font-size:13.5px;padding:0;margin-bottom:6
 .tx .ln.mentor .sp{color:var(--orange)}
 .tx .tag{font-family:var(--mono);font-size:11px;font-weight:500}
 
+/* conversation logs (I-47) */
+.filters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+.filters label{font-size:13px;font-weight:600;color:var(--fg-2)}
+.filters select{width:auto;min-width:170px;max-width:100%}
+.filters .btn{margin-left:auto}
+
+/* AI settings (I-48) */
+.ai-sum{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0 0 16px}
+.ai-tile{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.ai-tile .eyebrow{margin:0;font-size:11px;color:var(--fg-3)}
+.ai-tile b{font-size:13px;font-weight:500;overflow-wrap:anywhere}
+.ai-tile .pill{align-self:flex-start}
+.ai-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:start}
+@media (max-width:1000px){.ai-grid,.ai-sum{grid-template-columns:1fr}}
+.ai-grid .card{min-width:0}
+.ai-grid .card .field{margin-bottom:4px}
+.ai-grid .card .who small{line-height:1.45}
+.ai-note{grid-column:1/-1;margin:0}
+.keybox{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
+.keybox .mono{font-size:13px;overflow-wrap:anywhere;min-width:0}
+.keyrow{display:flex;gap:8px}
+.keyrow input{flex:1;min-width:0;font-family:var(--mono)}
+.kdet{margin:4px 0 6px;font-size:12.5px;color:var(--fg-3)}
+.kdet.ok{color:var(--teal)} .kdet.bad{color:var(--bad)}
+.effs{display:flex;flex-wrap:wrap;gap:6px}
+.effs button{border:1px solid var(--line);background:var(--surface);color:var(--fg-2);border-radius:999px;padding:6px 12px;font-family:var(--mono);font-size:12.5px;display:inline-flex;gap:6px;align-items:baseline;cursor:pointer}
+.effs button:hover{border-color:var(--accent-line);color:var(--accent)}
+.effs button small{font-family:var(--body);font-size:10.5px;color:var(--fg-3)}
+.effs button[aria-checked="true"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.effs button[aria-checked="true"] small{color:inherit;opacity:.8}
+
 /* scenario wizard (I-44): mockup rules; ≤640px steps show number circles only and the head tools shrink (ticket 17 #5, #6) */
 .wiz{display:grid;grid-template-columns:240px minmax(0,1fr);gap:24px}
 @media (max-width:860px){.wiz{grid-template-columns:1fr}}
