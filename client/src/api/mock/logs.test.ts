@@ -99,12 +99,22 @@ describe('A-10 AI settings', () => {
     expect(await admin.updateAiRole('mentor', { key_source: 'student', model: 'claude-sonnet-5-5', effort: 'medium' })).toMatchObject({ key_source: 'student', provider: 'anthropic', key_masked: null });
     const before = await admin.getAiSettings();
     await rejects(admin.updateAiRole('analysis', { key_source: 'own', api_key: 'pk-unknown-0000000000', model: 'x', effort: null }), 400, 'validation_failed');
-    await rejects(admin.updateAiRole('analysis', { key_source: 'own', model: 'gpt-5.5', effort: null }), 400, 'validation_failed');           // no key yet
     await rejects(admin.updateAiRole('analysis', { key_source: 'analysis', model: 'gpt-5.5', effort: null }), 400, 'validation_failed');      // itself
     await rejects(admin.updateAiRole('analysis', { key_source: 'mentor', model: 'claude-opus-5-5', effort: null }), 400, 'validation_failed'); // mentor shares, has no key of its own
     await rejects(admin.updateAiRole('analysis', { key_source: 'student', api_key: OAI, model: 'gpt-5.5', effort: null }), 400, 'validation_failed'); // a key only with own
     expect(await admin.getAiSettings()).toEqual(before);
     await rejects(admin.updateAiRole('teacher' as never, { key_source: 'own', model: 'gpt-5.5', effort: null }), 404, 'not_found');
+  });
+  it('no key yet → provider unknown: only the Effort enum is checked (ticket 18)', async () => {
+    const { admin } = await setup();
+    expect(await admin.updateAiRole('analysis', { key_source: 'own', model: 'gpt-5.5', effort: 'max' })).toMatchObject({ key_source: 'own', provider: null, key_masked: null, model: 'gpt-5.5', effort: 'max' });
+    await rejects(admin.updateAiRole('analysis', { key_source: 'own', model: 'gpt-5.5', effort: 'turbo' as never }), 400, 'validation_failed');
+  });
+  it('invalid_effort details = { allowed } (ticket 18)', async () => {
+    const { admin } = await setup();
+    await admin.updateAiRole('analysis', { key_source: 'own', api_key: OAI, model: 'gpt-6-astra', effort: 'low' });
+    const e = await rejects(admin.updateAiRole('analysis', { key_source: 'own', model: 'gpt-5.5', effort: 'max' }), 400, 'invalid_effort');
+    expect(e.body.error.details).toEqual({ allowed: ['none', 'low', 'medium', 'high', 'xhigh'] });
   });
   it('invalid_effort on three paths: listed model → its set, custom model → the provider set, null always passes', async () => {
     const { admin } = await setup();

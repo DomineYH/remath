@@ -193,10 +193,10 @@ export function createMockApi(o: MockOptions): Api {
     const keyProvider = key ? S.detectProvider(key) ?? fail('validation_failed', 'unrecognized key format') : null;
     const src = b.key_source === 'own' ? null : db.ai[b.key_source];
     if (src && (src.key_source !== 'own' || !src.provider)) fail('validation_failed', 'the source role has no key of its own');
-    const provider = keyProvider ?? (src ? src.provider : cur.key_source === 'own' ? cur.provider : null) ?? fail('validation_failed', 'register a key first');
-    // effort: null = 공급자 기본값(통과). 목록 모델은 그 모델 집합, 직접 입력은 공급자 집합(D-20).
-    const P = providersFile[provider], allowed = P.models.find(m => m.id === b.model)?.efforts ?? P.efforts;
-    if (b.effort !== null && !allowed.includes(b.effort)) fail('invalid_effort', 'effort not allowed for this model', { model: b.model, efforts: allowed });
+    const provider = keyProvider ?? (src ? src.provider : cur.key_source === 'own' ? cur.provider : null);
+    // effort: null = 공급자 기본값(통과). 목록 모델은 그 모델 집합, 직접 입력은 공급자 집합(D-20). 키가 없어 공급자를 모르면 enum 검증만(티켓 18).
+    const P = provider && providersFile[provider], allowed = P ? P.models.find(m => m.id === b.model)?.efforts ?? P.efforts : null;
+    if (allowed && b.effort !== null && !allowed.includes(b.effort)) fail('invalid_effort', 'effort not allowed for this model', { allowed });
     const masked = src ? null : key ? S.maskKey(key) : cur.key_masked;
     const next = { ...cur, key_source: b.key_source, provider, key_masked: masked, key_added_at: src ? null : key ? now() : cur.key_added_at, model: b.model, effort: b.effort };
     db.ai[role] = next;
