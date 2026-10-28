@@ -6,7 +6,8 @@
     "client",
     "shared",
     "prompts",
-    "db/seed"
+    "db/seed",
+    "db/migrations"
   ],
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
