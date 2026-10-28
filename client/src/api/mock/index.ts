@@ -1,7 +1,9 @@
 // 목 구현 — 서버 핸들러를 브라우저 안에서 흉내 낸다. 1차(#22): 인증 9개·저장소·감사 helper와 빈 목록들. 나머지는 #23~#27 이 채운다.
 // 규칙(400 검증·409 중복·401 구분 없음·비밀번호 변경 = 다른 로그인 종료)은 서버와 같다. 서버가 생기면 이 폴더만 버린다.
+import { compileScenario, TEMPLATES } from '@remath/prompts';
 import { ERROR_STATUS, routes, type ErrorCode } from '@remath/shared';
-import type * as S from '@remath/shared';
+import providers from '@remath/shared/providers.json';
+import * as S from '@remath/shared';
 import type { z } from 'zod';
 import { API_ROUTES, ApiError, type Api, type ClientRealm } from '../types.ts';
 import { audit } from './audit.ts';
@@ -79,7 +81,9 @@ export function createMockApi(o: MockOptions): Api {
   const tr = (s: ScenarioRow) => s.translations[s.lang];
   const toPublic = (s: ScenarioRow) => { const t = tr(s); return { id: s.id, slug: s.slug, status: 'published' as const, lang: s.lang, student_prefix: s.student_prefix, mentor_prefix: s.mentor_prefix, grade: s.grade, classification: s.classification, name: t.name, description: t.description, problem: t.problem, chars: t.chars, greet: t.greet, elicit: t.elicit, created_at: s.created_at, updated_at: s.updated_at }; };
   const sessionCount = (sid: string) => db.sessions.filter(x => x.scenario_id === sid).length;
-  const toSummary = (s: ScenarioRow): z.infer<typeof S.ScenarioSummary> => ({ id: s.id, slug: s.slug, status: s.status, lang: s.lang, student_prefix: s.student_prefix, grade: s.grade, name: tr(s).name, problem: tr(s).problem, classification_count: { leverage: s.classification.leverage.length, object: s.classification.object.length }, groups: groupsOf(g => g.scenario_ids.includes(s.id)), session_count: sessionCount(s.id), updated_at: s.updated_at });
+  const scenario = (id: string) => db.scenarios.find(s => s.id === id) ?? fail('not_found');
+  const toAdmin = ({ compiled_prompt: _, ...s }: ScenarioRow): z.infer<typeof S.ScenarioAdmin> => ({ ...s, groups: groupsOf(g => g.scenario_ids.includes(s.id)), session_count: sessionCount(s.id) });
+  const toSummary = (s: ScenarioRow): z.infer<typeof S.ScenarioSummary> => ({ id: s.id, slug: s.slug, status: s.status, lang: s.lang, student_prefix: s.student_prefix, grade: s.grade, name: tr(s).name, problem: tr(s).problem, misconception_count: s.internal.misconceptions.length, classification_count: { leverage: s.classification.leverage.length, object: s.classification.object.length }, groups: groupsOf(g => g.scenario_ids.includes(s.id)), session_count: sessionCount(s.id), updated_at: s.updated_at });
   /** turn_count = 예비교사 발화 수(END SESSION 은 기록되지 않으므로 자연히 제외, D-15). */
   const sessionRow = (s: SessionRow): z.infer<typeof S.SessionRow> => {
     const sc = db.scenarios.find(x => x.id === s.scenario_id)!, u = db.users.find(x => x.id === s.user_id)!;
@@ -108,8 +112,9 @@ export function createMockApi(o: MockOptions): Api {
     sendTurn: todo('sendTurn', 24), endSession: todo('endSession', 24),
 
     listScenarios: async () => { who('admin'); return [...db.scenarios].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).map(toSummary); },
-    createScenario: todo('createScenario', 26), getScenario: todo('getScenario', 26), updateScenario: todo('updateScenario', 26), deleteScenario: todo('deleteScenario', 26),
-    reviewScenario: todo('reviewScenario', 26), publishScenario: todo('publishScenario', 26), getScenarioPrompt: todo('getScenarioPrompt', 23),
+    createScenario: todo('createScenario', 26), getScenario: async id => { who('admin'); return toAdmin(scenario(id)); }, updateScenario: todo('updateScenario', 26), deleteScenario: todo('deleteScenario', 26),
+    reviewScenario: todo('reviewScenario', 26), publishScenario: todo('publishScenario', 26), // 저장된 컴파일(게시본) 또는 초안을 활성 언어판으로 컴파일한 전문(F-31).
+    getScenarioPrompt: async id => { who('admin'); const s = scenario(id); return s.compiled_prompt ?? compileScenario(s, tr(s), s.lang, TEMPLATES); },
 
     listUsers: async () => { who('admin'); return db.users.filter(u => u.role === 'teacher').map(userRow); },
     createUser: todo('createUser', 25), resetUserPassword: todo('resetUserPassword', 25), deleteUser: todo('deleteUser', 25),
@@ -118,7 +123,7 @@ export function createMockApi(o: MockOptions): Api {
 
     listAdminSessions: async q => { who('admin'); return filtered(q).map(sessionRow); },
     getAdminSession: todo('getAdminSession', 24), downloadSessionsCsv: todo('downloadSessionsCsv', 27),
-    getAiSettings: todo('getAiSettings', 27), updateAiRole: todo('updateAiRole', 27), getProviders: todo('getProviders', 27),
+    getAiSettings: todo('getAiSettings', 27), updateAiRole: todo('updateAiRole', 27), getProviders: async () => { who('admin'); return S.ProvidersFile.parse(providers); },
   };
 
   // 본문·쿼리는 라우트 표의 zod 스키마로 검증한다(서버와 같은 400 validation_failed). 메서드마다 다시 쓰지 않도록 여기서 한 번 감싼다.

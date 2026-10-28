@@ -1,6 +1,12 @@
 // 목 저장소 — 메모리 한 객체 + localStorage 한 키. 서버 테이블과 같은 이름·같은 snake_case 열(티켓 11, 0001_init.sql)이라 2단계에서 HTTP 로 바꿔도 화면은 모른다.
 // 키는 목업(`remath.scen.v3` 등)과 다르게 새로 시작한다(모양이 다르고 섞이면 깨진다). 초기화 = 이 키 삭제.
-import type * as S from '@remath/shared';
+import { compileScenario, TEMPLATES } from '@remath/prompts';
+import gabriel from '@remath/seed/scenarios/gabriel.json';
+import hajun from '@remath/seed/scenarios/hajun.json';
+import jiwoo from '@remath/seed/scenarios/jiwoo.json';
+import noah from '@remath/seed/scenarios/noah.json';
+import seoyeon from '@remath/seed/scenarios/seoyeon.json';
+import * as S from '@remath/shared';
 import type { z } from 'zod';
 
 export const STORAGE_KEY = 'remath.mock.v1';
@@ -42,11 +48,18 @@ export class Store {
 export const ADMIN_ID = '00000000-0000-4000-8000-000000000001';
 const aiRole = (role: 'student' | 'mentor' | 'analysis'): z.infer<typeof S.AiRoleSetting> => ({ role, key_source: role === 'student' ? 'own' : 'student', provider: null, key_masked: null, key_added_at: null, model: null, effort: null });
 
-/** 첫 실행 상태: 관리자 1명뿐. 예비교사·그룹·시나리오·기록 0, 데모 데이터 없음(G-33). */
+/** 샘플 시나리오 5개(H-38): 서버 시드(`--with-samples`)와 같은 JSON. 게시 상태로 싣고 compiled_prompt 는 게시와 같은 compileScenario 결과(G-33). */
+const SAMPLES = { gabriel, noah, jiwoo, hajun, seoyeon };
+const sample = (slug: string, json: unknown, now: string): ScenarioRow => {
+  const s = S.ScenarioInput.parse(json);
+  return { ...s, id: crypto.randomUUID(), slug, status: 'published', compiled_prompt: compileScenario(s, s.translations[s.lang], s.lang, TEMPLATES), created_at: now, updated_at: now };
+};
+
+/** 첫 실행 상태: 관리자 1명 + 샘플 시나리오 5개(그룹이 없어 예비교사에게는 안 보인다). 예비교사·그룹·기록 0, 데모 데이터 없음(G-33). */
 export function seedDb(now: string): Db {
   return {
     users: [{ id: ADMIN_ID, nickname: 'admin', password_hash: null, role: 'admin', pw_updated_at: now, created_at: now, updated_at: now }],
-    auth_sessions: [], groups: [], scenarios: [], sessions: [], turns: [], audit_log: [],
+    auth_sessions: [], groups: [], scenarios: Object.entries(SAMPLES).map(([slug, json]) => sample(slug, json, now)), sessions: [], turns: [], audit_log: [],
     login: { teacher: null, admin: null },
     ai: { student: aiRole('student'), mentor: aiRole('mentor'), analysis: aiRole('analysis') },
   };

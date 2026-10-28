@@ -30,14 +30,14 @@ const recording = () => {
 };
 
 describe('initial state (G-33)', () => {
-  it('no teachers, groups or sessions; one admin', async () => {
+  it('no teachers, groups or sessions; one admin; the five published samples', async () => {
     const { store, teacher, admin } = setup();
     expect(store.db.users.map(u => [u.nickname, u.role])).toEqual([['admin', 'admin']]);
     await admin.adminLogin({ nickname: 'admin', password: ADMIN_PW });
     expect(await admin.listUsers()).toEqual([]);
     expect(await admin.listGroups()).toEqual([]);
     expect(await admin.listAdminSessions({})).toEqual([]);
-    expect(await admin.listScenarios()).toEqual([]);
+    expect((await admin.listScenarios()).map(s => [s.slug, s.status])).toEqual(['gabriel', 'noah', 'jiwoo', 'hajun', 'seoyeon'].map(x => [x, 'published']));
     await teacher.signup(creds);
     expect(await teacher.getPractice()).toEqual({ groups: [], scenarios: [] });
     expect(await teacher.listSessions()).toEqual([]);
