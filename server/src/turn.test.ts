@@ -53,14 +53,21 @@ const gabriel = S.ScenarioInput.parse(JSON.parse(readFileSync(new URL('../../db/
 type Call = [string, unknown?];
 const SID = '11111111-1111-4111-8111-111111111111', UID = '22222222-2222-4222-8222-222222222222', SC = '33333333-3333-4333-8333-333333333333';
 interface FakeOpts {
-  claim?: boolean; recordFails?: boolean; teacherTurns?: number; startDup?: boolean; started?: boolean;
+  claim?: boolean; teacherTurns?: number; startDup?: boolean; started?: boolean;
+  /** claim_turn 이 커밋한 뒤 응답만 잃는다(결과 모름). */
+  claimLost?: boolean;
+  /** record_turn: before = 쓰기 전 오류, after = 커밋 뒤 응답만 잃음, fenced = 울타리에 막혀 false. */
+  record?: 'before' | 'after' | 'fenced';
+  /** 결과를 맞추는 읽기(select turn_claim …)가 실패한다. */
+  readFails?: boolean;
   /** 호출마다 한 번: 여기서 기다리면 그 Data API 호출이 멈춘다(끼어들기 재현). */
   before?: (label: string, detail: unknown) => Promise<void> | void;
 }
 
 /**
  * Data API 가짜: 서버가 쓰는 from()/rpc() 빌더만. 필터는 무시하고 표마다 정해진 한 행으로 답한다.
- * sessions 행은 start_session rpc 가 끝나야 보인다(started) — rpc 한 번 = 트랜잭션 하나. 호출 순서를 calls 에 남긴다.
+ * sessions 행은 start_session rpc 가 끝나야 보인다(started) — rpc 한 번 = 트랜잭션 하나.
+ * claim_turn/record_turn/release_turn 은 0003 처럼 turn_claim 토큰을 지킨다. 호출 순서를 calls 에 남긴다.
  */
 function fakeDb(o: FakeOpts = {}) {
   const calls: Call[] = [];
@@ -70,21 +77,35 @@ function fakeDb(o: FakeOpts = {}) {
   const translations = (['ko', 'en'] as const).map(lang => ({ lang, ...gabriel.translations[lang] }));
   const row = {
     id: SID, user_id: UID, scenario_id: SC, started_at: T0, ended_at: null, report: null, lang: 'ko', goal_reached: false, counts: {},
-    progress: { mis: gabriel.internal.misconceptions.map(() => 0) }, turn_started_at: T0,
+    progress: { mis: gabriel.internal.misconceptions.map(() => 0) }, turn_started_at: T0, turn_claim: null as string | null,
     user: { role: 'teacher', nickname: 'kim' }, turns, scenario: { ...gabriel, compiled_prompt: null, scenario_translations: translations },
   };
   const auth = { realm: 'teacher', expires_at: '2999-01-01T00:00:00Z', user: { id: UID, nickname: 'kim', role: 'teacher', pw_updated_at: T0, password_hash: 'h' } };
+  const lost = { data: null, error: { message: 'fetch failed' } };
   const answer = (label: string, args: unknown) => {
+    const a = args as Record<string, unknown>;
     switch (label) {
-      case 'claim_turn': return { data: o.claim ?? true, error: null };
-      case 'record_turn': return o.recordFails ? { data: null, error: { message: 'boom' } } : { data: null, error: null };
+      case 'claim_turn':
+        if (o.claim === false) return { data: false, error: null };
+        row.turn_claim = a.p_token as string;
+        return o.claimLost ? lost : { data: true, error: null };
+      case 'record_turn': {
+        if (o.record === 'before') return lost;
+        if (o.record === 'fenced' || row.turn_claim !== a.p_token || row.ended_at) return { data: false, error: null };
+        turns.push(...(a.p_turns as Record<string, unknown>[]).map(t => ({ ...t, created_at: T1 })));
+        Object.assign(row, { turn_claim: null, ended_at: a.p_ended_at, report: a.p_report });
+        return o.record === 'after' ? lost : { data: true, error: null };
+      }
+      case 'release_turn': if (row.turn_claim === a.p_token) row.turn_claim = null; return { data: null, error: null };
       case 'teacher_scenarios': return { data: [{ id: SC }], error: null };
       case 'start_session':
         if (o.startDup) return { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint "sessions_one_active"' } };
         started = true; void args; return { data: SID, error: null };
       case 'select auth_sessions': return { data: auth, error: null };
       case 'select scenarios': return { data: { lang: 'ko', internal: gabriel.internal, scenario_translations: translations }, error: null };
-      case 'select sessions': return { data: started ? row : null, error: null };
+      case 'select sessions':
+        if (o.readFails && String(args).startsWith('turn_claim')) return lost;
+        return { data: started ? structuredClone(row) : null, error: null };
       default: return { data: null, error: null };
     }
   };
@@ -109,31 +130,34 @@ const opts = (db: Db, signal?: AbortSignal) => ({ db, log, maxTurns: 40, timeout
 const session = { id: SID, ended_at: null };
 const run = (db: Db, text: string, signal?: AbortSignal) => withTurn(opts(db, signal), session, text, collect);
 const labels = (calls: Call[]) => calls.map(c => c[0]);
-const RELEASE: Call = ['update sessions', { turn_started_at: null }];
+const T1 = '2026-10-28T03:00:01.5+00:00';
 
 describe('withTurn: claim_turn → runTurn → record_turn once (F-22, F-24)', () => {
-  it('claims, runs, records this turn with server seq in one record_turn, and never touches turn_started_at itself', async () => {
+  it('claims, runs, records this turn with server seq in one record_turn, and needs no release', async () => {
     const { db, calls } = fakeDb();
     const events = await run(db, '그림을 설명해 줄래?') as AdminSseEvent[];
     expect(events.map(e => e.type)).toEqual(['classification', 'student', 'done']);
     expect(labels(calls)).toEqual(['claim_turn', 'select sessions', 'record_turn']);
-    const rec = calls[2][1] as { turns: { seq: number; speaker: string }[]; ended_at: null };
-    expect(rec.turns.map(t => [t.seq, t.speaker])).toEqual([[2, 'teacher'], [3, 'student']]);
-    expect(rec.ended_at).toBeNull();
+    const rec = calls[2][1] as { p_turns: { seq: number; speaker: string }[]; p_ended_at: null };
+    expect(rec.p_turns.map(t => [t.seq, t.speaker])).toEqual([[2, 'teacher'], [3, 'student']]);
+    expect(rec.p_ended_at).toBeNull();
     expect((events[2] as { turns: unknown[] }).turns).toHaveLength(2);
   });
 
-  it('a failed record_turn: error event, nothing recorded, the turn is released', async () => {
-    const { db, calls } = fakeDb({ recordFails: true });
-    expect((await run(db, '그림을 설명해 줄래?')).at(-1)).toEqual({ type: 'error', code: 'provider_unavailable', message: expect.any(String), retryable: true });
-    expect(calls.at(-1)).toEqual(RELEASE);
+  it('claim, record and release carry the same fresh token', async () => {
+    const { db, calls } = fakeDb({ record: 'fenced' });
+    await run(db, '그림을 설명해 줄래?');
+    const tokens = calls.filter(c => ['claim_turn', 'record_turn', 'release_turn'].includes(c[0])).map(c => (c[1] as { p_token: string }).p_token);
+    expect(tokens).toHaveLength(3);
+    expect(new Set(tokens).size).toBe(1);
+    expect(tokens[0]).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it('a client that leaves while the context is read: no record_turn, the claim is released', async () => {
     const ac = new AbortController();
     const { db, calls } = fakeDb({ before: label => { if (label === 'select sessions') ac.abort(); } });
     await expect(run(db, '그림을 설명해 줄래?', ac.signal)).rejects.toMatchObject({ code: 'provider_unavailable' });
-    expect(labels(calls)).toEqual(['claim_turn', 'select sessions', 'update sessions']);
+    expect(labels(calls)).toEqual(['claim_turn', 'select sessions', 'release_turn']);
   });
 
   it('a client already gone before the claim: nothing is claimed', async () => {
@@ -146,7 +170,7 @@ describe('withTurn: claim_turn → runTurn → record_turn once (F-22, F-24)', (
   it('events abandoned before the first pull still release the claim', async () => {
     const { db, calls } = fakeDb();
     expect(await withTurn(opts(db), session, 'hi', async () => 'not pulled')).toBe('not pulled');
-    expect(labels(calls)).toEqual(['claim_turn', 'select sessions', 'update sessions']);
+    expect(labels(calls)).toEqual(['claim_turn', 'select sessions', 'release_turn']);
   });
 
   it('refuses before streaming: lost claim = 409 turn_in_progress, turn limit = 422 after releasing the claim', async () => {
@@ -158,8 +182,54 @@ describe('withTurn: claim_turn → runTurn → record_turn once (F-22, F-24)', (
     const e = await run(full.db, 'hi').catch((x: unknown) => x);
     expect(e).toBeInstanceOf(ApiFail);
     expect(e).toMatchObject({ code: 'turn_limit_reached', details: { turn_count: 40, turn_limit: 40 } });
-    expect(labels(full.calls)).toEqual(['claim_turn', 'select sessions', 'update sessions']);
+    expect(labels(full.calls)).toEqual(['claim_turn', 'select sessions', 'release_turn']);
     expect((await run(fakeDb({ teacherTurns: 40 }).db, 'END SESSION')).at(-1)).toMatchObject({ type: 'done', ended: true });
+  });
+});
+
+describe('withTurn: deadline from the claim, fenced record, unknown RPC outcomes (F-24, rev 3)', () => {
+  const lastErr = (evs: unknown[]) => evs.at(-1) as { type: string; retryable?: boolean; message?: string };
+  it('a context read that outlives TURN_TIMEOUT_MS (counted from the claim) is refused: no record, released', async () => {
+    const { db, calls } = fakeDb({ before: label => label === 'select sessions' ? new Promise(r => setTimeout(r, 60)) : undefined });
+    await expect(withTurn({ ...opts(db), timeoutMs: 30 }, session, 'hi', collect)).rejects.toMatchObject({ code: 'provider_unavailable', message: 'turn timed out' });
+    expect(labels(calls)).toEqual(['claim_turn', 'select sessions', 'release_turn']);
+  });
+  it('a record fenced off by the DB (claim taken over or session ended): error, retryable, released', async () => {
+    const { db, calls } = fakeDb({ record: 'fenced' });
+    expect(lastErr(await run(db, '그림을 설명해 줄래?'))).toMatchObject({ type: 'error', retryable: true });
+    expect(labels(calls).at(-1)).toBe('release_turn');
+  });
+  it('claim_turn committed but its response was lost: the row shows our token, so the turn goes on and records once', async () => {
+    const { db, calls } = fakeDb({ claimLost: true });
+    expect((await run(db, '그림을 설명해 줄래?')).at(-1)).toMatchObject({ type: 'done', ended: false });
+    expect(labels(calls)).toEqual(['claim_turn', 'select sessions', 'select sessions', 'record_turn']);
+    expect(calls[1][1]).toBe('turn_claim');
+  });
+  it('claim_turn outcome unknown and the reconcile read fails: release by token, then fail', async () => {
+    const { db, calls } = fakeDb({ claimLost: true, readFails: true });
+    await expect(run(db, 'hi')).rejects.toMatchObject({ message: 'fetch failed' });
+    expect(labels(calls)).toEqual(['claim_turn', 'select sessions', 'release_turn']);
+  });
+  it('record_turn committed but its response was lost: done with the stored rows, no error, no retry advice', async () => {
+    const { db, calls } = fakeDb({ record: 'after' });
+    const evs = await run(db, '그림을 설명해 줄래?');
+    expect(evs.at(-1)).toMatchObject({ type: 'done', ended: false, turns: [
+      expect.objectContaining({ seq: 2, speaker: 'teacher', text: '그림을 설명해 줄래?', created_at: T1 }), expect.objectContaining({ seq: 3, speaker: 'student' })] });
+    expect(labels(calls)).toEqual(['claim_turn', 'select sessions', 'record_turn', 'select sessions']);
+  });
+  it('END SESSION committed but its response was lost: done ended with the stored report', async () => {
+    const { db } = fakeDb({ record: 'after' });
+    expect((await run(db, 'END SESSION')).at(-1)).toMatchObject({ type: 'done', ended: true, report: expect.objectContaining({ verdict: expect.any(String) }) });
+  });
+  it('record_turn failed before writing: the row still holds our token, so retryable error and release', async () => {
+    const { db, calls } = fakeDb({ record: 'before' });
+    expect(lastErr(await run(db, '그림을 설명해 줄래?'))).toMatchObject({ type: 'error', retryable: true });
+    expect(labels(calls)).toEqual(['claim_turn', 'select sessions', 'record_turn', 'select sessions', 'release_turn']);
+  });
+  it('record_turn outcome unknown and the reconcile read fails: error with retryable:false (a retry could duplicate), release by token', async () => {
+    const { db, calls } = fakeDb({ record: 'after', readFails: true });
+    expect(lastErr(await run(db, '그림을 설명해 줄래?'))).toMatchObject({ type: 'error', retryable: false });
+    expect(labels(calls).at(-1)).toBe('release_turn');
   });
 });
 
@@ -194,7 +264,7 @@ async function dropDuring(pauseAt: (label: string, detail: unknown) => boolean) 
 describe('POST …/turns notices a dropped client before any awaited step (F-24)', () => {
   it('dropped during the context read: no record_turn, the claim is released', async () => {
     const r = await dropDuring((label, cols) => label === 'select sessions' && String(cols).includes('progress'));
-    await vi.waitFor(() => expect(r.calls.at(-1)).toEqual(RELEASE));
+    await vi.waitFor(() => expect(r.calls.at(-1)?.[0]).toBe('release_turn'));
     expect(labels(r.calls)).not.toContain('record_turn');
     await r.close();
   });
@@ -237,5 +307,22 @@ describe('POST /api/sessions starts through one start_session rpc (F-25, D-14)',
     const r = await s.post();
     expect(r.statusCode).toBe(409);
     expect(r.json().error).toMatchObject({ code: 'session_active', details: { session_id: SID } });
+  });
+});
+
+describe('POST …/end goes through the same claim → record_turn(token) fence (F-25)', () => {
+  it('claims with a token and records the end with it; a fenced end is 502 provider_unavailable', async () => {
+    const ok = fakeDb(), app = await buildApp({ db: ok.db, config });
+    const r = await app.inject({ method: 'POST', url: `/api/sessions/${SID}/end`, headers: { cookie: TEACHER.cookie, 'x-remath-realm': 'teacher' } });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ verdict: expect.any(String) });
+    const tok = (l: string) => (ok.calls.find(c => c[0] === l)![1] as { p_token: string }).p_token;
+    expect(tok('record_turn')).toBe(tok('claim_turn'));
+    expect((ok.calls.find(c => c[0] === 'record_turn')![1] as { p_turns: unknown[] }).p_turns).toEqual([]);
+
+    const fenced = fakeDb({ record: 'fenced' }), app2 = await buildApp({ db: fenced.db, config });
+    const f = await app2.inject({ method: 'POST', url: `/api/sessions/${SID}/end`, headers: { cookie: TEACHER.cookie, 'x-remath-realm': 'teacher' } });
+    expect(f.statusCode).toBe(502);
+    expect(labels(fenced.calls).at(-1)).toBe('release_turn');
   });
 });

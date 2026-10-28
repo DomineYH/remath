@@ -27,18 +27,36 @@ interface TurnContext {
 const CONTEXT = 'ended_at, lang, goal_reached, counts, progress, user:users!inner(role), turns(seq, speaker, text, leverage, object, trigger), '
   + 'scenario:scenarios!inner(lang, student_prefix, internal, classification, compiled_prompt, scenario_translations(*))';
 
+type Result<T> = { data: T; error: null } | { data: null; error: unknown };
+/** supabase-js 는 {error} 를 돌려주지만 던질 수도 있다. 둘 다 {error} 로. error = "결과를 모른다"(커밋 뒤 응답만 잃었을 수 있음). */
+const settle = <T>(q: PromiseLike<{ data: unknown; error: unknown }>): Promise<Result<T>> =>
+  Promise.resolve(q).then(r => r as Result<T>, (error: unknown) => ({ data: null, error }));
+
 /**
  * 한 턴의 수명(F-22·F-24): session_ended 409 → claim_turn 실패 409 turn_in_progress → 상한 422(END SESSION 은 예외) → use(이벤트).
- * 이벤트는 done 에서 record_turn 한 번으로 이번 턴을 기록한다. 기록되지 않고 끝나면(오류·시간 초과·끊김·이벤트를 끝까지 읽지 않음)
- * 이 함수의 finally 가 턴을 해제한다 — 생성기 finally 는 첫 pull 전에는 돌지 않으므로 거기에 맡기지 않는다.
- * o.signal(클라이언트 끊김)은 await 마다 다시 본다: 이미 끊겼으면 잡지 않고, 잡은 뒤 끊겼으면 해제하고 기록하지 않는다.
+ * 턴마다 토큰을 만들어 잡고(0003), record_turn·release_turn 은 그 토큰일 때만 DB 가 받는다: 시간 초과로 빼앗긴 느린 턴은 기록하지 못한다.
+ * TURN_TIMEOUT_MS 는 잡는 순간부터 센다 — DB 가 고아로 보기 전에 서버가 먼저 포기한다.
+ * 기록되지 않고 끝나면(오류·시간 초과·끊김·이벤트를 끝까지 읽지 않음) 이 함수의 finally 가 release_turn 한다 — 생성기 finally 는
+ * 첫 pull 전에는 돌지 않으므로 거기에 맡기지 않는다. release_turn 은 토큰 울타리라 결과를 모를 때 불러도 남의 턴을 풀지 않는다.
+ * o.signal(클라이언트 끊김)과 기한은 await 마다 다시 본다: 이미 끝났으면 잡지 않고, 잡은 뒤 끝났으면 해제하고 기록하지 않는다.
  */
 export async function withTurn<T>(o: TurnOpts, s: { id: string; ended_at: string | null }, text: string, use: (events: AsyncGenerator<AdminSseEvent>) => Promise<T>): Promise<T> {
-  const { db } = o;
-  const gone = () => { if (o.signal?.aborted) throw new ApiFail('provider_unavailable', 'client disconnected'); };
+  const { db } = o, token = crypto.randomUUID();
   if (s.ended_at) throw new ApiFail('session_ended', 'session has ended');
+  const deadline = AbortSignal.timeout(o.timeoutMs);
+  const signal = AbortSignal.any([deadline, ...o.signal ? [o.signal] : []]);
+  const gone = () => { if (signal.aborted) throw new ApiFail('provider_unavailable', deadline.aborted ? 'turn timed out' : 'client disconnected'); };
+  const release = async () => {
+    const { error } = await settle(db.rpc('release_turn', { p_session_id: s.id, p_token: token }));
+    if (error) o.log.error({ err: error }, 'turn release failed');   // 남은 잡기는 claim_turn 이 timeout_ms 뒤 고아로 본다
+  };
   gone();
-  if (!must(await db.rpc('claim_turn', { session_id: s.id, timeout_ms: o.timeoutMs }))) {
+  const claim = await settle<boolean>(db.rpc('claim_turn', { p_session_id: s.id, p_token: token, p_timeout_ms: o.timeoutMs }));
+  if (claim.error) {   // 결과를 모른다: 행을 읽어 우리 토큰이면 잡은 것
+    const r = await settle<{ turn_claim: string | null }>(db.from('sessions').select('turn_claim').eq('id', s.id).single());
+    if (r.error) await release();
+    if (r.error || r.data?.turn_claim !== token) throw claim.error;
+  } else if (claim.data !== true) {
     const r = must(await db.from('sessions').select('turn_started_at').eq('id', s.id).single()) as { turn_started_at: string | null };
     throw new ApiFail('turn_in_progress', 'turn in progress', { turn_started_at: r.turn_started_at });
   }
@@ -50,19 +68,37 @@ export async function withTurn<T>(o: TurnOpts, s: { id: string; ended_at: string
     if (c.ended_at) throw new ApiFail('session_ended', 'session has ended');
     const turn_count = c.turns.filter(t => t.speaker === 'teacher').length;
     if (!END_SESSION_RE.test(text.trim()) && turn_count >= o.maxTurns) throw new ApiFail('turn_limit_reached', 'turn limit reached', { turn_count, turn_limit: o.maxTurns });
-    return await use(stream(o, s.id, c, text, done));
+    return await use(stream({ ...o, signal }, s.id, token, c, text, done));
   } finally {
-    if (!done.recorded) {
-      const { error } = await db.from('sessions').update({ turn_started_at: null }).eq('id', s.id);
-      if (error) o.log.error({ err: error }, 'turn release failed');   // 남은 플래그는 claim_turn 이 timeout_ms 뒤 고아로 본다
-    }
+    if (!done.recorded) await release();
   }
 }
 
-async function* stream(o: TurnOpts, id: string, c: TurnContext, text: string, done: { recorded: boolean }): AsyncGenerator<AdminSseEvent> {
-  const sc = c.scenario, history = c.turns;
+type Recorded = { ok: true; turns?: z.infer<typeof S.Turn>[]; report?: z.infer<typeof S.SessionReport> | null } | { ok: false; message: string; retryable: boolean };
+
+/**
+ * record_turn 한 번. 응답을 잃었으면(error) 행을 읽어 맞춘다: 아직 우리 토큰 = 기록 안 됨(재시도 가능),
+ * 토큰이 풀렸고 우리 발화(seq0 의 예비교사 문장)·종료가 있다 = 기록됨(DB 값으로 done), 그 밖 = 기록 안 됨.
+ * 읽기도 실패하면 모른다: 재시도하면 중복될 수 있으니 retryable:false(클라이언트는 새로고침으로 복구한다).
+ */
+async function record(o: TurnOpts, id: string, token: string, args: Record<string, unknown>, seq0: number, text: string, ended: boolean): Promise<Recorded> {
+  const r = await settle<boolean>(o.db.rpc('record_turn', { p_session_id: id, p_token: token, ...args }));
+  if (!r.error) return r.data === true ? { ok: true } : { ok: false, message: 'turn expired', retryable: true };   // 빼앗겼거나 이미 끝남
+  o.log.error({ err: r.error }, 'record_turn outcome unknown');
+  const c = await settle<{ turn_claim: string | null; ended_at: string | null; report: z.infer<typeof S.SessionReport> | null; turns: z.infer<typeof S.Turn>[] }>(
+    o.db.from('sessions').select('turn_claim, ended_at, report, turns(seq, speaker, text, leverage, object, trigger, created_at)').eq('id', id).order('seq', { referencedTable: 'turns' }).single());
+  if (c.error || !c.data) {
+    o.log.error({ err: c.error }, 'turn outcome unknown');
+    return { ok: false, message: 'turn outcome unknown: reload', retryable: false };
+  }
+  const mine = c.data.turns.filter(t => t.seq >= seq0);
+  if (c.data.turn_claim !== token && (ended ? c.data.ended_at !== null : mine[0]?.speaker === 'teacher' && mine[0].text === text)) return { ok: true, turns: mine, report: c.data.report };
+  return { ok: false, message: 'turn failed', retryable: true };
+}
+
+async function* stream(o: TurnOpts & { signal: AbortSignal }, id: string, token: string, c: TurnContext, text: string, done: { recorded: boolean }): AsyncGenerator<AdminSseEvent> {
+  const sc = c.scenario, history = c.turns, { signal } = o;
   const tr = (lang: Lang) => sc.scenario_translations.find(t => t.lang === lang)!;
-  const signal = AbortSignal.any([AbortSignal.timeout(o.timeoutMs), ...o.signal ? [o.signal] : []]);
   const pass = (p: Provider): Provider => ({ ...p, complete: req => p.complete({ ...req, signal }) });   // F-24: 어댑터 호출마다 signal
   const bots = { student: pass(mockProvider), analysis: pass(mockProvider), mentor: pass(mockProvider), model: 'mock' };
   const criteria = sc.classification.leverage.length ? sc.classification : null;
@@ -78,20 +114,22 @@ async function* stream(o: TurnOpts, id: string, c: TurnContext, text: string, do
       else if (ev.type === 'trigger') { add({ speaker: 'mentor', text: '', trigger: ev.trigger }); yield ev; }
       else if (ev.type === 'mentor') { pending[pending.length - 1].text = ev.text; yield { type: 'mentor', text: ev.text, final: true }; }
       else {
-        signal.throwIfAborted();   // 시간 초과·끊김 뒤에는 기록하지 않는다
+        signal.throwIfAborted();   // 기한(잡은 순간부터)·끊김 뒤에는 기록하지 않는다
         const at = o.now().toISOString(), turns = ev.ended ? [] : pending;
         const report = ev.ended ? sessionReport(sc.classification.leverage, history, c.goal_reached, ev.summary ?? null) : null;
-        must(await o.db.rpc('record_turn', {
-          session_id: id, turns, progress: { mis: ev.state.mis }, counts: ev.state.counts, goal_reached: ev.state.goalReached,
-          ended_at: ev.ended ? at : null, report,
-        }));
+        const rec = await record(o, id, token, {
+          p_turns: turns, p_progress: { mis: ev.state.mis }, p_counts: ev.state.counts, p_goal_reached: ev.state.goalReached,
+          p_ended_at: ev.ended ? at : null, p_report: report,
+        }, seq0, text, ev.ended);
+        if (!rec.ok) { yield { type: 'error', code: 'provider_unavailable', message: rec.message, retryable: rec.retryable }; return; }
         done.recorded = true;
         if (c.user.role === 'admin') {   // 관리자 세션만, done 직전 1회(티켓 15)
           const last_trigger = [...history, ...turns].reverse().find(t => t.trigger)?.trigger ?? null;
           yield { type: 'state', mis: ev.state.mis, counts: ev.state.counts, goal_reached: ev.state.goalReached, last_trigger };
         }
-        // ponytail: created_at 은 서버 시각이다(record_turn 은 void, DB 값과 ms 차). 기록 뒤 다시 읽다 실패하면 재전송 중복이 생겨 읽지 않는다.
-        yield ev.ended ? { type: 'done', ended: true, report } : { type: 'done', ended: false, turns: turns.map(t => ({ ...t, created_at: at })) };
+        // ponytail: 정상 기록이면 created_at 은 서버 시각이다(record_turn 은 boolean, DB 값과 ms 차). 맞춰 읽은 경우만 DB 값.
+        yield ev.ended ? { type: 'done', ended: true, report: rec.report !== undefined ? rec.report : report }
+          : { type: 'done', ended: false, turns: rec.turns ?? turns.map(t => ({ ...t, created_at: at })) };
       }
     }
   } catch (err) {
@@ -100,7 +138,7 @@ async function* stream(o: TurnOpts, id: string, c: TurnContext, text: string, do
   }
 }
 
-/** F-24: 기동 시 진행 중 턴 표시를 일괄 해제한다(이전 프로세스가 남긴 고아). 끝난 세션은 건드리지 않는다. */
+/** F-24: 기동 시 진행 중 턴(표시·토큰)을 일괄 해제한다(이전 프로세스가 남긴 고아). 끝난 세션은 건드리지 않는다. */
 export async function releaseTurns(db: Db) {
-  must(await db.from('sessions').update({ turn_started_at: null }).not('turn_started_at', 'is', null).is('ended_at', null));
+  must(await db.from('sessions').update({ turn_started_at: null, turn_claim: null }).not('turn_started_at', 'is', null).is('ended_at', null));
 }
