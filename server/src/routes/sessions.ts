@@ -1,12 +1,13 @@
 // 예비교사 경로 (C-11, D-14, E-19, E-20, F-22~F-25): 학생 선택·세션 시작/복구/목록/상세·턴 SSE·종료. 세션 경로는 `any` 실, 소유자만.
 import { Readable } from 'node:stream';
+import { finished } from 'node:stream/promises';
 import * as S from '@remath/shared';
 import type { FastifyRequest } from 'fastify';
 import type { z } from 'zod';
 import type { Deps, Handlers } from '../app.ts';
 import { must } from '../db.ts';
 import { ApiFail } from '../errors.ts';
-import { frame, openTurn } from '../turn.ts';
+import { frame, withTurn } from '../turn.ts';
 
 type Lang = z.infer<typeof S.Lang>;
 interface SessionCols {
@@ -74,37 +75,47 @@ export function sessionHandlers({ db, config, now }: Deps): Handlers {
       const sc = must(await db.from('scenarios').select('lang, internal, scenario_translations(lang, greet)').eq('id', scenario_id).maybeSingle()) as
         { lang: Lang; internal: { misconceptions?: unknown[] }; scenario_translations: { lang: Lang; greet: string }[] } | null;
       if (!sc) throw new ApiFail('not_found', 'scenario not found');
-      const ins = await db.from('sessions').insert({ user_id: u.id, scenario_id, lang: sc.lang, progress: { mis: (sc.internal.misconceptions ?? []).map(() => 0) } }).select('id').single();
-      if (ins.error?.code === '23505') {
+      // 세션 행과 인사 발화(seq 1)는 rpc 한 번(0003 start_session, 한 트랜잭션): 복구·턴이 인사 없는 세션을 보지 못한다.
+      const r = await db.rpc('start_session', {
+        p_user_id: u.id, p_scenario_id: scenario_id, p_lang: sc.lang, p_progress: { mis: (sc.internal.misconceptions ?? []).map(() => 0) }, p_counts: {},
+        p_greet: sc.scenario_translations.find(t => t.lang === sc.lang)?.greet ?? '',
+      });
+      if (r.error?.code === '23505') {
         const active = must(await db.from('sessions').select('id').eq('user_id', u.id).is('ended_at', null).maybeSingle()) as { id: string } | null;
         throw new ApiFail('session_active', 'a session is in progress', { session_id: active?.id });
       }
-      const { id } = must(ins) as { id: string };
-      const greet = await db.from('turns').insert({ session_id: id, seq: 1, speaker: 'student', text: sc.scenario_translations.find(t => t.lang === sc.lang)?.greet ?? '' });
-      if (greet.error) {   // 인사 없는 세션을 남기지 않는다
-        await db.from('sessions').delete().eq('id', id);
-        throw greet.error;
-      }
+      const id = must(r) as string;
       reply.code(201);
       return detail((await load(mine(req, DETAIL).eq('id', id)))!);
     },
 
-    /** F-22~F-24: 검사(409·422)는 일반 오류 응답, 통과하면 text/event-stream. 클라이언트가 끊으면 abort → 발화 미기록 + 턴 해제. */
+    /**
+     * F-22~F-24: 검사(409·422)는 일반 오류 응답, 통과하면 text/event-stream. 끊김 감지는 첫 await(소유자 읽기) 전에 건다:
+     * 끊기면 abort → 아직 안 잡았으면 잡지 않고, 잡았으면 발화 미기록 + 턴 해제(withTurn 의 finally). 스트림이 다 끝나야 withTurn 이 돌아온다.
+     */
     'POST /api/sessions/:id/turns': async (req, reply) => {
       const ac = new AbortController();
-      const events = await openTurn({ ...turnOpts, log: req.log, signal: ac.signal }, await sessionOf(req, 'light'), (req.body as z.infer<typeof S.TurnBody>).text);
-      // request.raw 의 close 는 본문을 다 읽으면 바로 온다(Node 16+). 끊김은 응답 소켓 쪽에서 본다.
+      // request.raw 의 close 는 본문을 다 읽으면 바로 온다(Node 16+). 끊김은 응답 소켓 쪽에서 본다. preValidation 중에 이미 끊겼을 수도 있다.
       reply.raw.on('close', () => { if (!reply.raw.writableFinished) ac.abort(); });
-      reply.header('content-type', 'text/event-stream; charset=utf-8').header('cache-control', 'no-cache');
-      return reply.send(Readable.from((async function* () { for await (const ev of events) yield frame(ev); })()));
+      if (reply.raw.destroyed || req.raw.socket?.destroyed) ac.abort();
+      const { text } = req.body as z.infer<typeof S.TurnBody>;
+      return withTurn({ ...turnOpts, log: req.log, signal: ac.signal }, await sessionOf(req, 'light'), text, async events => {
+        const body = Readable.from((async function* () { for await (const ev of events) yield frame(ev); })());
+        ac.signal.addEventListener('abort', () => body.destroy(), { once: true });
+        reply.header('content-type', 'text/event-stream; charset=utf-8').header('cache-control', 'no-cache').send(body);
+        await finished(body).catch(() => {});   // 끝까지 보냈거나, 끊겨 생성기 return() 까지 끝났을 때
+        return reply;
+      });
     },
     /** F-25: 종료 버튼 = END SESSION 발화와 같은 함수·같은 SessionReport|null. 재열람은 sessions.report 저장본. */
     'POST /api/sessions/:id/end': async req => {
-      for await (const ev of await openTurn({ ...turnOpts, log: req.log }, await sessionOf(req, 'light'), 'END SESSION')) {
-        if (ev.type === 'error') throw new ApiFail('provider_unavailable', ev.message);
-        if (ev.type === 'done' && ev.ended) return ev.report;
-      }
-      return null;
+      return withTurn({ ...turnOpts, log: req.log }, await sessionOf(req, 'light'), 'END SESSION', async events => {
+        for await (const ev of events) {
+          if (ev.type === 'error') throw new ApiFail('provider_unavailable', ev.message);
+          if (ev.type === 'done' && ev.ended) return ev.report;
+        }
+        return null;
+      });
     },
   };
 }
