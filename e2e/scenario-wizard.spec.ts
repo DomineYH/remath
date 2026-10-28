@@ -28,6 +28,7 @@ async function teacherHome(page: Page) {
 }
 
 test('B-1: wizard → fill example → review → publish → user and group → the teacher sees only the new scenario', async ({ page }) => {
+  test.slow();   // the longest journey in the suite: it neared the 30 s default under parallel workers
   await adminLogin(page);
   await page.getByRole('button', { name: '＋ New scenario' }).click();
   await expect(page).toHaveURL('/admin/scenarios/new');
