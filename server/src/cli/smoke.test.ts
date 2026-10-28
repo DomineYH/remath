@@ -14,7 +14,7 @@ describe('deploy smoke (H-29 4, D-17)', () => {
     const f = (async (url: string, init: RequestInit) => {
       const key = (init.headers as Record<string, string>).apikey;
       seen.push({ url, key });
-      const path = (key === 'anon' ? 'anon:' : '') + url.slice('https://p.supabase.co/rest/v1/'.length);
+      const path = (init.method === 'HEAD' ? 'HEAD ' : '') + (key === 'anon' ? 'anon:' : '') + url.slice('https://p.supabase.co/rest/v1/'.length);
       if (!routes[path]) throw new Error(`unexpected ${path}`);
       return routes[path]();
     }) as typeof fetch;
@@ -58,6 +58,23 @@ describe('deploy smoke (H-29 4, D-17)', () => {
 
   it('a 401 that is not a DB permission denial (invalid API key) does not count as denied', async () => {
     expect(await failed(run({ ...healthy, 'anon:scenarios?select=internal': () => json(401, { message: 'Invalid API key' }) }))).toEqual(['anon denied scenarios.internal']);
+  });
+
+  it('restore mode: exact per-table counts (HEAD, Prefer count=exact, so no max-rows cap) instead of the seed checks', async () => {
+    const range = (r: string) => () => new Response(null, { status: 200, headers: { 'content-range': r } });
+    const { f, seen } = fakeFetch({
+      'HEAD users?select=*': range('0-0/2'), 'HEAD turns?select=*': range('0-0/1500'), 'HEAD groups?select=*': range('*/0'),
+      'HEAD audit_log?select=*': () => json(500, {}), 'anon:scenarios?select=internal': denied,
+    });
+    const checks = await smoke({ url: 'https://p.supabase.co', serviceKey: 'service', anonKey: 'anon', fetch: f, counts: { users: 2, turns: 1500, groups: 1, audit_log: 0 } });
+    expect(checks).toEqual([
+      { name: 'rows users', ok: true, detail: '2 rows, want 2' },
+      { name: 'rows turns', ok: true, detail: '1500 rows, want 1500' },
+      { name: 'rows groups', ok: false, detail: '0 rows, want 1' },
+      { name: 'rows audit_log', ok: false, detail: 'HTTP 500' },
+      { name: 'anon denied scenarios.internal', ok: true, detail: 'HTTP 401 code 42501' },
+    ]);
+    expect(seen.map(s => s.key)).toEqual(['service', 'service', 'service', 'service', 'anon']);
   });
 
   it('HTTP errors and network failures are FAIL, not crashes', async () => {

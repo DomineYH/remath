@@ -14,22 +14,23 @@ const SCRIPT = join(ROOT, 'scripts/deploy.sh');
 const STUBS: Record<string, string> = {
   node: 'exit 0', psql: 'exit 0',
   // db:new-project 는 마지막 인자(deploy.sh 의 임시 env 파일)에 NEW_ENV 를 쓰고 경로를 $LOG.tmp, env 를 $LOG.newenv 에 남긴다. 나머지 호출의 env 는 $LOG.env 로.
-  npm: 'echo "npm $* REMATH_ENV_FILE=$REMATH_ENV_FILE" >> "$LOG"; case "$*" in *db:new-project*) for a; do out="$a"; done; echo "$out" > "$LOG.tmp"; env >> "$LOG.newenv";'
+  npm: 'echo "npm $* REMATH_ENV_FILE=$REMATH_ENV_FILE" >> "$LOG"; case "$*" in *db:restore*) [ -n "${ADMIN_INITIAL_PASSWORD:-}" ] && echo "ADMIN_INITIAL_PASSWORD reached $*" >> "$LOG" ;; esac; case "$*" in *db:new-project*) for a; do out="$a"; done; echo "$out" > "$LOG.tmp"; env >> "$LOG.newenv";'
     + ' [ "$FAIL" = db:new-project ] && exit 1; printf "$NEW_ENV" > "$out"; exit 0 ;; esac; env >> "$LOG.env"; case "$*" in *"$FAIL"*) [ -n "$FAIL" ] && exit 1 ;; esac; exit 0',
   docker: 'echo "docker $*" >> "$LOG"; env >> "$LOG.env"; case "$*" in *"$FAIL"*) [ -n "$FAIL" ] && exit 1 ;; esac; exit 0',
   curl: 'for a; do url="$a"; done; echo "curl $url" >> "$LOG"; case "$url" in */healthz) printf 200 ;; */api/auth/me) printf "${ME_CODE:-401}" ;; esac',
 };
 const NEW = { SUPABASE_URL: 'https://new.supabase.co', SUPABASE_SERVICE_KEY: 'new-service', SUPABASE_DB_URL: 'postgres://u:p@new:5432/postgres', SUPABASE_ANON_KEY: 'new-anon' };
 
-function deploy(args: string[] = [], extra: Record<string, string> = {}) {
+function deploy(args: string[] = [], extra: Record<string, string> = {}, script = SCRIPT) {
   const dir = mkdtempSync(join(tmpdir(), 'deploy-test-')), bin = join(dir, 'bin');
   mkdirSync(bin);
   for (const [name, body] of Object.entries(STUBS)) { writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`); chmodSync(join(bin, name), 0o755); }
   writeFileSync(join(dir, 'server.env'), 'MOCK_LLM=1\n', { mode: 0o600 });
+  writeFileSync(join(dir, 'remath-20261028.sqlite'), '');   // restore.sh 의 백업 파일(가짜 npm 은 읽지 않는다)
   const log = join(dir, 'log');
   writeFileSync(log, '');
   // REMATH_ENV_FILE 는 상대 경로로 준다: deploy.sh 가 절대 경로로 바꿔 넘겨야 한다.
-  const r = spawnSync('bash', [SCRIPT, ...args], {
+  const r = spawnSync('bash', [script, ...args], {
     cwd: dir, encoding: 'utf8',
     env: { PATH: `${bin}:/usr/bin:/bin`, LOG: log, REMATH_ENV_FILE: 'server.env', ADMIN_INITIAL_PASSWORD: 'admin1234', ...NEW, ...extra },
   });
@@ -194,5 +195,85 @@ describe('deploy/compose.yaml (the only container definition)', () => {
     expect(y).toMatch(/^ {4}restart: unless-stopped$/m);
     expect(y).toMatch(/^ {4}user: node$/m);
     expect(y).toMatch(/^ {6}- "\$\{REMATH_BACKUP_DIR:-\.\.\/backup\}:\/app\/server\/backup"$/m);
+  });
+});
+
+describe('scripts/restore.sh <file> (H-31, #49)', () => {
+  const RESTORE = join(ROOT, 'scripts/restore.sh');
+  const TOKEN = 'sbp_token_must_not_leak';
+  const MGMT = { SUPABASE_ACCESS_TOKEN: TOKEN, SUPABASE_ORG_ID: 'my-org', SUPABASE_REGION: 'ap-northeast-2', SUPABASE_DB_PASSWORD: 'db-pass' };
+  const REF = 'abcdefghijklmnopqrst';
+  const NEW_ENV = `SUPABASE_URL=https://${REF}.supabase.co\\nSUPABASE_SERVICE_KEY=s\\nSUPABASE_DB_URL=postgresql://postgres.${REF}:x@pooler:5432/postgres?sslmode=require\\nSUPABASE_ANON_KEY=a\\n`;
+  // 백업 파일은 상대 경로로 준다(작업 디렉터리 = 가짜 배포 디렉터리): 절대 경로로 바꿔 넘겨야 한다. ADMIN_INITIAL_PASSWORD 는 없다.
+  const restore = (args: string[] = ['remath-20261028.sqlite'], extra: Record<string, string> = {}) => {
+    const r = deploy(args, { SUPABASE_URL: '', SUPABASE_SERVICE_KEY: '', SUPABASE_DB_URL: '', SUPABASE_ANON_KEY: '', ADMIN_INITIAL_PASSWORD: '', NEW_ENV, ...MGMT, ...extra }, RESTORE);
+    return { ...r, file: join(r.dir, 'remath-20261028.sqlite') };
+  };
+  it('is committed executable', () => {
+    expect(execFileSync('git', ['ls-files', '-s', 'scripts/restore.sh'], { cwd: ROOT, encoding: 'utf8' })).toMatch(/^100755 /);
+  });
+
+  it('preflight + file check → new project → migrate → load (no seed) → smoke with the backup counts → env:swap → compose up → backup', () => {
+    const r = restore();
+    expect(r.stderr).toBe('');
+    expect(r.status).toBe(0);
+    const env = `REMATH_ENV_FILE=${join(r.dir, 'server.env')}`;
+    expect(r.steps).toEqual([
+      'docker compose -f deploy/compose.yaml config -q',
+      `npm run --silent db:restore -w server -- --check ${r.file} ${env}`,
+      `npm run --silent db:new-project -w server -- ${r.tmp} ${env}`,
+      `npm run --silent db:migrate -w server ${env}`,
+      `npm run --silent db:restore -w server -- --load ${r.file} ${env}`,
+      `npm run --silent db:smoke -w server -- --restore ${r.file} ${env}`,
+      `npm run --silent env:swap -w server ${env}`,
+      'docker compose -f deploy/compose.yaml up -d --force-recreate',
+      'docker compose -f deploy/compose.yaml exec -T server npm run --silent backup',
+    ]);
+    expect(r.stdout).toContain(`== 3/6 restore ${r.file}`);
+    expect(r.childEnv).not.toContain(TOKEN);
+    expect(r.newEnv.split('\n').filter(l => l.includes(TOKEN))).toEqual([`SUPABASE_ACCESS_TOKEN=${TOKEN}`]);
+    expect(existsSync(r.tmp)).toBe(false);
+  });
+
+  it('a missing file, an unreadable backup or a missing Management var never creates a project', () => {
+    const missing = restore(['nope.sqlite']);
+    const bad = restore(undefined, { FAIL: '--check' });
+    const token = restore(undefined, { SUPABASE_ACCESS_TOKEN: '' });
+    expect([missing.status, bad.status, token.status]).toEqual([1, 1, 1]);
+    expect(missing.stderr).toMatch(/backup file nope\.sqlite is not a file/);
+    expect(token.stderr).toMatch(/SUPABASE_ACCESS_TOKEN is not set/);
+    for (const r of [missing, bad, token]) expect(r.calls.some(c => c.includes('db:new-project'))).toBe(false);
+  });
+
+  it('takes exactly one file argument and no other option', () => {
+    for (const args of [[], ['a.sqlite', 'b.sqlite'], ['--with-samples'], ['--new']]) {
+      const r = restore(args);
+      expect(r.status, args.join(' ')).toBe(2);
+      expect(r.stderr).toMatch(/usage: scripts\/restore\.sh <backup\/remath-YYYYMMDD\.sqlite>/);
+      expect(r.calls).toEqual([]);
+    }
+  });
+
+  for (const step of ['--load', 'db:smoke']) {
+    it(`a failed ${step} keeps the env file and the container and prints the new ref`, () => {
+      const r = restore(undefined, { FAIL: step });
+      expect(r.status).toBe(1);
+      expect(r.steps.at(-1)).toMatch(step);
+      expect(r.calls.some(c => c.includes('env:swap') || c.includes(' up '))).toBe(false);
+      expect(readFileSync(join(r.dir, 'server.env'), 'utf8')).toBe('MOCK_LLM=1\n');
+      expect(r.stderr).toMatch(new RegExp(`new Supabase project ${REF} is left in place.*delete it by hand`));
+    });
+  }
+
+  it('ADMIN_INITIAL_PASSWORD set in the shell does not reach the load', () => {
+    const r = restore(undefined, { ADMIN_INITIAL_PASSWORD: 'admin1234' });
+    expect(r.status).toBe(0);
+    expect(r.calls.some(c => c.startsWith('ADMIN_INITIAL_PASSWORD reached'))).toBe(false);
+  });
+
+  it('deploy.sh rejects --restore combined with --with-samples', () => {
+    const r = deploy(['--restore', 'x.sqlite', '--with-samples'], { ...MGMT });
+    expect(r.status).toBe(2);
+    expect(r.calls).toEqual([]);
   });
 });
