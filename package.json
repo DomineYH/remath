@@ -1,0 +1,30 @@
+{
+  "name": "remath",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "client",
+    "shared",
+    "prompts",
+    "db/seed"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "eslint . && npm run lint:env",
+    "lint:env": "! git grep -n VITE_MOCK_ADMIN_PASSWORD -- client/src client/index.html shared prompts ':(exclude)client/src/api/mock' ':(exclude)client/src/vite-env.d.ts'",
+    "test": "vitest run",
+    "e2e": "playwright test",
+    "check:bundle": "node scripts/check-bundle.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^24.19.2",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.13.0",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^5.0.5"
+  }
+}

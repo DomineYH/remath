@@ -1,0 +1,5 @@
+{
+  "name": "@remath/seed",
+  "private": true,
+  "description": "Seed JSON for stage 2 (no code, no dependencies)."
+}

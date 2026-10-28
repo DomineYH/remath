@@ -3,3 +3,7 @@ node_modules/
 *.sqlite
 backup/
 dist/
+!.env.example
+dist-mock/
+playwright-report/
+test-results/
