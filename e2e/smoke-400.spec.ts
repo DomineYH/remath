@@ -3,24 +3,34 @@
 // EN↔한 changes the interface copy but not the chatbot lines.
 import { expect, test, type Page } from '@playwright/test';
 
-test.use({ viewport: { width: 400, height: 800 } });
+// Headless Chromium hides scrollbars; drop that flag so long screens get a 15px classic scrollbar (only 385px of content).
+test.use({ viewport: { width: 400, height: 800 }, launchOptions: { ignoreDefaultArgs: ['--hide-scrollbars'] } });
 
 const PW = 'abcd1234';
+/** A 16-character nickname (the maximum) in the widest script, so the account button must shrink. */
+const NICK = '가나다라마바사아자차카타파하거너';
 const GREET = '안녕하세요… 저는 가브리엘이에요.';
 
-/** No document-level horizontal scroll (I-54), the top bar on one line (ticket 17 #3: all bar items share one centre line)
+/** No document-level horizontal scroll (I-54), the top bar on one line (ticket 17 #3 / #33: all bar items share one centre line
+ *  and the bar is no taller than one row of its tallest item)
  *  a label on every form control (I-55) and no mockup-only demo element (I-41). */
 async function fits(page: Page, where: string) {
   await expect(page.locator('.top')).toBeVisible();
   const m = await page.evaluate(() => ({
     sw: document.documentElement.scrollWidth,
     mids: [...document.querySelectorAll('.top .in > *')].map(e => e.getBoundingClientRect()).filter(r => r.height > 0).map(r => r.top + r.height / 2),
+    bar: (() => {
+      const top = document.querySelector('.top')!, inner = document.querySelector('.top .in')!, cs = getComputedStyle(inner);
+      const tallest = Math.max(...[...inner.children].map(e => e.getBoundingClientRect().height));
+      return { height: top.getBoundingClientRect().height, oneLine: tallest + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) + parseFloat(getComputedStyle(top).borderBottomWidth) };
+    })(),
     demo: /\bdemo\b|데모/i.test(document.body.innerText),
     unlabelled: [...document.querySelectorAll<HTMLInputElement>('input, select, textarea')]
       .filter(e => !e.labels?.length && !e.getAttribute('aria-label') && !e.getAttribute('aria-labelledby')).map(e => e.outerHTML.slice(0, 80)),
   }));
   expect(m.sw, `${where}: scrollWidth`).toBeLessThanOrEqual(400);
   expect(Math.max(...m.mids) - Math.min(...m.mids), `${where}: top bar on one line`).toBeLessThan(4);
+  expect(m.bar.height, `${where}: top bar height = one line`).toBeLessThanOrEqual(m.bar.oneLine + 0.5);
   expect(m.demo, `${where}: mockup-only demo element (I-41)`).toBe(false);
   expect(m.unlabelled, `${where}: form controls without a label`).toEqual([]);
 }
@@ -99,14 +109,14 @@ test('B-4: 400px smoke over every screen, menus by keyboard, dark mode, EN↔한
   await expect(add).toBeHidden();
   await expect(opener).toBeFocused();
   await opener.click();
-  await add.getByLabel('Nickname').fill('Bora');
+  await add.getByLabel('Nickname').fill(NICK);
   await add.getByLabel('Password', { exact: true }).fill(PW);
   await add.getByLabel('Confirm password').fill(PW);
   await add.getByRole('button', { name: 'Add' }).click();
   await expect(add).toBeHidden();
   await fits(page, 'users');
   await page.goto('/admin/groups');
-  await saveGroup(page, 'A반', ['Bora', '🦊 가브리엘']);
+  await saveGroup(page, 'A반', [NICK, '🦊 가브리엘']);
   await fits(page, 'groups');
 
   // admin test chat: the panel is a closed <details> above the chat; it and the ⋯ menu work by keyboard
@@ -135,14 +145,29 @@ test('B-4: 400px smoke over every screen, menus by keyboard, dark mode, EN↔한
   await fits(page, 'logs');
   await page.goto('/admin/ai');
   await fits(page, 'ai settings');
+  // KO: the long screens (classic scrollbar) keep a one-line bar too
+  await page.getByRole('group', { name: 'Interface language' }).getByRole('button', { name: '한' }).click();
+  await fits(page, 'ai settings (ko)');
+  for (const path of ['/admin/scenarios', '/admin/scenarios/new', '/admin/logs']) {
+    await page.goto(path);
+    await fits(page, `${path} (ko)`);
+  }
+  await page.getByRole('group', { name: '화면 언어' }).getByRole('button', { name: 'EN' }).click();
 
   // teacher: practice home → chat → history
   await page.goto('/');
-  await page.getByLabel('Nickname').fill('Bora');
+  await page.getByLabel('Nickname').fill(NICK);
   await page.getByLabel('Password', { exact: true }).fill(PW);
   await page.locator('form').getByRole('button', { name: 'Sign in' }).click();
   await expect(page).toHaveURL('/practice');
   await fits(page, 'practice home');
+  await page.getByRole('group', { name: 'Interface language' }).getByRole('button', { name: '한' }).click();
+  await fits(page, 'practice home (ko)');
+  await page.getByRole('group', { name: '화면 언어' }).getByRole('button', { name: 'EN' }).click();
+  // the long nickname is cut with an ellipsis; the full nickname stays in the title
+  const acct = page.getByRole('button', { name: 'Account menu' });
+  await expect(acct).toHaveAttribute('title', NICK);
+  expect(await acct.locator('span').evaluate(e => getComputedStyle(e).textOverflow === 'ellipsis' && e.scrollWidth > e.clientWidth)).toBe(true);
   await expect(page.locator('.band')).toHaveCSS('padding', '24px');
   await page.locator('.pick button').filter({ hasText: '가브리엘' }).click();
   const students = page.getByRole('log').locator('.msg.student');
@@ -179,3 +204,39 @@ test('B-4: 400px smoke over every screen, menus by keyboard, dark mode, EN↔한
   await fits(page, 'history');
   expect(await page.locator('table.tbl').evaluate(t => getComputedStyle(t).minWidth)).not.toBe('860px');
 });
+
+test.describe('1280px', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  // #33: the no-wrap/shrink rules leave the desktop bar as it was: one line, nothing cut, 14px gaps,
+  // the brand at the left padding and the theme button at the right one.
+  test('desktop top bar layout is unchanged', async ({ page }) => {
+    await page.goto('/admin');
+    await page.getByLabel('Admin ID').fill('admin');
+    await page.getByLabel('Password', { exact: true }).fill('E2eAdmin123');
+    await page.getByRole('button', { name: 'Sign in as admin' }).click();
+    await expect(page).toHaveURL('/admin/scenarios');
+    await fits1280(page);
+    await page.getByRole('group', { name: 'Interface language' }).getByRole('button', { name: '한' }).click();
+    await fits1280(page);
+  });
+});
+
+async function fits1280(page: Page) {
+  await expect(page.locator('.brand .sub')).toBeVisible();
+  const m = await page.evaluate(() => {
+    const inner = document.querySelector('.top .in')!, box = inner.getBoundingClientRect();
+    const kids = [...inner.children].map(e => e.getBoundingClientRect());
+    return {
+      lefts: kids.map(r => Math.round(r.left - box.left)), rights: kids.map(r => Math.round(box.right - r.right)),
+      gaps: kids.slice(1, -1).map((r, i) => Math.round(kids[i + 2].left - r.right)),
+      mids: kids.map(r => r.top + r.height / 2),
+      cut: [...document.querySelectorAll('.brand b, .acct-name span')].some(e => e.scrollWidth > e.clientWidth),
+    };
+  });
+  expect(m.lefts[0]).toBe(16);
+  expect(m.rights.at(-1)).toBe(16);
+  expect(m.gaps).toEqual([14, 14]);
+  expect(Math.max(...m.mids) - Math.min(...m.mids)).toBeLessThan(1);
+  expect(m.cut).toBe(false);
+}
