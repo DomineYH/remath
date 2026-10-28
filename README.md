@@ -21,7 +21,7 @@ Run all five before a change is done. CI (`.github/workflows/ci.yml`) runs the s
 ```sh
 npm run typecheck     # tsc --noEmit in every workspace
 npm run lint          # ESLint (screens may not import the HTTP/mock API) + lint:env (VITE_MOCK_ADMIN_PASSWORD only inside the mock module)
-npm test              # Vitest unit tests: shared contract, Api ↔ route table, mock API auth and storage
-npm run e2e           # Playwright: one journey in mock mode (signup → practice, admin login, toggles)
+npm test              # Vitest unit tests: shared contract, Api ↔ route table, turn engine, prompts, review checks, mock API
+npm run e2e           # Playwright in mock mode: walking skeleton (signup, admin login, toggles) and the admin scenario list
 npm run check:bundle  # production build has no mock storage key, mock marker or admin password; a mock build has all three
 ```
