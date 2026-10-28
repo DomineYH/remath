@@ -13,7 +13,8 @@
     "db:migrate": "node --import ./src/raw-hooks.ts src/cli/migrate.ts",
     "db:seed": "node --import ./src/raw-hooks.ts src/cli/seed.ts",
     "db:smoke": "node --import ./src/raw-hooks.ts src/cli/smoke.ts",
-    "env:swap": "node --import ./src/raw-hooks.ts src/cli/env-swap.ts"
+    "env:swap": "node --import ./src/raw-hooks.ts src/cli/env-swap.ts",
+    "backup": "node --import ./src/raw-hooks.ts src/cli/backup.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.5",
@@ -22,8 +23,13 @@
     "@remath/shared": "*",
     "@supabase/supabase-js": "^2.118.0",
     "argon2": "^0.45.1",
+    "better-sqlite3": "^13.0.3",
     "fastify": "^5.12.7",
     "fastify-type-provider-zod": "^7.0.0",
     "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.12",
+    "@types/better-sqlite3": "^9.6.0"
   }
 }

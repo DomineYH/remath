@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# 재배포 (#35 H-29 2~5단계, D-15, D-16, D-17): 현재 env 의 Supabase 프로젝트에
+# 재배포 (#35 H-29 2~6단계, D-15, D-16, D-17): 현재 env 의 Supabase 프로젝트에
 #   2) 미적용 마이그레이션 → 3) 시드 → 4) 스모크 → 5) 전환: 런타임 env 파일의 SUPABASE_* 4개 교체(env:swap)
-#   → deploy/compose.yaml 로 컨테이너 재생성 → /healthz 200 + 새 DB 응답 확인.
+#   → deploy/compose.yaml 로 컨테이너 재생성 → /healthz 200 + 새 DB 응답 확인 → 6) 컨테이너 안에서 SQLite 백업(npm run backup).
 # 어느 단계든 실패하면 거기서 멈추고 종료코드 ≠ 0. 스모크나 env 교체가 실패하면 env 파일·컨테이너는 그대로다.
 # 두 번째 실행은 DB 를 바꾸지 않는다(컨테이너는 같은 env 로 다시 만들어진다).
 #
@@ -39,13 +39,13 @@ compose=(docker compose -f deploy/compose.yaml)
 host="${REMATH_BIND:-127.0.0.1}"; [ "$host" = 0.0.0.0 ] && host=127.0.0.1   # compose.yaml 의 포트 바인딩과 같은 주소
 base="http://$host:${REMATH_PORT:-3000}"
 
-echo "== 2/5 migrations"
+echo "== 2/6 migrations"
 npm run --silent db:migrate -w server
-echo "== 3/5 seed"
+echo "== 3/6 seed"
 npm run --silent db:seed -w server "${with_samples[@]}"
-echo "== 4/5 smoke"
+echo "== 4/6 smoke"
 npm run --silent db:smoke -w server "${with_samples[@]}"
-echo "== 5/5 switch to $SUPABASE_URL"
+echo "== 5/6 switch to $SUPABASE_URL"
 npm run --silent env:swap -w server   # 실패하면 set -e 로 여기서 끝: 컨테이너는 그대로
 rollback="roll back by hand: mv $REMATH_ENV_FILE.prev $REMATH_ENV_FILE && ${compose[*]} up -d --force-recreate"
 "${compose[@]}" up -d --force-recreate || fail "docker compose up failed; $rollback"
@@ -57,8 +57,12 @@ for _ in $(seq 30); do
     # URL·키가 틀려 DB 를 못 읽으면 500 이다.
     got="$(code -H "Cookie: remath_teacher=deploy-check-$RANDOM" "$base/api/auth/me")"
     [ "$got" = 401 ] || fail "GET /api/auth/me with an unknown cookie answered $got, want 401 (server cannot query the new DB); $rollback"
-    echo "deploy.sh: ok ($base/healthz 200, new DB answers)"
-    # 6단계(백업)는 #47 이 여기에 붙인다.
+    echo "deploy.sh: switched ($base/healthz 200, new DB answers)"
+    echo "== 6/6 backup"
+    # 방금 만든 컨테이너 안에서 돈다: 새 env(SUPABASE_*, BACKUP_*)와 compose.yaml 의 백업 볼륨을 그대로 쓴다.
+    "${compose[@]}" exec -T server npm run --silent backup \
+      || fail "backup failed (the switch is done and the server is running); retry: ${compose[*]} exec server npm run backup"
+    echo "deploy.sh: ok"
     exit 0
   fi
   sleep 2
