@@ -13,6 +13,7 @@ import { SystemLine } from '../components/Chat.tsx';
 import { TranscriptModal } from '../components/TranscriptModal.tsx';
 import { errorText, useT } from '../i18n/index.tsx';
 import { useMe } from '../session.tsx';
+import { localDateTime } from '../time.ts';
 
 type Detail = z.infer<typeof S.SessionDetail>;
 
@@ -26,7 +27,7 @@ export function HistoryScreen() {
       <PageHead eyebrow={t('histEyebrow')} title={t('histTitle')} lead={t('histLead')} />
       {err !== undefined && <ErrorLine message={errorText(t, err)} />}
       {rows && <SessionsTable rows={rows} label={t('histTitle')} onView={r => teacherApi.getSession(r.id).then(setOpen, setErr)} />}
-      <TranscriptModal open={!!open} title={s?.scenario_name ?? ''} sub={s && `${s.started_at.slice(0, 16).replace('T', ' ')} – ${s.ended_at?.slice(0, 16).replace('T', ' ') ?? '…'}`}
+      <TranscriptModal open={!!open} title={s?.scenario_name ?? ''} sub={s && `${localDateTime(s.started_at)} – ${s.ended_at ? localDateTime(s.ended_at) : '…'}`}
         turns={open?.turns ?? []} onClose={() => setOpen(undefined)}
         report={open?.report ? <SessionReport report={open.report} /> : s?.ended_at && <SystemLine>{t('endNoCls')}</SystemLine>} />
     </AppShell>

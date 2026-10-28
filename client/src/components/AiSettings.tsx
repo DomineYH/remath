@@ -6,6 +6,7 @@ import type * as S from '@remath/shared';
 import type { z } from 'zod';
 import { adminApi } from '../apis.ts';
 import { errorText, useT } from '../i18n/index.tsx';
+import { localDate } from '../time.ts';
 import { Button } from './Button.tsx';
 import { Card } from './Card.tsx';
 import { ErrorLine } from './ErrorLine.tsx';
@@ -53,7 +54,7 @@ function KeyBox({ s, providers, onChange }: { s: Setting; providers: Providers; 
     <div className="keybox">
       <Pill tone="lang">{providers[s.provider!].name}</Pill>
       <span className="mono">{s.key_masked}</span>
-      <span className="hint">{t('keyAdded', s.key_added_at!.slice(0, 10))}</span>
+      <span className="hint">{t('keyAdded', localDate(s.key_added_at!))}</span>
       <Button size="sm" onClick={onChange}>{t('changeKey')}</Button>
     </div>
   );
