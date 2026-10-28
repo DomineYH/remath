@@ -1,6 +1,6 @@
 // SQLite 백업 (H-30, O-5, PRD 7절): Data API 로 읽기만 하고 better-sqlite3 파일 하나에 쓴다.
 // 실행: `npm run backup -w server`(cli/backup.ts, deploy.sh 6단계)와 서버 안 매일 타이머(index.ts).
-import { closeSync, fsyncSync, mkdirSync, openSync, readdirSync, renameSync, rmSync } from 'node:fs';
+import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { z } from 'zod';
@@ -100,6 +100,7 @@ async function readInto(db: Db, tmp: string, pageSize: number) {
   };
   const sq = new Database(tmp);
   try {
+    chmodSync(tmp, 0o600);   // 비밀번호 해시가 들어간다. 아직 빈 파일일 때 막고, rename 이 이 모드를 그대로 가져간다
     sq.pragma('journal_mode = OFF');   // 실패하면 파일째 버리므로 롤백 저널이 필요 없다
     for (const [table, cols] of Object.entries(TABLES)) {
       const keys = KEYS[table] ?? ['id'];

@@ -1,6 +1,6 @@
 // SQLite 백업 (H-30, T-1 (e)): 테이블·열 집합, Data API 페이지 읽기, 임시 파일 → rename, 보관 개수, 매일 타이머, env 검증.
 // Data API 는 가짜 PostgREST(fetch) 로, 열 집합은 PGlite 에 마이그레이션을 실제로 올려 맞춰 본다. 실 DB 는 수동(LIVE CHECK).
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
@@ -168,6 +168,13 @@ describe('backup file (H-30, T-1 e)', () => {
     const r = await backup(db, { dir, keep: 3, now: D1 });
     expect(requests.filter(q => q.startsWith('sessions?') && q.includes('counts') && q.includes('offset=0')).length).toBe(2);
     expect(r.rows).toMatchObject({ sessions: 0, turns: 0 });
+  });
+
+  it('the file is 0600 (it holds password hashes), also when it replaces an older file of the same date', async () => {
+    const dir = tmp();
+    writeFileSync(join(dir, 'remath-20261028.sqlite'), 'old', { mode: 0o644 });
+    const r = await backup(fakeDb(DATA).db, { dir, keep: 3, now: D1 });
+    expect(statSync(r.file).mode & 0o777).toBe(0o600);
   });
 
   it('leaves no file behind when a read fails, and keeps the previous backup', async () => {
