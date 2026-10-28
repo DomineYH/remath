@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router';
 import type * as S from '@remath/shared';
 import type { z } from 'zod';
 import { adminApi } from '../apis.ts';
@@ -19,7 +20,7 @@ type Summary = z.infer<typeof S.ScenarioSummary>;
 
 /** 시나리오 목록(I-43): 워크플로 5단계 + 시나리오 카드 + "프롬프트 보기" 모달(저장본을 getScenarioPrompt 로, F-31). */
 export function AdminScenariosScreen() {
-  const t = useT(), me = useMe();
+  const t = useT(), me = useMe(), navigate = useNavigate();
   const [list, setList] = useState<Summary[]>(), [err, setErr] = useState<unknown>();
   const [viewing, setViewing] = useState<Summary>(), [compiled, setCompiled] = useState<z.infer<typeof S.Compiled>>(), [promptErr, setPromptErr] = useState<unknown>();
   useEffect(() => { adminApi.listScenarios().then(setList, setErr); }, []);
@@ -33,7 +34,7 @@ export function AdminScenariosScreen() {
       <PageHead eyebrow={t('adminEyebrow')} title={t('listTitle')} lead={t('listLead')} />
       {err !== undefined && <ErrorLine message={errorText(t, err)} />}
       {list?.length === 0 && <p className="muted">{t('noScenarios')}</p>}
-      <div className="cards">{list?.map(s => <ScenarioCard key={s.id} s={s} onViewPrompt={() => view(s)} />)}</div>
+      <div className="cards">{list?.map(s => <ScenarioCard key={s.id} s={s} onViewPrompt={() => view(s)} onTestChat={() => navigate(`/admin/scenarios/${s.id}/test`)} />)}</div>
       <Modal open={!!viewing} title={t('promptTitle', viewing?.name)} onClose={() => setViewing(undefined)} actions={<Button onClick={() => setViewing(undefined)}>{t('close')}</Button>}>
         {promptErr !== undefined && <ErrorLine message={errorText(t, promptErr)} />}
         {compiled && <CompiledPrompt compiled={compiled} />}
