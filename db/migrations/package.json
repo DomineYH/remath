@@ -1,0 +1,9 @@
+{
+  "name": "@remath/migrations",
+  "private": true,
+  "type": "module",
+  "description": "SQL migrations (psql --single-transaction) and their PGlite tests (T-3).",
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.12"
+  }
+}
