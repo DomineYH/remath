@@ -18,6 +18,8 @@ async function fits(page: Page, where: string) {
   await expect(page.locator('.top')).toBeVisible();
   const m = await page.evaluate(() => ({
     sw: document.documentElement.scrollWidth,
+    cw: document.documentElement.clientWidth,
+    lastRight: [...document.querySelectorAll('.top .in > *')].at(-1)!.getBoundingClientRect().right,
     mids: [...document.querySelectorAll('.top .in > *')].map(e => e.getBoundingClientRect()).filter(r => r.height > 0).map(r => r.top + r.height / 2),
     bar: (() => {
       const top = document.querySelector('.top')!, inner = document.querySelector('.top .in')!, cs = getComputedStyle(inner);
@@ -29,7 +31,9 @@ async function fits(page: Page, where: string) {
     unlabelled: [...document.querySelectorAll<HTMLInputElement>('input, select, textarea')]
       .filter(e => !e.labels?.length && !e.getAttribute('aria-label') && !e.getAttribute('aria-labelledby')).map(e => e.outerHTML.slice(0, 80)),
   }));
-  expect(m.sw, `${where}: scrollWidth`).toBeLessThanOrEqual(400);
+  // against clientWidth, not 400: a classic scrollbar leaves only 385px, and a bar running under it must fail
+  expect(m.sw, `${where}: scrollWidth`).toBeLessThanOrEqual(m.cw);
+  expect(m.lastRight, `${where}: last top-bar item inside the viewport`).toBeLessThanOrEqual(m.cw);
   expect(Math.max(...m.mids) - Math.min(...m.mids), `${where}: top bar on one line`).toBeLessThan(4);
   expect(m.bar.height, `${where}: top bar height = one line`).toBeLessThanOrEqual(m.bar.oneLine + 0.5);
   expect(m.brandCut, `${where}: the brand word "ReMath" is cut`).toBe(false);
