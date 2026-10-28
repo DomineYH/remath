@@ -35,12 +35,16 @@ export function adminScenarioHandlers({ db, config }: Deps): Handlers {
     'GET /api/admin/scenarios': async () =>
       (must(await db.from('scenarios').select(SCENARIO_SELECT).order('updated_at', { ascending: false })) as unknown as ScenarioDbRow[]).map(toSummary),
 
-    /** 새 시나리오는 초안, slug 는 서버가 만든다. 번역 2행이 실패하면 시나리오 행도 지운다(Data API 는 트랜잭션이 없다). */
+    /** 새 시나리오는 초안, slug 는 서버가 만든다. 어느 insert 든 실패하면 시나리오 행을 지운다(Data API 는 트랜잭션이 없다). */
     'POST /api/admin/scenarios': async (req, reply) => {
       const id = randomUUID(), slug = `scenario-${id.slice(0, 8)}`, { cols, tr } = split(req.body as Input, id);
-      must(await db.from('scenarios').insert({ id, slug, status: 'draft', compiled_prompt: null, ...cols }));
-      const r = await db.from('scenario_translations').insert(tr);
-      if (r.error) { await db.from('scenarios').delete().eq('id', id); throw r.error; }
+      try {
+        must(await db.from('scenarios').insert({ id, slug, status: 'draft', compiled_prompt: null, ...cols }));
+        must(await db.from('scenario_translations').insert(tr));
+      } catch (err) {   // 응답만 잃고 커밋된 insert 도 있다: id 로 지운다(없으면 no-op)
+        await db.from('scenarios').delete().eq('id', id);
+        throw err;
+      }
       await audit(db, req.log, { actor_id: actor(req), action: 'scenario.create', target: id, meta: { slug } });
       reply.code(201);
       return toAdmin(await load(id));

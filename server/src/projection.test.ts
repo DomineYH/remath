@@ -31,6 +31,10 @@ describe('scenario projection', () => {
     expect(S.ScenarioAdmin.strict().parse(a)).toEqual(a);
   });
 
+  it('a scenario missing a translation row still projects, with an empty text set for that lang', () => {
+    expect(toSummary({ ...row, scenario_translations: [] })).toMatchObject({ name: '', problem: '' });
+  });
+
   it('ScenarioSummary uses the active lang texts and counts', () => {
     expect(toSummary(row)).toMatchObject({ name: '노아', problem: '노아 problem', misconception_count: 1,
       classification_count: { leverage: 1, object: 0 }, session_count: 3 });

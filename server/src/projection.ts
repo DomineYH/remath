@@ -1,6 +1,6 @@
 // 투영 (E-19, M-10): Data API 조인 결과 → 목 projection.ts 와 같은 응답 모양. 순수 함수, 쓰기 없음.
 // 각 SELECT 상수가 그 행 타입의 모양을 만든다(PostgREST 임베드). 둘을 함께 고친다.
-import type * as S from '@remath/shared';
+import * as S from '@remath/shared';
 import type { z } from 'zod';
 
 type Lang = 'ko' | 'en';
@@ -20,8 +20,9 @@ export type ScenarioDbRow = Omit<z.infer<typeof S.ScenarioAdmin>, 'translations'
 };
 
 /** scenario_translations 2행 → 인라인 {ko, en}. */
+/** 행이 빠진 언어판(실패한 생성의 잔여)은 빈 판으로 채워 목록 전체가 500 이 되지 않게 한다. */
 export const translations = (rows: ScenarioDbRow['scenario_translations']) =>
-  Object.fromEntries(rows.map(({ lang, ...t }) => [lang, t])) as Record<Lang, Translation>;
+  ({ ko: S.Translation.parse({}), en: S.Translation.parse({}), ...Object.fromEntries(rows.map(({ lang, ...t }) => [lang, t])) }) as Record<Lang, Translation>;
 /** compileScenario·autoChecks 가 받는 ScenarioInput 모양. */
 export const toInput = (s: ScenarioDbRow): z.infer<typeof S.ScenarioInput> => ({
   lang: s.lang, student_prefix: s.student_prefix, mentor_prefix: s.mentor_prefix, grade: s.grade,
