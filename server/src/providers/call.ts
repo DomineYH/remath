@@ -73,9 +73,15 @@ export async function* stream(id: RealProviderId, o: AdapterOpts, req: CompleteR
   }
 }
 
-/** 키 확인용 모델 목록 GET(Q23). 2xx = 유효(#55) — 본문이 없거나 모양이 다르면 빈 목록. */
+/** 키 확인 전체(헤더+본문)의 기한. 없으면 멈춘 공급자에 관리자 저장이 영영 걸린다. */
+export const LIST_MODELS_TIMEOUT_MS = 10_000;
+
+/** 키 확인용 모델 목록 GET(Q23). 유효성은 상태만으로 정한다: 2xx = 유효(#55). 그 뒤 id 읽기는 최선 — 본문 실패·기한 초과·모양 다름이면 빈 목록. */
 export async function listModels(id: RealProviderId, o: AdapterOpts, http: Http, ids: (json: never) => string[]): Promise<string[]> {
+  const signal = AbortSignal.timeout(LIST_MODELS_TIMEOUT_MS);
   let res: Response;
-  try { res = await send(id, o, http); } catch (err) { throw asAdapterError(id, err); }
-  try { return ids(await res.json() as never); } catch { return []; }
+  try { res = await send(id, o, http, signal); } catch (err) { throw asAdapterError(id, err, signal); }
+  // 주입된 fetch 의 본문은 signal 을 모를 수 있어 기한과 경주시킨다.
+  const expired = new Promise<never>((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+  try { return ids(await Promise.race([res.json(), expired]) as never); } catch { return []; }
 }

@@ -1,6 +1,6 @@
 // 어댑터 3종 픽스처 테스트(#56). 픽스처 = docs/research/llm-providers-2026-10.md 의 실제 응답 형태를 손으로 적은 SSE.
 import { AdapterError, collect, type CompleteRequest, type Provider, type Role, type StreamEvent } from '@remath/shared/engine';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { anthropicProvider } from './anthropic.ts';
 import { geminiProvider } from './gemini.ts';
 import { openaiProvider } from './openai.ts';
@@ -286,6 +286,20 @@ describe.each(Object.entries(CASES))('%s adapter', (_, c) => {
     expect(await setup(() => new Response(null, { status: 204 })).p.listModels()).toEqual([]);
     expect(await setup(() => jsonResponse({})).p.listModels()).toEqual([]);
     expect(await setup(() => new Response('not json', { status: 200 })).p.listModels()).toEqual([]);
+  });
+
+  it('listModels never hangs: one 10 s signal — stalled 2xx body → [], stalled headers → retryable provider_unavailable', async () => {
+    const real = AbortSignal.timeout.bind(AbortSignal);
+    const spy = vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => real(20));   // 운영값 10 s 를 20 ms 로 줄여 본다
+    try {
+      const stalled = new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('{"data":[')); } }), { status: 200 });
+      expect(await setup(() => stalled).p.listModels()).toEqual([]);
+      expect(spy).toHaveBeenCalledWith(10_000);
+      // 헤더가 오지 않는 fetch: 실제 fetch 처럼 signal 이 끊기면 그 reason 으로 거절한다.
+      const noHeaders = ((_: string, init: RequestInit) => new Promise((_, reject) => init.signal!.addEventListener('abort', () => reject(init.signal!.reason)))) as typeof fetch;
+      const p = c.make(KEY, { log: memLog().log, fetch: noHeaders });
+      await expect(p.listModels()).rejects.toMatchObject({ name: 'AdapterError', code: 'provider_unavailable', retryable: true, message: 'timeout' });
+    } finally { spy.mockRestore(); }
   });
 });
 
