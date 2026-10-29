@@ -2,7 +2,7 @@
 // effort 경로: generation_config.thinking_level 은 Interactions API 의 필드다. 이 엔드포인트(GenerateContentRequest)에서는
 // generationConfig.thinkingConfig.thinkingLevel 이므로 그 경로로 보낸다(snake_case 도 받는 proto JSON — system_instruction 과 같은 표기).
 import type { Provider } from '@remath/shared/engine';
-import { listModels, stream, streamError, type AdapterOpts, type Done } from './call.ts';
+import { httpError, listModels, stream, streamError, type AdapterOpts, type Done } from './call.ts';
 
 const API = 'https://generativelanguage.googleapis.com/v1beta';
 
@@ -11,7 +11,7 @@ const STOP: Record<string, Done['stopReason']> = { STOP: 'end', MAX_TOKENS: 'len
 interface Chunk {
   candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] }; finishReason?: string }[];
   usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number };
-  modelVersion?: string; error?: { message?: string };
+  modelVersion?: string; error?: { code?: number; message?: string; status?: string };
 }
 
 export function geminiProvider(key: string, o: AdapterOpts): Provider {
@@ -27,7 +27,7 @@ export function geminiProvider(key: string, o: AdapterOpts): Provider {
       },
     }, ev => {
       const d = JSON.parse(ev.data) as Chunk;
-      if (d.error) throw streamError('gemini', d.error.message);
+      if (d.error) throw typeof d.error.code === 'number' ? httpError('gemini', d.error.code, `stream error: ${d.error.message}`) : streamError('gemini', d.error.message, d.error.status);
       const c = d.candidates?.[0], text = c?.content?.parts?.filter(p => !p.thought).map(p => p.text ?? '').join('') ?? '';
       if (!c?.finishReason) return text;
       // 마지막 청크는 텍스트와 finishReason·usageMetadata 를 함께 싣는다.

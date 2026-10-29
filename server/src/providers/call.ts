@@ -16,9 +16,14 @@ export function httpError(id: RealProviderId, status: number, message: string): 
   return new AdapterError(id, retryable ? 'provider_unavailable' : 'provider_rejected', `${status} ${message}`.slice(0, 300), { status, retryable });
 }
 
-/** 200 뒤에 온 `event: error`·실패 이벤트. 공급자 측 장애라 재시도 가능으로 둔다. */
-export const streamError = (id: RealProviderId, message: unknown) =>
-  new AdapterError(id, 'provider_unavailable', `stream error: ${String(message ?? 'unknown')}`.slice(0, 300), { retryable: true });
+/** 영구 오류 이름(Q7 거절): Anthropic `*_error` type, OpenAI type/code, Gemini status — docs/research/llm-providers-2026-10.md. */
+const REJECTED = /invalid|auth|permission|not_found/i;
+
+/** 200 뒤에 온 `event: error`·실패 이벤트. kind = 공급자의 오류 type/code/status. 요청·인증 문제는 거절, 그 밖(과부하·한도·서버·모름)은 재시도 가능. */
+export function streamError(id: RealProviderId, message: unknown, kind?: unknown): AdapterError {
+  const rejected = typeof kind === 'string' && REJECTED.test(kind);
+  return new AdapterError(id, rejected ? 'provider_rejected' : 'provider_unavailable', `stream error: ${String(message ?? 'unknown')}`.slice(0, 300), { retryable: !rejected });
+}
 
 /** fetch·본문 읽기에서 던져진 것 → AdapterError. 기한 초과(TimeoutError)·네트워크는 재시도 가능, 호출자 abort 는 아니다. */
 function asAdapterError(id: RealProviderId, err: unknown, signal?: AbortSignal): AdapterError {

@@ -33,6 +33,11 @@ data: {"type":"response.output_text.delta","sequence_number":2,"item_id":"msg_1"
   `event: error
 data: {"type":"error","sequence_number":3,"code":"server_error","message":"The server had an error","param":null}`,
 );
+// 200 뒤 영구 오류(Q7): 요청·인증 문제는 거절로 남는다.
+const OPENAI_MID_REJECTED = sseText(
+  `event: error
+data: {"type":"error","sequence_number":1,"code":"invalid_prompt","message":"Invalid prompt","param":null}`,
+);
 const OPENAI_LENGTH = sseText(
   `event: response.output_text.delta
 data: {"type":"response.output_text.delta","sequence_number":2,"item_id":"msg_1","output_index":0,"content_index":0,"delta":"반은"}`,
@@ -72,6 +77,10 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text
   `event: error
 data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`,
 );
+const ANTHROPIC_MID_REJECTED = sseText(
+  `event: error
+data: {"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long"}}`,
+);
 const ANTHROPIC_LENGTH = sseText(
   `event: message_start
 data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"claude-sonnet-5-5","usage":{"input_tokens":42,"output_tokens":1}}}`,
@@ -93,13 +102,16 @@ const GEMINI_MID_ERROR = sseText(
   `data: {"candidates":[{"content":{"parts":[{"text":"반은 "}],"role":"model"},"index":0}],"modelVersion":"gemini-3.8-flash"}`,
   `data: {"error":{"code":503,"message":"The model is overloaded. Please try again later.","status":"UNAVAILABLE"}}`,
 );
+const GEMINI_MID_REJECTED = sseText(
+  `data: {"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT"}}`,
+);
 const GEMINI_LENGTH = sseText(
   `data: {"candidates":[{"content":{"parts":[{"text":"반은"}],"role":"model"},"finishReason":"MAX_TOKENS","index":0}],"usageMetadata":{"promptTokenCount":42,"candidatesTokenCount":1024,"totalTokenCount":1066},"modelVersion":"gemini-3.8-flash"}`,
 );
 
 interface Case {
   make: (key: string, o: AdapterOpts) => Provider;
-  ok: string; okEvents: StreamEvent[]; midError: string; length: string;
+  ok: string; okEvents: StreamEvent[]; midError: string; midRejected: string; length: string;
   /** 비-2xx 오류 본문(공급자별 형태). */
   errorBody: (message: string) => unknown;
   request: { url: string; headers: Record<string, string>; body: unknown; effort: unknown };
@@ -108,7 +120,7 @@ interface Case {
 
 const CASES: Record<string, Case> = {
   openai: {
-    make: openaiProvider, ok: OPENAI_OK, midError: OPENAI_MID_ERROR, length: OPENAI_LENGTH,
+    make: openaiProvider, ok: OPENAI_OK, midError: OPENAI_MID_ERROR, midRejected: OPENAI_MID_REJECTED, length: OPENAI_LENGTH,
     okEvents: [
       { type: 'delta', text: '반은 ' }, { type: 'delta', text: '이분의 일' },
       { type: 'done', model: 'gpt-6.1-sol-2026-09-01', stopReason: 'end', usage: { input: 42, output: 7 } },
@@ -123,7 +135,7 @@ const CASES: Record<string, Case> = {
     models: { url: 'https://api.openai.com/v1/models', json: { object: 'list', data: [{ id: 'gpt-6.1-sol', object: 'model', created: 1, owned_by: 'openai' }, { id: 'gpt-5.5', object: 'model', created: 1, owned_by: 'openai' }] }, ids: ['gpt-6.1-sol', 'gpt-5.5'] },
   },
   anthropic: {
-    make: anthropicProvider, ok: ANTHROPIC_OK, midError: ANTHROPIC_MID_ERROR, length: ANTHROPIC_LENGTH,
+    make: anthropicProvider, ok: ANTHROPIC_OK, midError: ANTHROPIC_MID_ERROR, midRejected: ANTHROPIC_MID_REJECTED, length: ANTHROPIC_LENGTH,
     okEvents: [
       { type: 'delta', text: '반은 ' }, { type: 'delta', text: '이분의 일' },
       { type: 'done', model: 'claude-sonnet-5-5', stopReason: 'end', usage: { input: 42, output: 7 } },
@@ -138,7 +150,7 @@ const CASES: Record<string, Case> = {
     models: { url: 'https://api.anthropic.com/v1/models', json: { data: [{ type: 'model', id: 'claude-opus-5-5', display_name: 'Claude Opus 5.5', created_at: '2026-01-01T00:00:00Z' }], has_more: false, first_id: 'claude-opus-5-5', last_id: 'claude-opus-5-5' }, ids: ['claude-opus-5-5'] },
   },
   gemini: {
-    make: geminiProvider, ok: GEMINI_OK, midError: GEMINI_MID_ERROR, length: GEMINI_LENGTH,
+    make: geminiProvider, ok: GEMINI_OK, midError: GEMINI_MID_ERROR, midRejected: GEMINI_MID_REJECTED, length: GEMINI_LENGTH,
     okEvents: [
       { type: 'delta', text: '반은 ' }, { type: 'delta', text: '이분의 일' },
       { type: 'done', model: 'gemini-3.8-flash', stopReason: 'end', usage: { input: 42, output: 37 } },   // output = 응답 + 생각 토큰(3사 모두 과금 기준)
@@ -213,6 +225,11 @@ describe.each(Object.entries(CASES))('%s adapter', (_, c) => {
     expect(e).toMatchObject({ provider: p.id, code: 'provider_unavailable', retryable: true });
   });
 
+  it('a mid-stream request/auth error keeps Q7: provider_rejected, not retryable', async () => {
+    const { p } = setup(() => sseResponse(c.midRejected));
+    expect(await rejection(p.complete(REQ))).toMatchObject({ provider: p.id, code: 'provider_rejected', retryable: false });
+  });
+
   it('a stream that ends without a final event throws', async () => {
     const { p } = setup(() => sseResponse(''));
     expect(await rejection(p.complete(REQ))).toBeInstanceOf(AdapterError);
@@ -256,6 +273,20 @@ describe.each(Object.entries(CASES))('%s adapter', (_, c) => {
     expect(calls).toEqual([{ url: c.models.url, method: 'GET', headers: expect.any(Object), body: undefined }]);
     const bad = setup(() => jsonResponse(c.errorBody('bad key'), 401)).p;
     await expect(bad.listModels()).rejects.toMatchObject({ code: 'provider_rejected', status: 401, retryable: false });
+  });
+});
+
+describe('mid-stream error shapes without a numeric code (Q7)', () => {
+  const fail = (make: Case['make'], text: string) => collect(make(KEY, { log: memLog().log, fetch: fakeFetch(() => sseResponse(text)).fetch }).complete(REQ)).catch((e: unknown) => e);
+  it('gemini status string: PERMISSION_DENIED → rejected; RESOURCE_EXHAUSTED → unavailable, retryable', async () => {
+    expect(await fail(geminiProvider, sseText(`data: {"error":{"message":"denied","status":"PERMISSION_DENIED"}}`))).toMatchObject({ code: 'provider_rejected', retryable: false });
+    expect(await fail(geminiProvider, sseText(`data: {"error":{"message":"quota","status":"RESOURCE_EXHAUSTED"}}`))).toMatchObject({ code: 'provider_unavailable', retryable: true });
+  });
+  it('openai response.failed: invalid_prompt → rejected; server_error → unavailable, retryable', async () => {
+    const failed = (code: string) => sseText(`event: response.failed
+data: {"type":"response.failed","sequence_number":1,"response":{"id":"resp_1","status":"failed","error":{"code":"${code}","message":"x"}}}`);
+    expect(await fail(openaiProvider, failed('invalid_prompt'))).toMatchObject({ code: 'provider_rejected', retryable: false });
+    expect(await fail(openaiProvider, failed('server_error'))).toMatchObject({ code: 'provider_unavailable', retryable: true });
   });
 });
 
