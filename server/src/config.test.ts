@@ -21,10 +21,17 @@ describe('loadConfig: startup fail-fast (B, O-6, E-21, G-28)', () => {
     const { SUPABASE_SERVICE_KEY: _, ...env } = ENV;
     expect(() => loadConfig(env, disk)).toThrow(/SUPABASE_SERVICE_KEY/);
   });
-  it('MOCK_LLM other than 1 fails, unset too', () => {
-    expect(() => loadConfig({ ...ENV, MOCK_LLM: '0' }, disk)).toThrow(/MOCK_LLM/);
+  it('MOCK_LLM other than 0 or 1 fails, unset too', () => {
+    expect(() => loadConfig({ ...ENV, MOCK_LLM: '2' }, disk)).toThrow(/MOCK_LLM/);
     const { MOCK_LLM: _, ...env } = ENV;
     expect(() => loadConfig(env, disk)).toThrow(/MOCK_LLM/);
+  });
+  it('MOCK_LLM=0 needs a 32-byte KEY_VAULT_SECRET (Q4, Q25); MOCK_LLM=1 does not read it', () => {
+    const SECRET = Buffer.alloc(32, 7).toString('base64');
+    for (const KEY_VAULT_SECRET of [undefined, '', Buffer.alloc(31).toString('base64'), Buffer.alloc(33).toString('hex')])
+      expect(() => loadConfig({ ...ENV, MOCK_LLM: '0', KEY_VAULT_SECRET }, disk)).toThrow(/KEY_VAULT_SECRET[\s\S]*openssl rand -base64 32/);
+    expect(loadConfig({ ...ENV, MOCK_LLM: '0', KEY_VAULT_SECRET: SECRET }, disk).env).toMatchObject({ MOCK_LLM: '0', KEY_VAULT_SECRET: SECRET });
+    expect(loadConfig({ ...ENV, KEY_VAULT_SECRET: 'junk' }, disk).env).toMatchObject({ MOCK_LLM: '1', KEY_VAULT_SECRET: undefined });
   });
   it('a broken providers.json fails', () => {
     const read = (p: string) => p.endsWith('providers.json') ? '{"openai":{}}' : disk(p);
