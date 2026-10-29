@@ -115,7 +115,8 @@ async function* stream(o: TurnOpts & { signal: AbortSignal }, id: string, token:
   const sc = c.scenario, history = c.turns, { signal } = o;
   const tr = (lang: Lang) => sc.scenario_translations.find(t => t.lang === lang)!;
   const pass = (p: Provider): Provider => ({ ...p, complete: req => p.complete({ ...req, signal }) });   // F-24: 어댑터 호출마다 signal
-  const bots = { student: pass(mockProvider), analysis: pass(mockProvider), mentor: pass(mockProvider), model: 'mock' };
+  const bot = { provider: pass(mockProvider), model: 'mock', effort: null };   // ponytail: 세 역할 모두 MOCK. AI 설정을 읽는 건 이후 티켓.
+  const bots = { student: bot, analysis: bot, mentor: bot };
   const criteria = sc.classification.leverage.length ? sc.classification : null;
   const state = { mis: c.progress.mis, counts: c.counts, goalReached: c.goal_reached, takeOverCount: history.filter(t => t.trigger === S.TRIGGER.takingOver).length };
   const seq0 = (history.at(-1)?.seq ?? 0) + 1;
@@ -125,9 +126,9 @@ async function* stream(o: TurnOpts & { signal: AbortSignal }, id: string, token:
     for await (const ev of runTurn({ bots, compiled: sc.compiled_prompt ?? compileScenario(sc, tr(sc.lang), sc.lang, o.templates), criteria,
       tr: tr(c.lang) as Translation, lang: c.lang, state, history, text })) {
       if (ev.type === 'classification') { if (ev.cls) { Object.assign(pending[0], ev.cls); yield { type: 'classification', ...ev.cls }; } }
-      else if (ev.type === 'student') { add({ speaker: 'student', text: ev.text }); yield { type: 'student', text: ev.text, final: true }; }
+      else if (ev.type === 'student') { if (ev.final) add({ speaker: 'student', text: ev.text }); yield ev; }
       else if (ev.type === 'trigger') { add({ speaker: 'mentor', text: '', trigger: ev.trigger }); yield ev; }
-      else if (ev.type === 'mentor') { pending[pending.length - 1].text = ev.text; yield { type: 'mentor', text: ev.text, final: true }; }
+      else if (ev.type === 'mentor') { if (ev.final) pending[pending.length - 1].text = ev.text; yield ev; }
       else {
         signal.throwIfAborted();   // 기한(잡은 순간부터)·끊김 뒤에는 기록하지 않는다
         const at = o.now().toISOString(), turns = ev.ended ? [] : pending;

@@ -157,12 +157,21 @@ describe('withTurn: claim_turn → runTurn → record_turn once (F-22, F-24)', (
   it('claims, runs, records this turn with server seq in one record_turn, and needs no release', async () => {
     const { db, calls } = fakeDb();
     const events = await run(db, '그림을 설명해 줄래?') as AdminSseEvent[];
-    expect(events.map(e => e.type)).toEqual(['classification', 'student', 'done']);
+    expect(events.map(e => e.type)).toEqual(['classification', 'student', 'student', 'done']);
     expect(labels(calls)).toEqual(['claim_turn', 'select sessions', 'record_turn']);
     const rec = calls[2][1] as { p_turns: { seq: number; speaker: string }[]; p_ended_at: null };
     expect(rec.p_turns.map(t => [t.seq, t.speaker])).toEqual([[2, 'teacher'], [3, 'student']]);
     expect(rec.p_ended_at).toBeNull();
-    expect((events[2] as { turns: unknown[] }).turns).toHaveLength(2);
+    expect((events[3] as { turns: unknown[] }).turns).toHaveLength(2);
+  });
+
+  it('student streams final:false then final:true over SSE; only the final text is recorded (ADR-0004)', async () => {
+    const { db, calls } = fakeDb();
+    const events = await run(db, '그림을 설명해 줄래?') as AdminSseEvent[];
+    const said = events.filter(e => e.type === 'student');
+    expect(said.map(e => e.final)).toEqual([false, true]);
+    const rec = calls.find(c => c[0] === 'record_turn')![1] as { p_turns: { speaker: string; text: string }[] };
+    expect(rec.p_turns.filter(t => t.speaker === 'student').map(t => t.text)).toEqual([said[1].text]);
   });
 
   it('claim, record and release carry the same fresh token', async () => {
@@ -277,7 +286,7 @@ describe('withTurn: deadline from the claim, fenced record, unknown RPC outcomes
   it('probe 2: record outcome unknown and release outcome unknown → no error and no done: the stream just ends', async () => {
     const { db } = fakeDb({ record: 'before', releaseLost: true });
     const evs = await run(db, '그림을 설명해 줄래?') as AdminSseEvent[];
-    expect(evs.map(e => e.type)).toEqual(['classification', 'student']);
+    expect(evs.map(e => e.type)).toEqual(['classification', 'student', 'student']);
   });
   it('probe 2 for the claim: claim outcome unknown, not confirmed by the read, release unknown → no events at all', async () => {
     const { db, calls } = fakeDb({ claimLost: true, readFails: true, releaseLost: true });
@@ -408,6 +417,6 @@ describe('unknown outcome over HTTP: the SSE ends with no terminal event (client
     expect(r.statusCode).toBe(200);
     expect(r.headers['content-type']).toMatch(/^text\/event-stream/);
     const evs = await collect(sse(Promise.resolve(new Response(r.body)), S.SseEvent)) as AdminSseEvent[];
-    expect(evs.map(e => e.type)).toEqual(['classification', 'student']);
+    expect(evs.map(e => e.type)).toEqual(['classification', 'student', 'student']);
   });
 });
