@@ -37,10 +37,10 @@ export function mentorMessage(lang: Lang, trigger: Trigger, history: Turn[], tex
 const call = (b: BotCfg) => ({ model: b.model, ...b.effort ? { effort: b.effort } : {} });
 
 /** ADR-0004: 델타마다 지금까지의 전체를 final:false 로, 스트림이 끝나면 전체를 final:true 로 한 번. */
-async function* speak<T extends 'student' | 'mentor'>(type: T, stream: AsyncIterable<StreamEvent>) {
+async function* speak<T extends 'student' | 'mentor'>(type: T, bot: BotCfg, stream: AsyncIterable<StreamEvent>) {
   let text = '', done = false;
   for await (const ev of stream) { if (ev.type === 'delta') yield { type, text: text += ev.text, final: false }; else done = true; }
-  if (!done) throw new AdapterError('mock', 'no_done', 'stream ended without done event');
+  if (!done) throw new AdapterError(bot.provider.id, 'no_done', 'stream ended without done event');
   yield { type, text, final: true };
 }
 
@@ -69,14 +69,14 @@ export async function* runTurn(p: { bots: Bots; compiled: Compiled; criteria: Cr
   else {
     const req = { system: compiled.student + runtimeBlock(j.state, j.directive, lang), messages: studentMessages(history, text), ...call(bots.student),
       context: { role: 'student' as const, lang, teacherText: text, leverage: cls?.leverage ?? null, directive: j.directive, goalReached: p.state.goalReached, lines: { greet: tr.greet, chars: tr.chars, elicit: tr.elicit } } };
-    yield* speak('student', bots.student.provider.complete(req));
+    yield* speak('student', bots.student, bots.student.provider.complete(req));
   }
   // 3) 멘토: 트리거 3종 모두 호출(티켓 16).
   const trigger = j.kind === 'help' ? TRIGGER.help : j.trigger;
   if (trigger) {
     yield { type: 'trigger', trigger };
     const req = { system: compiled.mentor, messages: mentorMessage(lang, trigger, history, text), ...call(bots.mentor), context: { role: 'mentor' as const, lang, trigger, lines: { t1: tr.t1, t2: tr.t2, t3: tr.t3 } } };
-    yield* speak('mentor', bots.mentor.provider.complete(req));
+    yield* speak('mentor', bots.mentor, bots.mentor.provider.complete(req));
   }
   yield { type: 'done', state: j.state, ended: false };
 }

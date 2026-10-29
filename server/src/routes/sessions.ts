@@ -11,9 +11,10 @@ import { SESSION_DETAIL_SELECT, SESSION_SELECT, sessionDetail, sessionRow, type 
 import { frame, withTurn } from '../turn.ts';
 
 type Lang = z.infer<typeof S.Lang>;
-export function sessionHandlers({ db, config, now }: Deps): Handlers {
+export function sessionHandlers({ db, config, now, providersFor }: Deps): Handlers {
   const turnLimit = config.env.MAX_TURNS;
-  const turnOpts = { db, maxTurns: turnLimit, timeoutMs: config.env.TURN_TIMEOUT_MS, templates: config.templates, now };
+  const live = config.env.MOCK_LLM === '0' ? { providersFor, secret: config.env.KEY_VAULT_SECRET! } : undefined;   // config 가 0 이면 비밀을 이미 검증했다
+  const turnOpts = { db, maxTurns: turnLimit, timeoutMs: config.env.TURN_TIMEOUT_MS, templates: config.templates, now, live };
 
   const detail = (s: SessionDbRow) => sessionDetail(s, turnLimit);
   const mine = (req: FastifyRequest, cols: string) => db.from('sessions').select(cols).eq('user_id', req.auth!.user.id);
