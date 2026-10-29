@@ -11,9 +11,10 @@ import { SESSION_DETAIL_SELECT, SESSION_SELECT, sessionDetail, sessionRow, type 
 import { frame, withTurn } from '../turn.ts';
 
 type Lang = z.infer<typeof S.Lang>;
-export function sessionHandlers({ db, config, now }: Deps): Handlers {
+export function sessionHandlers({ db, config, now, providersFor }: Deps): Handlers {
   const turnLimit = config.env.MAX_TURNS;
-  const turnOpts = { db, maxTurns: turnLimit, timeoutMs: config.env.TURN_TIMEOUT_MS, templates: config.templates, now };
+  const live = config.env.MOCK_LLM === '0' ? { providersFor, secret: config.env.KEY_VAULT_SECRET! } : undefined;   // config 가 0 이면 비밀을 이미 검증했다
+  const turnOpts = { db, maxTurns: turnLimit, timeoutMs: config.env.TURN_TIMEOUT_MS, templates: config.templates, now, live };
 
   const detail = (s: SessionDbRow) => sessionDetail(s, turnLimit);
   const mine = (req: FastifyRequest, cols: string) => db.from('sessions').select(cols).eq('user_id', req.auth!.user.id);
@@ -97,7 +98,7 @@ export function sessionHandlers({ db, config, now }: Deps): Handlers {
     'POST /api/sessions/:id/end': async req => {
       return withTurn({ ...turnOpts, log: req.log }, await sessionOf(req, 'light'), 'END SESSION', async events => {
         for await (const ev of events) {
-          if (ev.type === 'error') throw new ApiFail('provider_unavailable', ev.message);
+          if (ev.type === 'error') throw new ApiFail(ev.code === 'provider_rejected' ? 'provider_rejected' : 'provider_unavailable', ev.message);   // Q7 코드 유지(둘 다 502)
           if (ev.type === 'done' && ev.ended) return ev.report;
         }
         // 결과를 모른다(이벤트 없이 끝남): 리포트를 지어내지 않는다. 화면의 end() 는 오류를 보이고 finally 에서 GET 으로 맞춘다.

@@ -1,11 +1,13 @@
-// 턴 파이프라인 (F-22~F-25): claim_turn → runTurn(MOCK_LLM) → SSE 이벤트 → done 에서 record_turn 한 번. 실패·끊김은 발화 미기록 + 턴 해제.
+// 턴 파이프라인 (F-22~F-25): claim_turn → runTurn(MOCK_LLM=1 이면 MOCK, 0 이면 ai_settings 의 실 공급자) → SSE 이벤트 → done 에서 record_turn 한 번. 실패·끊김은 발화 미기록 + 턴 해제.
 import { compileScenario, type Templates } from '@remath/prompts';
 import * as S from '@remath/shared';
-import { END_SESSION_RE, mockProvider, runTurn, sessionReport, type Provider, type Translation } from '@remath/shared/engine';
+import { AdapterError, END_SESSION_RE, mockProvider, runTurn, sessionReport, type BotCfg, type Bots, type Effort, type Provider, type Role, type Translation } from '@remath/shared/engine';
 import type { FastifyBaseLogger } from 'fastify';
 import type { z } from 'zod';
 import { must, type Db } from './db.ts';
 import { ApiFail } from './errors.ts';
+import type { ProvidersFor, RealProviderId } from './providers/types.ts';
+import { open, VaultError } from './vault.ts';
 
 export type AdminSseEvent = z.infer<typeof S.AdminSseEvent>;
 
@@ -16,7 +18,9 @@ export const frame = ({ type, ...data }: AdminSseEvent) => `event: ${type}\ndata
 export const adminState = (s: { mis: number[]; counts: Record<string, number>; goal_reached: boolean }, turns: Pick<z.infer<typeof S.Turn>, 'trigger'>[]): z.infer<typeof S.AdminState> =>
   ({ mis: s.mis, counts: s.counts, goal_reached: s.goal_reached, last_trigger: [...turns].reverse().find(t => t.trigger)?.trigger ?? null });
 
-export interface TurnOpts { db: Db; log: FastifyBaseLogger; maxTurns: number; timeoutMs: number; templates: Templates; now: () => Date; signal?: AbortSignal }
+/** 실 모드(MOCK_LLM=0) 의존성. 없으면 세 역할 모두 MOCK 이고 ai_settings 를 읽지 않는다(Q4). */
+export interface Live { providersFor: ProvidersFor; secret: string }
+export interface TurnOpts { db: Db; log: FastifyBaseLogger; maxTurns: number; timeoutMs: number; templates: Templates; now: () => Date; signal?: AbortSignal; live?: Live }
 
 type Lang = z.infer<typeof S.Lang>;
 type TurnCols = Omit<z.infer<typeof S.Turn>, 'created_at'>;
@@ -111,23 +115,58 @@ async function record(o: TurnOpts, id: string, token: string, args: Record<strin
   return mine.length === n && mine[0].speaker === 'teacher' && mine[0].text === text ? { ok: true, turns: mine } : { ok: false, message: 'turn failed' };
 }
 
+/** 실 모드에서 역할에 공급자·암호문·모델이 없거나(Q4) 암호문을 풀지 못함(Q18). 턴은 기록하지 않고 재시도해도 소용없다. */
+class Unconfigured extends Error {
+  readonly role: Role; readonly code: 'ai_not_configured' | 'vault_decrypt_failed';
+  // 매개변수 속성은 쓰지 않는다: 서버는 Node 타입 제거(erasable 문법만)로 돈다.
+  constructor(role: Role, code: 'ai_not_configured' | 'vault_decrypt_failed') { super(code); this.role = role; this.code = code; }
+}
+type AiRow = { role: Role; key_source: Role | 'own'; provider: RealProviderId | null; key_ciphertext: string | null; model: string | null; effort: Effort | null };
+
+/** Q3·Q19·Q21: ai_settings 3행을 턴마다 한 번 읽어 Bots. 공유 역할은 출처 행의 provider·암호문(저장 시 복사 없음), model·effort 는 자기 행. */
+async function liveBots(o: TurnOpts, live: Live, pass: (p: Provider) => Provider): Promise<Bots> {
+  const rows = must(await o.db.from('ai_settings').select('role, key_source, provider, key_ciphertext, model, effort')) as AiRow[];
+  const by = new Map(rows.map(r => [r.role, r]));
+  const bot = (role: Role): BotCfg => {
+    const r = by.get(role), src = r && (r.key_source === 'own' ? r : by.get(r.key_source));
+    if (!r?.model || !src?.provider || !src.key_ciphertext) throw new Unconfigured(role, 'ai_not_configured');
+    let key: string;
+    try { key = open(src.key_ciphertext, live.secret); } catch (err) { throw err instanceof VaultError ? new Unconfigured(role, err.code) : err; }
+    return { provider: pass(live.providersFor(src.provider, key, { log: o.log, role })), model: r.model, effort: r.effort };
+  };
+  return { student: bot('student'), analysis: bot('analysis'), mentor: bot('mentor') };
+}
+
+/**
+ * 실패 → SSE error(Q7). 기한은 오류 이름이 아니라 우리 signal 의 reason 으로 안다(어댑터 오류는 늘 AdapterError).
+ * 어댑터 오류는 code·retryable 을 그대로 쓰고, 메시지는 고정 문자열이다: AdapterError.message 는 공급자 문구(마스킹된 키 포함)를 담을 수 있다.
+ */
+function failure(err: unknown, signal: AbortSignal): AdminSseEvent {
+  if (signal.aborted && (signal.reason as Error | undefined)?.name === 'TimeoutError') return { type: 'error', code: 'provider_unavailable', message: 'turn timed out', retryable: true };
+  if (err instanceof Unconfigured) return { type: 'error', code: 'provider_unavailable', message: 'ai not configured', retryable: false };
+  if (err instanceof AdapterError && err.code === 'provider_rejected') return { type: 'error', code: 'provider_rejected', message: 'provider rejected the request', retryable: err.retryable };
+  if (err instanceof AdapterError && err.code === 'provider_unavailable') return { type: 'error', code: 'provider_unavailable', message: 'turn failed', retryable: err.retryable };
+  return { type: 'error', code: 'provider_unavailable', message: 'turn failed', retryable: true };
+}
+
 async function* stream(o: TurnOpts & { signal: AbortSignal }, id: string, token: string, c: TurnContext, text: string, done: { settled: boolean }): AsyncGenerator<AdminSseEvent> {
   const sc = c.scenario, history = c.turns, { signal } = o;
   const tr = (lang: Lang) => sc.scenario_translations.find(t => t.lang === lang)!;
   const pass = (p: Provider): Provider => ({ ...p, complete: req => p.complete({ ...req, signal }) });   // F-24: 어댑터 호출마다 signal
-  const bots = { student: pass(mockProvider), analysis: pass(mockProvider), mentor: pass(mockProvider), model: 'mock' };
+  const mock = { provider: pass(mockProvider), model: 'mock', effort: null };
   const criteria = sc.classification.leverage.length ? sc.classification : null;
   const state = { mis: c.progress.mis, counts: c.counts, goalReached: c.goal_reached, takeOverCount: history.filter(t => t.trigger === S.TRIGGER.takingOver).length };
   const seq0 = (history.at(-1)?.seq ?? 0) + 1;
   const pending: TurnCols[] = [{ seq: seq0, speaker: 'teacher', text, leverage: null, object: null, trigger: null }];
   const add = (t: Pick<TurnCols, 'speaker' | 'text'> & Partial<TurnCols>) => pending.push({ leverage: null, object: null, trigger: null, ...t, seq: seq0 + pending.length });
   try {
+    const bots = o.live ? await liveBots(o, o.live, pass) : { student: mock, analysis: mock, mentor: mock };
     for await (const ev of runTurn({ bots, compiled: sc.compiled_prompt ?? compileScenario(sc, tr(sc.lang), sc.lang, o.templates), criteria,
       tr: tr(c.lang) as Translation, lang: c.lang, state, history, text })) {
       if (ev.type === 'classification') { if (ev.cls) { Object.assign(pending[0], ev.cls); yield { type: 'classification', ...ev.cls }; } }
-      else if (ev.type === 'student') { add({ speaker: 'student', text: ev.text }); yield { type: 'student', text: ev.text, final: true }; }
+      else if (ev.type === 'student') { if (ev.final) add({ speaker: 'student', text: ev.text }); yield ev; }
       else if (ev.type === 'trigger') { add({ speaker: 'mentor', text: '', trigger: ev.trigger }); yield ev; }
-      else if (ev.type === 'mentor') { pending[pending.length - 1].text = ev.text; yield { type: 'mentor', text: ev.text, final: true }; }
+      else if (ev.type === 'mentor') { if (ev.final) pending[pending.length - 1].text = ev.text; yield ev; }
       else {
         signal.throwIfAborted();   // 기한(잡은 순간부터)·끊김 뒤에는 기록하지 않는다
         const at = o.now().toISOString(), turns = ev.ended ? [] : pending;
@@ -147,8 +186,9 @@ async function* stream(o: TurnOpts & { signal: AbortSignal }, id: string, token:
       }
     }
   } catch (err) {
-    o.log.error({ err }, 'turn failed');
-    yield { type: 'error', code: 'provider_unavailable', message: (err as Error)?.name === 'TimeoutError' ? 'turn timed out' : 'turn failed', retryable: true };
+    // 키·암호문·발화는 로그에 넣지 않는다: 어댑터 오류는 공급자·코드·상태만(Q9).
+    o.log.error(err instanceof AdapterError ? { provider: err.provider, code: err.code, status: err.status } : err instanceof Unconfigured ? { role: err.role, code: err.code } : { err }, 'turn failed');
+    yield failure(err, signal);
   }
 }
 

@@ -21,11 +21,11 @@ const STUBS: Record<string, string> = {
 };
 const NEW = { SUPABASE_URL: 'https://new.supabase.co', SUPABASE_SERVICE_KEY: 'new-service', SUPABASE_DB_URL: 'postgres://u:p@new:5432/postgres', SUPABASE_ANON_KEY: 'new-anon' };
 
-function deploy(args: string[] = [], extra: Record<string, string> = {}, script = SCRIPT) {
+function deploy(args: string[] = [], extra: Record<string, string> = {}, script = SCRIPT, serverEnv = 'MOCK_LLM=1\n') {
   const dir = mkdtempSync(join(tmpdir(), 'deploy-test-')), bin = join(dir, 'bin');
   mkdirSync(bin);
   for (const [name, body] of Object.entries(STUBS)) { writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`); chmodSync(join(bin, name), 0o755); }
-  writeFileSync(join(dir, 'server.env'), 'MOCK_LLM=1\n', { mode: 0o600 });
+  writeFileSync(join(dir, 'server.env'), serverEnv, { mode: 0o600 });
   writeFileSync(join(dir, 'remath-20261028.sqlite'), '');   // restore.sh 의 백업 파일(가짜 npm 은 읽지 않는다)
   const log = join(dir, 'log');
   writeFileSync(log, '');
@@ -181,6 +181,50 @@ describe('scripts/deploy.sh --new (H-29 1, O-4)', () => {
     expect(r.status).toBe(2);
     expect(r.calls).toEqual([]);
   });
+});
+
+// Q25: 런타임 env 파일이 MOCK_LLM=0 이면 KEY_VAULT_SECRET 이 32바이트여야 서버가 뜬다(vault.ts parseSecret) — 1단계 전에 멈춘다.
+describe('scripts/deploy.sh KEY_VAULT_SECRET preflight (Q25)', () => {
+  const B64 = Buffer.alloc(32, 7).toString('base64'), HEX = Buffer.alloc(32, 9).toString('hex'), SHORT = Buffer.alloc(16, 7).toString('base64');
+  const MGMT = { SUPABASE_ACCESS_TOKEN: 't', SUPABASE_ORG_ID: 'o', SUPABASE_REGION: 'r', SUPABASE_DB_PASSWORD: 'p', NEW_ENV: '' };
+  const live = (secret?: string) => `COOKIE_SECURE=false\nMOCK_LLM=0\n${secret === undefined ? '' : `KEY_VAULT_SECRET=${secret}\n`}`;
+
+  for (const [what, body, msg] of [
+    ['missing', live(), /KEY_VAULT_SECRET is not set/], ['empty', live(''), /KEY_VAULT_SECRET is not set/],
+    ['16 bytes', live(SHORT), /KEY_VAULT_SECRET in .* is not 32 bytes \(base64 or 64 hex chars\)/], ['63 hex chars', live(HEX.slice(1)), /KEY_VAULT_SECRET in .* is not 32 bytes \(base64 or 64 hex chars\)/],
+    ['not base64', live('!'.repeat(44)), /KEY_VAULT_SECRET in .* is not 32 bytes \(base64 or 64 hex chars\)/],
+    // 서버는 끝만 trim 한다: 가운데 공백이 있으면 hex 가 아니라 base64 48바이트로 읽혀 뜨지 못한다.
+    ['32 hex + space + 32 hex', live(`${HEX.slice(0, 32)} ${HEX.slice(32)}`), /KEY_VAULT_SECRET in .* is not 32 bytes \(base64 or 64 hex chars\)/],
+  ] as const) {
+    it(`MOCK_LLM=0 with a ${what} secret stops before anything, with how to make one`, () => {
+      for (const r of [deploy([], {}, SCRIPT, body), deploy(['--new'], MGMT, SCRIPT, body), deploy(['remath-20261028.sqlite'], MGMT, join(ROOT, 'scripts/restore.sh'), body)]) {
+        expect(r.status).toBe(1);
+        expect(r.stderr).toMatch(msg);
+        expect(r.stderr).toMatch(/openssl rand -base64 32/);
+        expect(r.steps).toEqual([]);   // compose config·db:restore --check·db:new-project 전
+        if (body.includes('KEY_VAULT_SECRET=') && body !== live('')) expect(r.stderr).not.toContain(body.split('KEY_VAULT_SECRET=')[1].trim());
+      }
+    });
+  }
+
+  // 서버(config.ts)는 MOCK_LLM 이 정확히 '0'·'1' 이어야 뜬다. 사전 점검도 줄 끝 CR 하나만 떼고 같은 규칙.
+  for (const [what, body] of [['padded', `MOCK_LLM= 0\nKEY_VAULT_SECRET=${B64}\n`], ['trailing space', `MOCK_LLM=1 \n`], ['not 0/1', 'MOCK_LLM=true\n'], ['missing', 'COOKIE_SECURE=false\n']] as const) {
+    it(`MOCK_LLM ${what} stops before anything`, () => {
+      for (const r of [deploy([], {}, SCRIPT, body), deploy(['--new'], MGMT, SCRIPT, body), deploy(['remath-20261028.sqlite'], MGMT, join(ROOT, 'scripts/restore.sh'), body)]) {
+        expect(r.status).toBe(1);
+        expect(r.stderr).toMatch(/MOCK_LLM in .* must be exactly 0 or 1/);
+        expect(r.steps).toEqual([]);
+      }
+    });
+  }
+
+  for (const [what, body] of [['base64', live(B64)], ['hex', live(HEX)], ['base64 with CRLF', live(`${B64}\r`)], ['MOCK_LLM=1 without a secret', 'MOCK_LLM=1\n'], ['MOCK_LLM=1 with CRLF', 'MOCK_LLM=1\r\n'], ['MOCK_LLM=0 with CRLF', `MOCK_LLM=0\r\nKEY_VAULT_SECRET=${B64}\r\n`], ['base64 with spaces around', live(`  ${B64} \t`)], ['hex with spaces around', live(` ${HEX}  \r`)]] as const) {
+    it(`passes with ${what}`, () => {
+      const r = deploy([], {}, SCRIPT, body);
+      expect(r.stderr).toBe('');
+      expect(r.status).toBe(0);
+    });
+  }
 });
 
 describe('deploy/compose.yaml (the only container definition)', () => {

@@ -2,12 +2,15 @@
 import { ProvidersFile } from '@remath/shared';
 import { checkTemplates, type Templates } from '@remath/prompts';
 import { z } from 'zod';
+import { parseSecret } from './vault.ts';
 
 // 서버 런타임이 읽는 변수만. SUPABASE_DB_URL·ANON_KEY·ADMIN_INITIAL_PASSWORD·BACKUP_*는 각 CLI·스크립트 티켓이 검증한다.
 const Env = z.object({
   SUPABASE_URL: z.url(),
   SUPABASE_SERVICE_KEY: z.string().min(1),
-  MOCK_LLM: z.literal('1', { error: 'stage 2 server runs only with MOCK_LLM=1 (O-6)' }),
+  MOCK_LLM: z.enum(['0', '1'], { error: 'MOCK_LLM must be 0 (real providers) or 1 (mock) (Q4)' }),
+  // MOCK_LLM=0 에서만 필수·검증(Q4·Q25). 1이면 읽지 않는다(undefined).
+  KEY_VAULT_SECRET: z.string().optional(),
   MAX_TURNS: z.coerce.number().int().positive().default(40),
   TURN_TIMEOUT_MS: z.coerce.number().int().positive().default(120000),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
@@ -19,6 +22,8 @@ export type Config = ReturnType<typeof loadConfig>;
 export function loadConfig(env: Record<string, string | undefined>, read: (path: string) => string) {
   const e = Env.safeParse(env);
   if (!e.success) throw new Error('invalid environment:\n' + z.prettifyError(e.error));
+  if (e.data.MOCK_LLM === '1') e.data.KEY_VAULT_SECRET = undefined;
+  else try { parseSecret(e.data.KEY_VAULT_SECRET ?? ''); } catch (err) { throw new Error(`invalid environment:\n✖ ${(err as Error).message}\n  → at KEY_VAULT_SECRET (required when MOCK_LLM=0)`); }
 
   let providers;
   try { providers = ProvidersFile.parse(JSON.parse(read('shared/providers.json'))); }

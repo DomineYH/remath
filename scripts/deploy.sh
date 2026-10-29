@@ -19,6 +19,7 @@
 #   4단계 스모크의 기대 행 수 = 백업 파일의 행 수. 파일 점검(db:restore --check)도 사전 점검이라 프로젝트 생성 전. ADMIN_INITIAL_PASSWORD 는 쓰지 않는다.
 #
 # REMATH_ENV_FILE(필수): 서버 런타임 env 파일. 컨테이너 설정(이미지 태그·포트·볼륨·사용자)은 deploy/compose.yaml 만 정한다.
+#   그 파일이 MOCK_LLM=0 이면 KEY_VAULT_SECRET(32바이트, openssl rand -base64 32)이 있어야 한다: 사전 점검이라 1단계 전(Q25, restore.sh 도 여기서).
 set -euo pipefail
 
 with_samples=() new= restore=
@@ -52,6 +53,23 @@ done
 [ -f "$REMATH_ENV_FILE" ] || fail "REMATH_ENV_FILE $REMATH_ENV_FILE is not a file"
 REMATH_ENV_FILE="$(realpath "$REMATH_ENV_FILE")"
 export REMATH_ENV_FILE
+# 런타임 env 파일의 값: 그 키의 마지막 줄, 첫 = 뒤 글자 그대로(compose format: raw 와 같다). 없으면 빈 문자열.
+env_get() { local l v=; while IFS= read -r l || [ -n "$l" ]; do case $l in "$1="*) v="${l#*=}" ;; esac; done < "$REMATH_ENV_FILE"; printf %s "$v"; }
+# Q25: MOCK_LLM=0 이면 서버는 KEY_VAULT_SECRET 이 32바이트(hex 64자 또는 base64, vault.ts parseSecret)여야 뜬다. 값은 출력하지 않는다.
+check_vault_secret() {
+  local m s n how="make one with: openssl rand -base64 32 and put it in that file"
+  # 서버(config.ts)와 같은 규칙: 정확히 0 또는 1. CRLF 파일의 줄 끝 CR 만 뗀다.
+  m="$(env_get MOCK_LLM)"; m="${m%$'\r'}"
+  [ "$m" = 0 ] || [ "$m" = 1 ] || fail "MOCK_LLM in $REMATH_ENV_FILE must be exactly 0 or 1 (no spaces)"
+  [ "$m" = 0 ] || return 0
+  # 서버(vault.ts parseSecret)와 같이 앞뒤 공백(줄 끝 CR 포함)만 뗀다. 가운데 글자는 그대로 둔다.
+  s="$(env_get KEY_VAULT_SECRET)"; s="${s#"${s%%[![:space:]]*}"}"; s="${s%"${s##*[![:space:]]}"}"
+  [ -n "$s" ] || fail "MOCK_LLM=0 but KEY_VAULT_SECRET is not set in $REMATH_ENV_FILE; $how"
+  [[ $s =~ ^[0-9a-fA-F]{64}$ ]] && return 0
+  n="$(printf %s "$s" | base64 -d 2>/dev/null | wc -c)" || n=0
+  [ "$n" -eq 32 ] || fail "KEY_VAULT_SECRET in $REMATH_ENV_FILE is not 32 bytes (base64 or 64 hex chars); $how"
+}
+check_vault_secret
 if [ -n "$restore" ]; then
   [ -f "$restore" ] || fail "backup file $restore is not a file"
   restore="$(realpath "$restore")"   # npm -w server 는 server/ 에서 돈다

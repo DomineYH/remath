@@ -10,6 +10,7 @@ import { authenticate, COOKIE, createLimiter, resolveRealm, type Auth } from './
 import type { Config } from './config.ts';
 import type { Db } from './db.ts';
 import { ApiFail } from './errors.ts';
+import type { ProvidersFor } from './providers/types.ts';
 import { adminAiHandlers } from './routes/admin-ai.ts';
 import { adminScenarioHandlers } from './routes/admin-scenarios.ts';
 import { adminSessionHandlers } from './routes/admin-sessions.ts';
@@ -19,14 +20,15 @@ import { sessionHandlers } from './routes/sessions.ts';
 
 declare module 'fastify' { interface FastifyRequest { auth?: Auth } }
 
-export interface Deps { db: Db; config: Config; limiter: ReturnType<typeof createLimiter>; now: () => Date }
+export interface Deps { db: Db; config: Config; limiter: ReturnType<typeof createLimiter>; now: () => Date; providersFor: ProvidersFor }
 /** 키 = 라우트 표의 `METHOD path`. 핸들러가 없는 표의 라우트는 등록하지 않는다(Fastify 기본 404). */
 export type Handlers = Record<string, (req: FastifyRequest, reply: FastifyReply) => Promise<unknown>>;
 
 const DIST = fileURLToPath(new URL('../../client/dist/', import.meta.url));
 
 export async function buildApp(d: Pick<Deps, 'db' | 'config'> & Partial<Deps>, opts: FastifyServerOptions = {}) {
-  const deps: Deps = { limiter: createLimiter(), now: () => new Date(), ...d };
+  // providersFor: index.ts 가 providers/index.ts 의 실 팩토리를 넘긴다. 기본값은 테스트용: 넘기지 않으면 실 모드의 키 저장·턴이 실패한다.
+  const deps: Deps = { limiter: createLimiter(), now: () => new Date(), providersFor: () => { throw new Error('providersFor not wired'); }, ...d };
   const app = Fastify(opts);
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);

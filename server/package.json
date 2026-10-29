@@ -17,7 +17,8 @@
     "db:restore": "node --import ./src/raw-hooks.ts src/cli/restore.ts",
     "db:new-project": "node --import ./src/raw-hooks.ts src/cli/new-project.ts",
     "test:http": "vitest run --config vitest.http.config.ts",
-    "backup": "node --import ./src/raw-hooks.ts src/cli/backup.ts"
+    "backup": "node --import ./src/raw-hooks.ts src/cli/backup.ts",
+    "load": "node --import ./src/raw-hooks.ts src/cli/load.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.5",
