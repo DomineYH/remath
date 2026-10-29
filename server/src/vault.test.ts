@@ -23,6 +23,11 @@ describe('key vault (Q6): AES-256-GCM, base64(iv‖tag‖ct)', () => {
       expect(bad).toThrow(expect.objectContaining({ name: 'VaultError', code: 'vault_decrypt_failed' }));
     expect(() => open(c, S2)).toThrow(VaultError);
   });
+  it('a truncated auth tag (or anything shorter than iv + 16-byte tag) → VaultError, never a forged plaintext', () => {
+    const empty = Buffer.from(seal('', S1), 'base64');   // iv‖tag, ct 없음
+    for (const n of [4, 8, 12, 15]) expect(() => open(empty.subarray(0, 12 + n).toString('base64'), S1), `${n}-byte tag`).toThrow(VaultError);
+    expect(open(empty.toString('base64'), S1)).toBe('');
+  });
   it('secrets that are not exactly 32 bytes are refused (31, 33, empty, junk)', () => {
     for (const s of [randomBytes(31).toString('base64'), randomBytes(33).toString('base64'), randomBytes(31).toString('hex'), randomBytes(33).toString('hex'), '', 'not a secret'])
       expect(() => parseSecret(s), s).toThrow(/32 bytes/);

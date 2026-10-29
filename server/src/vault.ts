@@ -22,7 +22,9 @@ export function seal(plain: string, secret: string): string {
 export function open(ciphertext: string, secret: string): string {
   const key = parseSecret(secret), b = Buffer.from(ciphertext, 'base64');
   try {
-    const d = createDecipheriv('aes-256-gcm', key, b.subarray(0, 12));
+    if (b.length < 12 + 16) throw new VaultError();
+    // 태그 길이 고정: 없으면 Node 가 4~16바이트 짧은 태그도 받아 위조가 쉬워진다.
+    const d = createDecipheriv('aes-256-gcm', key, b.subarray(0, 12), { authTagLength: 16 });
     d.setAuthTag(b.subarray(12, 28));
     return Buffer.concat([d.update(b.subarray(28)), d.final()]).toString('utf8');
   } catch { throw new VaultError(); }
