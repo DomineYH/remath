@@ -62,7 +62,8 @@ check_vault_secret() {
   m="$(env_get MOCK_LLM)"; m="${m%$'\r'}"
   [ "$m" = 0 ] || [ "$m" = 1 ] || fail "MOCK_LLM in $REMATH_ENV_FILE must be exactly 0 or 1 (no spaces)"
   [ "$m" = 0 ] || return 0
-  s="$(env_get KEY_VAULT_SECRET | tr -d ' \t\r')"
+  # 서버(vault.ts parseSecret)와 같이 앞뒤 공백(줄 끝 CR 포함)만 뗀다. 가운데 글자는 그대로 둔다.
+  s="$(env_get KEY_VAULT_SECRET)"; s="${s#"${s%%[![:space:]]*}"}"; s="${s%"${s##*[![:space:]]}"}"
   [ -n "$s" ] || fail "MOCK_LLM=0 but KEY_VAULT_SECRET is not set in $REMATH_ENV_FILE; $how"
   [[ $s =~ ^[0-9a-fA-F]{64}$ ]] && return 0
   n="$(printf %s "$s" | base64 -d 2>/dev/null | wc -c)" || n=0
