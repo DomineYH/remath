@@ -2,6 +2,7 @@
 // 관리자 기록·CSV·AI 설정 라우트 (#44): 메모리 Data API 가짜로 필터·최신순·키셋 쪽·CSV 응답·AI 검증(목과 같은 입력 → 같은 결과)을 고정한다.
 import { readFileSync } from 'node:fs';
 import * as S from '@remath/shared';
+import { AdapterError } from '@remath/shared/engine';
 import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 import { ADMIN_PW, mockTarget } from '../../../client/src/api/seam.ts';
@@ -10,6 +11,8 @@ import { buildApp } from '../app.ts';
 import { sha256 } from '../auth.ts';
 import { loadConfig } from '../config.ts';
 import type { Db } from '../db.ts';
+import type { ProvidersFor } from '../providers/types.ts';
+import { open } from '../vault.ts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- stub rows mirror untyped PostgREST JSON
 type Row = Record<string, any>;
@@ -74,7 +77,7 @@ function fakeDb(t: Tables, calls: string[] = [], fail?: (table: string, n: numbe
 const ADMIN = crypto.randomUUID(), KIM = crypto.randomUUID(), LEE = crypto.randomUUID(), GAB = crypto.randomUUID(), NOAH = crypto.randomUUID();
 const aiRow = (role: string) => ({ role, key_source: role === 'student' ? 'own' : 'student', provider: null, key_ciphertext: null, key_masked: null, key_added_at: null, model: null, effort: null, created_at: T0 });
 
-async function setup(o: { sessions?: number; fail?: (table: string, n: number) => boolean; maxRows?: number } = {}) {
+async function setup(o: { sessions?: number; fail?: (table: string, n: number) => boolean; maxRows?: number; config?: typeof config; providersFor?: ProvidersFor } = {}) {
   const later = new Date(Date.now() + 3600_000).toISOString(), calls: string[] = [];
   const t: Tables = {
     users: [{ id: ADMIN, nickname: 'admin', role: 'admin' }, { id: KIM, nickname: 'kim', role: 'teacher' }, { id: LEE, nickname: 'lee', role: 'teacher' }],
@@ -95,7 +98,7 @@ async function setup(o: { sessions?: number; fail?: (table: string, n: number) =
       { session_id: id, seq: 1, speaker: 'student', text: 'hi', leverage: null, object: null, trigger: null, created_at: started_at },
       { session_id: id, seq: 3, speaker: 'mentor', text: 'm', leverage: null, object: null, trigger: i % 3 === 0 ? 2 : null, created_at: started_at });
   }
-  const app = await buildApp({ db: fakeDb(t, calls, o.fail, o.maxRows), config, now: () => new Date(T0) });
+  const app = await buildApp({ db: fakeDb(t, calls, o.fail, o.maxRows), config: o.config ?? config, now: () => new Date(T0), ...o.providersFor && { providersFor: o.providersFor } });
   const req = (method: string, url: string, payload?: unknown, cookies: Record<string, string> = { remath_admin: 'adm' }) =>
     app.inject({ method: method as 'GET', url, payload: payload as object, cookies });
   const newest = () => [...t.sessions].sort((a, b) => b.started_at < a.started_at ? -1 : b.started_at > a.started_at ? 1 : b.id < a.id ? -1 : 1);
@@ -257,5 +260,84 @@ describe('AI settings = mock updateAi (G-28, O-7)', () => {
   it('GET /api/admin/ai/providers is the ProvidersFile parsed at startup', async () => {
     const s = await setup();
     expect((await s.req('GET', '/api/admin/ai/providers')).json()).toEqual(config.providers);
+  });
+});
+
+describe('AI settings, MOCK_LLM=0: listModels check and key vault (Q5, Q6, Q23, Q32)', () => {
+  const SECRET = Buffer.alloc(32, 9).toString('base64');
+  const real = loadConfig({ SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_KEY: 'k', MOCK_LLM: '0', KEY_VAULT_SECRET: SECRET }, p => readFileSync(new URL(p, ROOT), 'utf8'));
+  /** listModels 가 throw 하면 그 오류를, 아니면 2xx(목록은 버린다). */
+  const fake = (fail?: () => Error) => {
+    const calls: [string, string, unknown][] = [];
+    const providersFor: ProvidersFor = (provider, key, opts) => {
+      calls.push([provider, key, opts.role]);
+      expect(typeof opts.log.info).toBe('function');
+      return { id: provider, complete: () => { throw new Error('not in this ticket'); }, listModels: async () => { if (fail) throw fail(); return ['m']; } };
+    };
+    return { calls, providersFor };
+  };
+  const ANT_BODY = { key_source: 'own', api_key: ANT, model: 'claude-haiku-5-5', effort: 'low' };
+
+  it('listModels throws 401 → 502 provider_rejected with status and a ≤200-char message summary; nothing is upserted or audited; the key is masked in the message', async () => {
+    const f = fake(() => new AdapterError('anthropic', 'authentication_error', `invalid x-api-key ${ANT} ` + 'x'.repeat(300), { status: 401 }));
+    const s = await setup({ config: real, providersFor: f.providersFor });
+    const before = structuredClone(s.t.ai_settings);
+    const r = await s.req('PUT', '/api/admin/ai/student', ANT_BODY), j = r.json();
+    expect(r.statusCode).toBe(502);
+    expect(j.error.code).toBe('provider_rejected');
+    expect(j.error.details).toMatchObject({ status: 401, message: expect.stringMatching(/^invalid x-api-key /) });
+    expect(j.error.details.message.length).toBeLessThanOrEqual(200);
+    expect(r.body).not.toContain(ANT);
+    expect(f.calls).toEqual([['anthropic', ANT, 'student']]);
+    expect(s.calls.filter(c => c.startsWith('upsert') || c.startsWith('insert'))).toEqual([]);
+    expect(s.t.ai_settings).toEqual(before);
+  });
+
+  it('a network error (no HTTP status) is provider_rejected too', async () => {
+    const s = await setup({ config: real, providersFor: fake(() => new TypeError('fetch failed')).providersFor });
+    const j = (await s.req('PUT', '/api/admin/ai/student', ANT_BODY)).json();
+    expect(j.error).toMatchObject({ code: 'provider_rejected', details: { status: null, message: 'fetch failed' } });
+    expect(s.calls.filter(c => c.startsWith('upsert'))).toEqual([]);
+  });
+
+  it('2xx → key_ciphertext is saved and opens back to the key; responses, GET and the audit meta never carry the key or the ciphertext', async () => {
+    const f = fake(), s = await setup({ config: real, providersFor: f.providersFor });
+    const r = await s.req('PUT', '/api/admin/ai/student', ANT_BODY);
+    expect(r.statusCode).toBe(200);
+    expect(f.calls).toEqual([['anthropic', ANT, 'student']]);
+    const c = s.t.ai_settings.find(x => x.role === 'student')!.key_ciphertext as string;
+    expect(open(c, SECRET)).toBe(ANT);
+    expect(r.json()).not.toHaveProperty('key_ciphertext');
+    expect(r.json()).toMatchObject({ provider: 'anthropic', key_masked: S.maskKey(ANT) });
+    const got = (await s.req('GET', '/api/admin/ai')).json();
+    for (const x of Object.values(got)) expect(x).not.toHaveProperty('key_ciphertext');
+    expect(s.t.audit_log.map(a => a.meta)).toEqual([expect.objectContaining({ key_changed: true })]);
+    for (const out of [r.body, JSON.stringify(got), JSON.stringify(s.t.audit_log)]) { expect(out).not.toContain(ANT); expect(out).not.toContain(c); }
+  });
+
+  it('saves without api_key never call providersFor and keep the ciphertext; switching to a shared key drops it', async () => {
+    const f = fake(), s = await setup({ config: real, providersFor: f.providersFor });
+    await s.req('PUT', '/api/admin/ai/student', ANT_BODY);
+    const c = s.t.ai_settings.find(x => x.role === 'student')!.key_ciphertext;
+    expect((await s.req('PUT', '/api/admin/ai/student', { key_source: 'own', model: 'claude-opus-5-5', effort: 'max' })).statusCode).toBe(200);
+    expect(s.t.ai_settings.find(x => x.role === 'student')!.key_ciphertext).toBe(c);
+    await s.req('PUT', '/api/admin/ai/analysis', { key_source: 'own', api_key: OAI, model: 'gpt-5.5', effort: null });
+    expect((await s.req('PUT', '/api/admin/ai/student', { key_source: 'analysis', model: 'gpt-5.5', effort: null })).statusCode).toBe(200);
+    expect(s.t.ai_settings.find(x => x.role === 'student')!.key_ciphertext).toBeNull();
+    expect(f.calls.map(x => x[0])).toEqual(['anthropic', 'openai']);
+  });
+
+  it('validation errors are answered before any provider call', async () => {
+    const f = fake(), s = await setup({ config: real, providersFor: f.providersFor });
+    expect((await s.req('PUT', '/api/admin/ai/student', { ...ANT_BODY, effort: 'none' })).json().error.code).toBe('invalid_effort');
+    expect((await s.req('PUT', '/api/admin/ai/student', { ...ANT_BODY, api_key: 'pk-unknown-0000000000' })).statusCode).toBe(400);
+    expect(f.calls).toEqual([]);
+  });
+
+  it('MOCK_LLM=1 never calls providersFor and stores no ciphertext (stage-2 behaviour)', async () => {
+    const f = fake(), s = await setup({ providersFor: f.providersFor });
+    expect((await s.req('PUT', '/api/admin/ai/student', ANT_BODY)).statusCode).toBe(200);
+    expect(f.calls).toEqual([]);
+    expect(s.t.ai_settings.map(r => r.key_ciphertext)).toEqual([null, null, null]);
   });
 });
