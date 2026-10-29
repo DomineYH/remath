@@ -63,12 +63,12 @@ ENV_FILE=$HOME/.config/remath/dev.env SERVER_URL=http://127.0.0.1:3946 npm run t
 
 ## 운영
 
-2단계 서버의 배포 단위는 Docker 이미지 1개(서버 + 프로덕션 `client/dist`)이고, 컨테이너는 `deploy/compose.yaml`로만 띄운다(손으로 `docker run` 하지 않는다). 아래 명령은 모두 운영 호스트의 저장소 루트에서 실행한다. G3 수용 절차(8단계, 명령·기대값·확인 방법)는 [`docs/g3-runbook.md`](docs/g3-runbook.md).
+서버의 배포 단위는 Docker 이미지 1개(서버 + 프로덕션 `client/dist`)이고, 컨테이너는 `deploy/compose.yaml`로만 띄운다(손으로 `docker run` 하지 않는다). 아래 명령은 모두 운영 호스트의 저장소 루트에서 실행한다. G3 수용 절차(8단계, 명령·기대값·확인 방법)는 [`docs/g3-runbook.md`](docs/g3-runbook.md), 실서버 G4 수용 절차는 [`docs/g4-runbook.md`](docs/g4-runbook.md).
 
 ### 전제
 
 - **호스트**: Docker 데몬 + Docker Compose v2.30 이상(`env_file` `format: raw`), Node 24·npm(저장소에서 `npm ci`), `psql`(postgresql-client), `curl`, 확인용 `sqlite3`. WSL2 + Docker Desktop도 된다.
-- **TLS**: 앞단에 HTTPS 종단(리버스 프록시)이 있으면 `COOKIE_SECURE`를 넣지 않는다(기본 true). 종단 없는 HTTP 스테이징만 런타임 env 파일에 `COOKIE_SECURE=false`(O-10 (B), 개발·HTTP 스테이징 전용). 이것 없이 HTTP로 열면 브라우저가 `Secure` 쿠키를 보내지 않아 로그인이 유지되지 않는다.
+- **TLS**: 앞단에 HTTPS 종단(리버스 프록시, 아래 "실서버"의 Caddy)이 있으면 `COOKIE_SECURE`를 넣지 않는다(기본 true). 종단 없는 HTTP 스테이징만 런타임 env 파일에 `COOKIE_SECURE=false`(O-10 (B), 개발·HTTP 스테이징 전용). 이것 없이 HTTP로 열면 브라우저가 `Secure` 쿠키를 보내지 않아 로그인이 유지되지 않는다.
 - **Supabase**: 조직의 Personal access token(`SUPABASE_ACCESS_TOKEN`), 조직 **slug**(`SUPABASE_ORG_ID`), 리전, 새 프로젝트의 DB 비밀번호. 무료 플랜은 조직당 활성 프로젝트 2개까지다: 한도에서 `deploy.sh --new`·`restore.sh`는 HTTP 400으로 실패하고 아무것도 만들지 않는다. 안 쓰는 프로젝트를 대시보드에서 일시 중지하거나 지운다.
 - **이미지**: 첫 배포 전, 그리고 새 코드를 낼 때마다 `docker build -t remath:latest .`. 빌드 안에서 `npm run check:bundle`이 돌아 목 코드가 섞이면 빌드가 실패한다. compose는 `${REMATH_IMAGE:-remath:latest}` 태그로 컨테이너를 다시 만든다(같은 코드로 재배포하려면 태그를 그대로 둔다).
 
@@ -77,7 +77,8 @@ ENV_FILE=$HOME/.config/remath/dev.env SERVER_URL=http://127.0.0.1:3946 npm run t
 1. **서버 런타임 env 파일**(`REMATH_ENV_FILE`, 절대 경로, 저장소 밖, `chmod 600`). 처음에는 직접 만든다:
 
    ```sh
-   umask 077; printf 'MOCK_LLM=1\nCOOKIE_SECURE=false\n' > /abs/path/remath-server.env   # COOKIE_SECURE 줄은 HTTP 스테이징만
+   umask 077; printf 'MOCK_LLM=1\nCOOKIE_SECURE=false\n' > /abs/path/remath-server.env   # 스테이징(목 LLM). COOKIE_SECURE 줄은 HTTP 스테이징만
+   umask 077; printf 'MOCK_LLM=0\nKEY_VAULT_SECRET=%s\n' "$(openssl rand -base64 32)" > /abs/path/remath-server.env   # 실서버(실 공급자, HTTPS)
    ```
 
    `deploy.sh`·`restore.sh`가 스모크 통과 뒤 `SUPABASE_URL`·`SUPABASE_SERVICE_KEY`·`SUPABASE_DB_URL`·`SUPABASE_ANON_KEY` 4줄만 써 넣고 나머지 줄은 그대로 둔다(이전 판은 `<파일>.prev`, 600). 형식은 한 줄 `KEY=value`, 값은 첫 `=` 뒤 글자 그대로(따옴표·`$` 치환 없음). `PORT`는 넣지 않는다(호스트 포트는 `REMATH_PORT`).
@@ -101,14 +102,14 @@ ENV_FILE=$HOME/.config/remath/dev.env SERVER_URL=http://127.0.0.1:3946 npm run t
 | `ADMIN_INITIAL_PASSWORD` | PRD 7절 3단계 | 없음(`deploy.sh`에 필수) | `db:seed` | 운영자 셸만. 관리자가 없을 때 1회 argon2id 해시로 저장. 비밀번호 규칙(`Password` zod) 미달이면 시드 실패. 재배포에서도 요구하지만 관리자가 있으면 쓰이지 않는다. `restore.sh`는 쓰지 않는다 |
 | `MAX_TURNS` | GLOSSARY 턴 상한, 티켓 19 | `40` | 서버 | `SessionDetail.turn_limit` |
 | `TURN_TIMEOUT_MS` | GLOSSARY 턴 시간 제한, 티켓 19 | `120000` | 서버 | |
-| `MOCK_LLM` | PRD 8절 | 없음(필수) | 서버 | 2단계 서버는 `1`만 허용, 아니면 기동 실패(O-6) |
+| `MOCK_LLM` | PRD 8절, Q4 | 없음(필수) | 서버, `deploy.sh`·`restore.sh`(사전 점검) | `0` = 실 공급자(OpenAI·Anthropic·Gemini, 관리자 AI 설정의 키), `1` = 세 역할 모두 목. 그 밖의 값이면 기동 실패. 기동 로그 `llm: live`/`llm: mock` |
 | `BACKUP_KEEP` | PRD 7절 | `7` | 서버(매일 백업), `backup` | 보관 개수. 넘으면 오래된 파일부터 지운다 |
 | `BACKUP_AT` | PRD 7절 | `03:00` | 서버 | 매일 백업 시각 `HH:MM`, 컨테이너 로컬 시각(기본 UTC). 런타임 env 파일에 `TZ=Asia/Seoul`을 넣으면 그 시각대(파일명 날짜도) |
 | `BACKUP_DIR` | PRD 7절 경로 | `backup` | 서버, `backup` | 컨테이너 작업 디렉터리(`/app/server`) 기준. compose 볼륨이 이 자리라 비우거나 `backup`으로 둔다 |
 | `PORT` | — (O-10) | `3000` | 서버 | 로컬 `npm run dev`용. 컨테이너 env 파일에는 넣지 않는다 |
-| `COOKIE_SECURE` | — (O-10) | `true` | 서버 | `false`는 HTTP 스테이징·개발만 |
+| `COOKIE_SECURE` | — (O-10) | `true` | 서버 | 실서버는 미설정. `false`는 HTTP 스테이징·개발만 |
 | `SUPABASE_ACCESS_TOKEN`, `SUPABASE_ORG_ID`, `SUPABASE_REGION`, `SUPABASE_DB_PASSWORD` | PRD 7절 1단계 "Management API" (O-4) | 없음(`--new`·`restore.sh`에 필수) | `deploy.sh --new`, `restore.sh` | 운영자 셸만, 서버 컨테이너에는 넣지 않는다. `SUPABASE_ORG_ID` = 조직 slug. 토큰은 `db:new-project`에만 넘어간다 |
-| `KEY_VAULT_SECRET` | PRD 9절 | — | — | **3단계**. 2단계는 읽지 않는다 |
+| `KEY_VAULT_SECRET` | PRD 9절, Q6·Q25 | 없음(`MOCK_LLM=0`이면 필수) | 서버, `deploy.sh`·`restore.sh`(사전 점검) | **3단계** 키 금고(AES-256-GCM)의 비밀. 32바이트(base64 또는 hex 64자): `openssl rand -base64 32`로 만들어 런타임 env 파일에 넣는다(자동 생성 없음). 없거나 32바이트가 아니면 서버 기동 실패, `deploy.sh`·`restore.sh`는 1단계 전에 실패. 비밀을 바꾸면 저장된 키를 복호할 수 없으므로 **모든 키를 다시 등록한다**. 백업에 없다(키 암호문도 없다): 복구 후 키를 다시 등록한다. `MOCK_LLM=1`이면 읽지 않는다 |
 
 운영자 셸에서만 읽는 배포 설정:
 
@@ -133,7 +134,7 @@ ENV_FILE=$HOME/.config/remath/dev.env SERVER_URL=http://127.0.0.1:3946 npm run t
 
 끝에 `deploy.sh: ok`, 종료코드 0.
 
-- 사전 점검(도구·Docker·변수·env 파일·compose 설정) 실패: 아무것도 만들지 않는다.
+- 사전 점검(도구·Docker·변수·env 파일·`MOCK_LLM=0`이면 `KEY_VAULT_SECRET` 32바이트·compose 설정) 실패: 아무것도 만들지 않는다.
 - 프로젝트 생성 뒤 전환 전 실패(마이그레이션·시드·스모크·env 교체): 종료코드 ≠ 0, env 파일·컨테이너 그대로(이전 DB가 계속 서비스), 새 프로젝트는 남겨 두고 ref를 출력한다 — 사람이 대시보드에서 지운다.
 - 전환 뒤 실패(컨테이너 재생성·`/healthz`·DB 응답): env 파일은 이미 새 값이다. 출력되는 되돌리기 명령 `mv <파일>.prev <파일> && docker compose -f deploy/compose.yaml up -d --force-recreate`를 실행한다.
 - 6단계 백업만 실패: 전환은 끝났고 서버는 돈다. 아래 수동 백업으로 다시 한다.
@@ -154,12 +155,29 @@ scripts/deploy.sh
 
 **`REMATH_ENV_FILE=… scripts/restore.sh <backup.sqlite>`** — 백업에서 새 DB로 복구(H-31, 사용자 스토리 24·25). 셸에 Management 변수 4개(`ADMIN_INITIAL_PASSWORD`는 쓰지 않는다).
 - 순서: 백업 파일 검사(잘못된 파일이면 프로젝트를 만들기 전에 실패) → 새 프로젝트 → 마이그레이션 → 백업 데이터를 FK 순서로 한 트랜잭션에 `psql \copy` → 스모크(기대 행 수 = 백업의 행 수) → env 교체·컨테이너 재생성·`/healthz` → 백업.
-- `auth_sessions`는 복구하지 않는다: 모든 로그인이 끝나고, 예비교사·관리자는 백업 시점의 같은 비밀번호로 다시 로그인한다. `ai_settings`는 키 없이 돌아오므로 3단계에서 키를 다시 등록한다.
+- `auth_sessions`는 복구하지 않는다: 모든 로그인이 끝나고, 예비교사·관리자는 백업 시점의 같은 비밀번호로 다시 로그인한다. `ai_settings`는 키 없이 돌아오므로(공급자·모델·노력·마스킹만) 관리자 AI 설정에서 키를 다시 등록한다. `KEY_VAULT_SECRET`은 백업에 없으니 런타임 env 파일의 값을 그대로 둔다.
 - 전환 전 실패: 종료코드 ≠ 0, env 파일·컨테이너 그대로, 새 프로젝트 ref를 출력하고 남겨 둔다. 이전 프로젝트는 지우지 않는다.
+
+**`KEY_VAULT_SECRET` 교체** — 재암호화는 없다(Q6). 런타임 env 파일의 값을 바꾸고 `docker compose -f deploy/compose.yaml up -d --force-recreate` → 관리자 AI 설정에서 세 역할의 키를 모두 다시 등록한다. 다시 등록하기 전에는 이전 비밀로 만든 키를 복호하지 못해 턴이 실패한다.
 
 **`docker compose -f deploy/compose.yaml exec server npm run admin:reset-password`** — 관리자 비밀번호 초기화(H-32, 사용자 스토리 26; `docker exec -it remath npm run admin:reset-password`와 같다). 터미널 프롬프트에서 에코 없이 두 번 받는다(인수·환경변수·파이프 거부).
 - 성공: 일치·비밀번호 규칙 검사 → 해시 갱신과 관리자 로그인 전부 종료를 한 트랜잭션으로 → `audit_log` `admin.password_reset`(actor null, `meta.host`) → `admin password reset; every admin login has ended`. 예비교사 로그인은 그대로다.
 - 실패(불일치·규칙 미달·중단·TTY 아님·인수 있음·관리자 없음): 종료코드 1, 아무것도 바뀌지 않는다.
+
+### 실서버(HTTPS, Caddy)
+
+실서버 = 운영자가 준비한 Linux 호스트 + 도메인 + 호스트의 Caddy(Q13·Q26). compose는 그대로다(Caddy 서비스를 더하지 않는다): 컨테이너는 `REMATH_BIND` 기본값 `127.0.0.1`에만 열리고, Caddy가 TLS를 받아 그리로 넘긴다. `REMATH_BIND=0.0.0.0`으로 바꾸지 않는다.
+
+`/etc/caddy/Caddyfile`(`<domain>`의 DNS A 레코드가 이 호스트를 가리켜야 Caddy가 인증서를 받는다):
+
+```caddyfile
+# ReMath 실서버: HTTPS 종단 → compose 컨테이너(127.0.0.1:3000)
+<domain> {
+	reverse_proxy 127.0.0.1:3000
+}
+```
+
+`sudo systemctl reload caddy` 뒤 `curl -s https://<domain>/healthz` → `{"ok":true}`. 런타임 env 파일은 `MOCK_LLM=0`, `KEY_VAULT_SECRET`, `COOKIE_SECURE` 없음(기본 true, HTTPS라 `Secure` 쿠키가 돈다). `REMATH_PORT`를 바꿨으면 Caddyfile의 포트도 맞춘다. 수용 절차는 [`docs/g4-runbook.md`](docs/g4-runbook.md).
 
 ## G2 demo checklist
 
