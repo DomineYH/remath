@@ -5,6 +5,7 @@ import { backup, BackupEnv, scheduleBackups } from './backup.ts';
 import { readEnv } from './cli/main.ts';
 import { loadConfig, type Config } from './config.ts';
 import { createDb } from './db.ts';
+import { providersFor } from './providers/index.ts';
 import { releaseTurns } from './turn.ts';
 
 const ROOT = new URL('../../', import.meta.url);
@@ -18,7 +19,8 @@ try {
 }
 const db = createDb(config.env.SUPABASE_URL, config.env.SUPABASE_SERVICE_KEY);
 await releaseTurns(db);
-const app = await buildApp({ db, config }, { logger: true });
+const app = await buildApp({ db, config, providersFor }, { logger: true });
+app.log.info(`llm: ${config.env.MOCK_LLM === '0' ? 'live' : 'mock'}`);
 await app.listen({ port: config.env.PORT, host: '0.0.0.0' });
 // 매일 SQLite 백업(H-30): 실패는 로그에만 남고 서비스는 그대로다.
 scheduleBackups({

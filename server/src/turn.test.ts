@@ -5,11 +5,14 @@ import * as S from '@remath/shared';
 import { describe, expect, it, vi } from 'vitest';
 import type { z } from 'zod';
 import { sse } from '../../client/src/api/http.ts';
+import { AdapterError, mockProvider } from '@remath/shared/engine';
 import { buildApp } from './app.ts';
 import { loadConfig } from './config.ts';
 import type { Db } from './db.ts';
 import { ApiFail } from './errors.ts';
+import type { ProvidersFor } from './providers/types.ts';
 import { frame, withTurn } from './turn.ts';
+import { seal } from './vault.ts';
 
 type AdminSseEvent = z.infer<typeof S.AdminSseEvent>;
 const T0 = '2026-10-28T03:00:00.123456+00:00';
@@ -66,6 +69,8 @@ interface FakeOpts {
   readFails?: boolean;
   /** 호출마다 한 번: 여기서 기다리면 그 Data API 호출이 멈춘다(끼어들기 재현). */
   before?: (label: string, detail: unknown) => Promise<void> | void;
+  /** ai_settings 행(실 모드). */
+  ai?: AiRow[];
 }
 
 /**
@@ -116,6 +121,7 @@ function fakeDb(o: FakeOpts = {}) {
         if (ok) row.turn_claim = null;
         return { data: ok, error: null };
       }
+      case 'select ai_settings': return { data: structuredClone(o.ai ?? []), error: null };
       case 'teacher_scenarios': return { data: [{ id: SC }], error: null };
       case 'start_session':
         if (o.startDup) return { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint "sessions_one_active"' } };
@@ -418,5 +424,109 @@ describe('unknown outcome over HTTP: the SSE ends with no terminal event (client
     expect(r.headers['content-type']).toMatch(/^text\/event-stream/);
     const evs = await collect(sse(Promise.resolve(new Response(r.body)), S.SseEvent)) as AdminSseEvent[];
     expect(evs.map(e => e.type)).toEqual(['classification', 'student', 'student']);
+  });
+});
+
+// ---- 실 모드(#57): ai_settings → 복호 → providersFor → Bots, 오류 매핑(Q3·Q4·Q7·Q18·Q19·Q21) --------------------
+interface AiRow { role: string; key_source: string; provider: string | null; key_ciphertext: string | null; model: string | null; effort: string | null }
+const SECRET = Buffer.alloc(32, 7).toString('base64');
+const own = (role: string, provider: string, key: string, model: string, effort: string | null = null): AiRow =>
+  ({ role, key_source: 'own', provider, key_ciphertext: seal(key, SECRET), model, effort });
+/** 학생 openai 자기 키, 분석 anthropic 자기 키, 멘토는 학생 키를 쓴다(행에는 provider·암호문이 없다: 출처 행에서 읽어야 한다). */
+const AI: AiRow[] = [own('student', 'openai', 'sk-student-1', 'gpt-s', 'low'), own('analysis', 'anthropic', 'sk-ant-2', 'claude-a'),
+  { role: 'mentor', key_source: 'student', provider: null, key_ciphertext: null, model: 'gpt-m', effort: 'high' }];
+/** 가짜 providersFor: 호출마다 (역할·공급자·키·모델·effort)를 남기고, fail 이 있으면 던지고, 없으면 mockProvider 로 답한다. */
+function fakeProviders(fail?: (provider: string, signal?: AbortSignal) => Promise<never>) {
+  const called: { role?: string; provider: string; key: string; model: string; effort: string | null }[] = [];
+  const providersFor: ProvidersFor = (provider, key, { role }) => ({
+    id: provider, listModels: async () => [],
+    async *complete(req) {
+      called.push({ role, provider, key, model: req.model, effort: req.effort ?? null });
+      if (fail) await fail(provider, req.signal);
+      yield* mockProvider.complete(req);
+    },
+  });
+  return { called, providersFor };
+}
+const lines: unknown[][] = [];
+const liveLog = { error: (...a: unknown[]) => lines.push(a), warn: (...a: unknown[]) => lines.push(a), info: (...a: unknown[]) => lines.push(a) } as never;
+const live = (db: Db, p: ReturnType<typeof fakeProviders>) => ({ ...opts(db), log: liveLog, live: { providersFor: p.providersFor, secret: SECRET } });
+
+describe('withTurn live mode (MOCK_LLM=0): Bots from ai_settings, read once per turn', () => {
+  it('each role calls with its row\'s model and effort; the mentor sharing the student key calls with the student provider and key', async () => {
+    const p = fakeProviders();
+    const a = fakeDb({ ai: AI }), b = fakeDb({ ai: AI });
+    expect((await withTurn(live(a.db, p), session, '그림을 설명해 줄래?', collect)).at(-1)).toMatchObject({ type: 'done', ended: false });
+    expect((await withTurn(live(b.db, p), session, '힌트 좀 줄래?', collect)).at(-1)).toMatchObject({ type: 'done', ended: false });
+    expect(labels(a.calls).filter(l => l === 'select ai_settings')).toHaveLength(1);
+    expect(p.called).toEqual(expect.arrayContaining([
+      { role: 'student', provider: 'openai', key: 'sk-student-1', model: 'gpt-s', effort: 'low' },
+      { role: 'analysis', provider: 'anthropic', key: 'sk-ant-2', model: 'claude-a', effort: null },
+      { role: 'mentor', provider: 'openai', key: 'sk-student-1', model: 'gpt-m', effort: 'high' },
+    ]));
+    expect(new Set(p.called.map(c => c.role))).toEqual(new Set(['student', 'analysis', 'mentor']));
+  });
+  const notConfigured = { type: 'error', code: 'provider_unavailable', message: 'ai not configured', retryable: false };
+  it('a role whose key row has no ciphertext → ai not configured (not retryable): no provider call, no turns recorded, claim released', async () => {
+    const p = fakeProviders(), f = fakeDb({ ai: [AI[0], AI[1], { ...AI[0], role: 'mentor', key_ciphertext: null }] });
+    expect(await withTurn(live(f.db, p), session, '그림을 설명해 줄래?', collect)).toEqual([notConfigured]);
+    expect(p.called).toEqual([]);
+    expect(labels(f.calls)).toEqual(['claim_turn', 'select sessions', 'select ai_settings', 'release_turn']);
+    expect(f.turns.filter(t => t.speaker === 'teacher')).toEqual([]);
+    expect(f.row.turn_claim).toBeNull();
+  });
+  it('a ciphertext the vault cannot open → ai not configured, logged as vault_decrypt_failed (no key, no ciphertext in the log)', async () => {
+    lines.length = 0;
+    const bad = seal('sk-ant-2', Buffer.alloc(32, 9).toString('base64'));
+    const p = fakeProviders(), f = fakeDb({ ai: [AI[0], { ...AI[1], key_ciphertext: bad }, AI[2]] });
+    expect(await withTurn(live(f.db, p), session, '그림을 설명해 줄래?', collect)).toEqual([notConfigured]);
+    expect(labels(f.calls)).not.toContain('record_turn');
+    const logged = JSON.stringify(lines);
+    expect(logged).toContain('vault_decrypt_failed');
+    expect(logged).not.toContain('sk-');
+    expect(logged).not.toContain(bad);
+  });
+  const failWith = (status: number) => fakeProviders(async provider => {
+    throw new AdapterError(provider as never, status >= 500 ? 'provider_unavailable' : 'provider_rejected', `${status} Incorrect API key provided: sk-stu****ent1`, { status, retryable: status >= 500 });
+  });
+  it('adapter 401 → provider_rejected, not retryable; the provider message (masked key) is not sent or logged', async () => {
+    lines.length = 0;
+    const f = fakeDb({ ai: AI });
+    const evs = await withTurn(live(f.db, failWith(401)), session, '그림을 설명해 줄래?', collect);
+    expect(evs).toEqual([{ type: 'error', code: 'provider_rejected', message: 'provider rejected the request', retryable: false }]);
+    expect(labels(f.calls)).not.toContain('record_turn');
+    expect(f.row.turn_claim).toBeNull();
+    expect(JSON.stringify(lines)).not.toMatch(/Incorrect|sk-/);
+  });
+  it('adapter 500 → provider_unavailable, retryable; nothing recorded', async () => {
+    const f = fakeDb({ ai: AI });
+    expect(await withTurn(live(f.db, failWith(500)), session, '그림을 설명해 줄래?', collect))
+      .toEqual([{ type: 'error', code: 'provider_unavailable', message: 'turn failed', retryable: true }]);
+    expect(labels(f.calls)).not.toContain('record_turn');
+  });
+  it('the turn deadline hit inside a provider call → turn timed out, retryable (detected from our signal, not the error name)', async () => {
+    const p = fakeProviders((provider, signal) => new Promise((_, rej) => signal!.addEventListener('abort', () =>
+      rej(new AdapterError(provider as never, 'provider_unavailable', 'aborted', { retryable: false })))));
+    const f = fakeDb({ ai: AI });
+    expect(await withTurn({ ...live(f.db, p), timeoutMs: 30 }, session, '그림을 설명해 줄래?', collect))
+      .toEqual([{ type: 'error', code: 'provider_unavailable', message: 'turn timed out', retryable: true }]);
+    expect(f.row.turn_claim).toBeNull();
+  });
+  it('mock mode never reads ai_settings', async () => {
+    const { db, calls } = fakeDb({ ai: AI });
+    await run(db, '그림을 설명해 줄래?');
+    expect(labels(calls)).not.toContain('select ai_settings');
+  });
+});
+
+describe('POST …/turns with MOCK_LLM=0 takes the injected providersFor and the vault secret from config', () => {
+  it('a turn over HTTP calls the real-provider factory for each role it needs', async () => {
+    const liveConfig = loadConfig({ SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_KEY: 'k', MOCK_LLM: '0', KEY_VAULT_SECRET: SECRET },
+      p => readFileSync(new URL(p, new URL('../../', import.meta.url)), 'utf8'));
+    const p = fakeProviders(), f = fakeDb({ ai: AI }), app = await buildApp({ db: f.db, config: liveConfig, providersFor: p.providersFor });
+    const r = await app.inject({ method: 'POST', url: `/api/sessions/${SID}/turns`, headers: TEACHER, payload: { text: '그림을 설명해 줄래?' } });
+    const evs = await collect(sse(Promise.resolve(new Response(r.body)), S.SseEvent)) as AdminSseEvent[];
+    expect(evs.at(-1)).toMatchObject({ type: 'done', ended: false });
+    expect(p.called.map(c => [c.role, c.key])).toEqual([['analysis', 'sk-ant-2'], ['student', 'sk-student-1']]);
   });
 });

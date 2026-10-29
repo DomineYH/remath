@@ -41,6 +41,11 @@ describe('C-3 adapter failures', () => {
     expect(pick(evs, 'classification')?.cls).toEqual({ leverage: 'Other', object: 'Other' });
     expect(pick(evs, 'done')?.state.counts).toEqual({ Other: 1 });
   });
+  it("a student stream that ends without done throws no_done with the student bot's provider id", async () => {
+    const cut: Provider = { ...mockProvider, id: 'openai', async *complete() { yield { type: 'delta', text: 'a' }; } };
+    const run = events(runTurn({ bots: { ...bots, student: { ...mock, provider: cut } }, compiled, criteria, tr: gabriel.translations.ko, lang: 'ko', state: fresh(), history: [], text: '왜 그렇게 생각했어?' }));
+    await expect(run).rejects.toSatisfy(e => e instanceof AdapterError && e.code === 'no_done' && e.provider === 'openai');
+  });
   it('MOCK without context throws AdapterError no_context', async () => {
     await expect(collect(mockProvider.complete({ system: '', messages: [], model: 'mock' }))).rejects.toSatisfy(e => e instanceof AdapterError && e.code === 'no_context');
   });

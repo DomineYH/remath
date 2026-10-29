@@ -27,7 +27,7 @@ export type Handlers = Record<string, (req: FastifyRequest, reply: FastifyReply)
 const DIST = fileURLToPath(new URL('../../client/dist/', import.meta.url));
 
 export async function buildApp(d: Pick<Deps, 'db' | 'config'> & Partial<Deps>, opts: FastifyServerOptions = {}) {
-  // providersFor: #57 이 providers/index.ts 의 실 팩토리를 넘긴다. 그 전에는 MOCK_LLM=0 의 키 저장만 여기서 실패한다.
+  // providersFor: index.ts 가 providers/index.ts 의 실 팩토리를 넘긴다. 기본값은 테스트용: 넘기지 않으면 실 모드의 키 저장·턴이 실패한다.
   const deps: Deps = { limiter: createLimiter(), now: () => new Date(), providersFor: () => { throw new Error('providersFor not wired'); }, ...d };
   const app = Fastify(opts);
   app.setValidatorCompiler(validatorCompiler);
