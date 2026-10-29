@@ -34,7 +34,7 @@ export function sessions(c: Ctx, p: Projection) {
   const lastTrigger = (s: SessionRow) => [...turnsOf(s.id)].reverse().find(t => t.trigger)?.trigger ?? null;
   const adminState = (s: SessionRow): z.infer<typeof S.AdminState> => ({ mis: s.progress.mis, counts: s.counts, goal_reached: s.goal_reached, last_trigger: lastTrigger(s) });
   const ownedByAdmin = (s: SessionRow) => db.users.find(u => u.id === s.user_id)?.role === 'admin';
-  const bots = { student: mockProvider, analysis: mockProvider, mentor: mockProvider, model: 'mock' };
+  const bots = { student: { provider: mockProvider, model: 'mock', effort: null }, analysis: { provider: mockProvider, model: 'mock', effort: null }, mentor: { provider: mockProvider, model: 'mock', effort: null } };
 
   /** 한 턴(G-36): runTurn 이벤트 → SSE 이벤트. 이 턴 발화는 done 에서 한꺼번에 seq 를 매겨 기록하고, error 면 하나도 기록하지 않는다.
    *  async generator 라 시작 전 오류(409·422)는 첫 next() 에서 throw 된다. */
@@ -51,9 +51,9 @@ export function sessions(c: Ctx, p: Projection) {
     try {
       for await (const ev of runTurn({ bots, compiled: sc.compiled_prompt ?? compile(sc), criteria, tr: t, lang: s.lang, state, history, text })) {
         if (ev.type === 'classification') { if (ev.cls) { Object.assign(pending[0], ev.cls); yield { type: 'classification', ...ev.cls }; } }
-        else if (ev.type === 'student') { pending.push({ speaker: 'student', text: ev.text }); yield { type: 'student', text: ev.text, final: true }; }
+        else if (ev.type === 'student') { if (ev.final) pending.push({ speaker: 'student', text: ev.text }); yield ev; }
         else if (ev.type === 'trigger') { pending.push({ speaker: 'mentor', text: '', trigger: ev.trigger }); yield ev; }
-        else if (ev.type === 'mentor') { pending[pending.length - 1].text = ev.text; yield { type: 'mentor', text: ev.text, final: true }; }
+        else if (ev.type === 'mentor') { pending[pending.length - 1].text = ev.text; yield ev; }
         else {
           const at = now();
           s.updated_at = at;

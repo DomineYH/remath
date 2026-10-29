@@ -2,10 +2,11 @@
 // and the mockup L1·L2 replays through runTurn (the base of A-3; sendTurn replays land in #24).
 import gabriel from '@remath/seed/scenarios/gabriel.json';
 import { describe, expect, it } from 'vitest';
-import { AdapterError, collect, judgeTurn, mockProvider, runTurn, TXT, type Criteria, type Provider, type SessionState, type Turn, type TurnEvent } from './index.ts';
+import { AdapterError, collect, judgeTurn, mockProvider, renderClassification, runTurn, TXT, type Bots, type CompleteRequest, type Criteria, type Provider, type SessionState, type Turn, type TurnEvent } from './index.ts';
 
 const criteria: Criteria = gabriel.classification;
-const bots = { student: mockProvider, analysis: mockProvider, mentor: mockProvider, model: 'mock' };
+const mock = { provider: mockProvider, model: 'mock', effort: null };
+const bots: Bots = { student: mock, analysis: mock, mentor: mock };
 const compiled = { student: '<student system>', analysis: '<analysis system>', mentor: '<mentor system>' }; // MOCK never reads these
 const fresh = (n = 3): SessionState => ({ mis: Array(n).fill(0), counts: {}, goalReached: false, takeOverCount: 0 });
 const events = async (it: AsyncIterable<TurnEvent>) => { const out: TurnEvent[] = []; for await (const e of it) out.push(e); return out; };
@@ -18,15 +19,16 @@ async function replay(lang: 'ko' | 'en', qs: string[], crit: Criteria | null) {
     const evs = await events(runTurn({ bots, compiled, criteria: crit, tr, lang, state, history, text: q }));
     log.push(evs); history.push({ speaker: 'teacher', text: q });
     for (const ev of evs) {
-      if (ev.type === 'student' || ev.type === 'mentor') history.push({ speaker: ev.type, text: ev.text });
+      if ((ev.type === 'student' || ev.type === 'mentor') && ev.final) history.push({ speaker: ev.type, text: ev.text });
       if (ev.type === 'done') { state = ev.state; summary = ev.summary; }
     }
   }
   return { log, state, summary, history };
 }
 const pick = <K extends TurnEvent['type']>(evs: TurnEvent[], type: K) => evs.find(e => e.type === type) as Extract<TurnEvent, { type: K }> | undefined;
-const student = (evs: TurnEvent[]) => pick(evs, 'student')?.text;
-const mentor = (evs: TurnEvent[]) => pick(evs, 'mentor')?.text;
+const final = (evs: TurnEvent[], type: 'student' | 'mentor') => evs.find(e => e.type === type && e.final) as Extract<TurnEvent, { type: typeof type }> | undefined;
+const student = (evs: TurnEvent[]) => final(evs, 'student')?.text;
+const mentor = (evs: TurnEvent[]) => final(evs, 'mentor')?.text;
 const trigger = (evs: TurnEvent[]) => pick(evs, 'trigger')?.trigger;
 const leverage = (evs: TurnEvent[]) => pick(evs, 'classification')?.cls?.leverage;
 
@@ -34,7 +36,7 @@ describe('C-3 adapter failures', () => {
   it('unparseable analysis output is re-requested once, then recorded as Other', async () => {
     let calls = 0;
     const broken: Provider = { ...mockProvider, async *complete() { calls++; yield { type: 'delta', text: 'garbage' }; yield { type: 'done', model: 'x', stopReason: 'end' }; } };
-    const evs = await events(runTurn({ bots: { ...bots, analysis: broken }, compiled, criteria, tr: gabriel.translations.ko, lang: 'ko', state: fresh(), history: [], text: '왜 그렇게 생각했어?' }));
+    const evs = await events(runTurn({ bots: { ...bots, analysis: { ...mock, provider: broken } }, compiled, criteria, tr: gabriel.translations.ko, lang: 'ko', state: fresh(), history: [], text: '왜 그렇게 생각했어?' }));
     expect(calls).toBe(2);
     expect(pick(evs, 'classification')?.cls).toEqual({ leverage: 'Other', object: 'Other' });
     expect(pick(evs, 'done')?.state.counts).toEqual({ Other: 1 });
@@ -46,6 +48,40 @@ describe('C-3 adapter failures', () => {
     const ac = new AbortController(); ac.abort();
     const context = { role: 'mentor' as const, lang: 'ko' as const, trigger: 1 as const, lines: { t1: 'a', t2: 'b', t3: 'c' } };
     await expect(collect(mockProvider.complete({ system: '', messages: [], model: 'mock', context, signal: ac.signal }))).rejects.toThrow();
+  });
+});
+
+/** 정해진 델타를 흘리고 받은 요청을 남기는 가짜 공급자. */
+const chunks = (parts: string[], seen: CompleteRequest[]): Provider => ({ ...mockProvider, async *complete(req) {
+  seen.push(req); for (const text of parts) yield { type: 'delta', text }; yield { type: 'done', model: req.model, stopReason: 'end' };
+} });
+
+describe('cumulative streaming and per-role bots (ADR-0004, Q2·Q20·Q21)', () => {
+  const seen = { student: [] as CompleteRequest[], analysis: [] as CompleteRequest[], mentor: [] as CompleteRequest[] };
+  const cls = renderClassification({ leverage: 'Taking Over', object: 'Other' });
+  const fake: Bots = {
+    student: { provider: chunks(['a', 'b', 'c'], seen.student), model: 'student-model', effort: 'low' },
+    analysis: { provider: chunks([cls.slice(0, 10), cls.slice(10, 20), cls.slice(20)], seen.analysis), model: 'analysis-model', effort: null },
+    mentor: { provider: chunks(['x', 'y', 'z'], seen.mentor), model: 'mentor-model', effort: 'high' },
+  };
+  it('student and mentor stream the text so far (final:false per delta) then the whole text once (final:true); analysis is one classification', async () => {
+    const evs = await events(runTurn({ bots: fake, compiled, criteria, tr: gabriel.translations.ko, lang: 'ko', state: fresh(), history: [], text: '통분하면 돼.' }));
+    expect(evs.filter(e => e.type !== 'done')).toEqual([
+      { type: 'classification', cls: { leverage: 'Taking Over', object: 'Other' } },
+      { type: 'student', text: 'a', final: false }, { type: 'student', text: 'ab', final: false }, { type: 'student', text: 'abc', final: false }, { type: 'student', text: 'abc', final: true },
+      { type: 'trigger', trigger: 1 },
+      { type: 'mentor', text: 'x', final: false }, { type: 'mentor', text: 'xy', final: false }, { type: 'mentor', text: 'xyz', final: false }, { type: 'mentor', text: 'xyz', final: true },
+    ]);
+  });
+  it("each call carries its own role's model and effort; a null effort leaves the key out", () => {
+    expect(seen.student.map(r => [r.model, r.effort])).toEqual([['student-model', 'low']]);
+    expect(seen.mentor.map(r => [r.model, r.effort])).toEqual([['mentor-model', 'high']]);
+    expect(seen.analysis.map(r => r.model)).toEqual(['analysis-model']);
+    expect('effort' in seen.analysis[0]).toBe(false);
+  });
+  it('a help request sends the fixed line once, final', async () => {
+    const evs = await events(runTurn({ bots, compiled, criteria: null, tr: gabriel.translations.en, lang: 'en', state: fresh(), history: [], text: 'Help' }));
+    expect(evs.filter(e => e.type === 'student')).toEqual([{ type: 'student', text: "Um… I'm still thinking.", final: true }]);
   });
 });
 
