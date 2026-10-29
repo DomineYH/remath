@@ -1,23 +1,20 @@
-// A-2 (practice-session rules), A-3 (L1·L2 replays through sendTurn), A-6 (admin `state`), against the mock API only.
+// A-2 (practice-session rules), A-3 (L1·L2 replays through sendTurn), A-6 (admin `state`).
+// HTTP groups run on any target (seam.ts); the [mock] group reloads the store and injects turnLimit.
 import * as S from '@remath/shared';
 import { HELP_LINE, TXT } from '@remath/shared/engine';
 import gabriel from '@remath/seed/scenarios/gabriel.json';
 import { describe, expect, it } from 'vitest';
 import { ApiError, type AdminApi, type AdminSseEvent, type Api } from '../types.ts';
-import { createMockApi, type MockOptions } from './index.ts';
+import { ADMIN_PW, describeMock, mockTarget, T0, target, type Target } from '../seam.ts';
+import { createMockApi } from './index.ts';
 import { memoryStorage, seedDb, Store } from './store.ts';
 
-const T0 = '2026-10-28T00:00:00.000Z';
-const ADMIN_PW = 'Admin1234';
-
-async function setup(extra: Partial<MockOptions> = {}) {
-  const store = new Store(memoryStorage(), () => seedDb(T0));
-  const opts = { store, now: () => T0, adminPassword: ADMIN_PW, ...extra };
-  const admin = createMockApi({ realm: 'admin', ...opts }) as unknown as AdminApi;
-  const teacher = createMockApi({ realm: 'teacher', ...opts });
+async function setup(t: Target = target()) {
+  const admin = t.api('admin') as unknown as AdminApi;
+  const teacher = t.api('teacher');
   await admin.adminLogin({ nickname: 'admin', password: ADMIN_PW });
   const ids = Object.fromEntries((await admin.listScenarios()).map(s => [s.slug, s.id]));
-  return { store, admin, teacher, ids };
+  return { t, admin, teacher, ids };
 }
 
 /** A teacher who can see `slug` through a group. */
@@ -59,7 +56,7 @@ describe('A-2 practice-session rules', () => {
     const env = await setup();
     await teacherWith(env, 'gabriel');
     await rejects(env.teacher.startSession({ scenario_id: env.ids.noah }), 403, 'forbidden');
-    env.store.db.scenarios.find(s => s.slug === 'gabriel')!.status = 'draft';
+    await env.admin.updateScenario(env.ids.gabriel, S.ScenarioInput.parse(await env.admin.getScenario(env.ids.gabriel)));   // PUT → draft
     await rejects(env.teacher.startSession({ scenario_id: env.ids.gabriel }), 403, 'forbidden');
     expect((await env.admin.startSession({ scenario_id: env.ids.gabriel })).turns).toHaveLength(1);
     await rejects(env.admin.startSession({ scenario_id: '00000000-0000-4000-8000-0000000000ff' }), 404, 'not_found');
@@ -168,38 +165,6 @@ describe('A-3 turn pipeline through sendTurn', () => {
 });
 
 describe('A-2 turn rules', () => {
-  it('409 turn_in_progress while a turn streams; finally releases it', async () => {
-    const env = await setup();
-    const sid = (await env.admin.startSession({ scenario_id: env.ids.gabriel })).session.id;
-    const it1 = env.admin.sendTurn(sid, { text: '어떻게 풀었는지 말해 줄래?' })[Symbol.asyncIterator]();
-    await it1.next();   // the stream has started
-    const e = await rejects(firstNext(env.admin.sendTurn(sid, { text: '왜?' })), 409, 'turn_in_progress');
-    expect(e.body.error.details).toEqual({ turn_started_at: T0 });
-    await rejects(env.admin.endSession(sid), 409, 'turn_in_progress');
-    await it1.return?.(undefined);   // client went away mid-stream: nothing recorded, lock released
-    expect((await env.admin.getSession(sid)).turns).toHaveLength(1);
-    expect((await drain(env.admin.sendTurn(sid, { text: '왜?' }))).at(-1)?.type).toBe('done');
-  });
-  it('a reload mid-turn leaves no stuck turn_started_at: the reloaded store can send and end', async () => {
-    const storage = memoryStorage();
-    const env = await setup({ store: new Store(storage, () => seedDb(T0)) });
-    const sid = (await env.admin.startSession({ scenario_id: env.ids.gabriel })).session.id;
-    await env.admin.sendTurn(sid, { text: '어떻게 풀었는지 말해 줄래?' })[Symbol.asyncIterator]().next();   // tab closes mid-stream
-    const admin2 = createMockApi({ realm: 'admin', store: new Store(storage, () => seedDb(T0)), now: () => T0, adminPassword: ADMIN_PW }) as unknown as AdminApi;
-    expect((await drain(admin2.sendTurn(sid, { text: '왜?' }))).at(-1)?.type).toBe('done');
-    expect(await admin2.endSession(sid)).not.toBeUndefined();
-  });
-  it('422 turn_limit_reached + details at the limit; END SESSION still ends the session', async () => {
-    const env = await setup({ turnLimit: 2 });
-    const d = await env.admin.startSession({ scenario_id: env.ids.gabriel });
-    expect(d.turn_limit).toBe(2);
-    await replay(env.admin, d.session.id, ['안녕!', '왜?'], S.AdminSseEvent);
-    const e = await rejects(firstNext(env.admin.sendTurn(d.session.id, { text: '어떻게?' })), 422, 'turn_limit_reached');
-    expect(e.body.error.details).toEqual({ turn_count: 2, turn_limit: 2 });
-    const [end] = await replay(env.admin, d.session.id, ['end session'], S.AdminSseEvent);
-    expect(end.at(-1)).toMatchObject({ type: 'done', ended: true });
-    expect((await env.admin.getSession(d.session.id)).session.turn_count).toBe(2);
-  });
   it('END SESSION and endSession give the same report, stored once; the session is then 409 session_ended', async () => {
     const env = await setup(), report = async (how: 'turn' | 'end') => {
       const sid = (await env.admin.startSession({ scenario_id: env.ids.gabriel })).session.id;
@@ -214,6 +179,48 @@ describe('A-2 turn rules', () => {
     const a = await report('turn'), b = await report('end');
     expect(a).toEqual(b);
     expect(a?.verdict).toBe('heavy');
+  });
+});
+
+// Mock-only: the mock runs a turn as the client pulls; over HTTP the server records it before the first byte arrives (#46).
+// The server's drop behaviour is covered by server/src/turn.test.ts dropDuring and the #46 live abort check.
+describeMock('A-2 turn rules: mid-stream', () => {
+  it('409 turn_in_progress while a turn streams; finally releases it', async () => {
+    const env = await setup();
+    const sid = (await env.admin.startSession({ scenario_id: env.ids.gabriel })).session.id;
+    const it1 = env.admin.sendTurn(sid, { text: '어떻게 풀었는지 말해 줄래?' })[Symbol.asyncIterator]();
+    await it1.next();   // the stream has started
+    const e = await rejects(firstNext(env.admin.sendTurn(sid, { text: '왜?' })), 409, 'turn_in_progress');
+    expect(e.body.error.details).toEqual({ turn_started_at: expect.any(String) });
+    S.Iso.parse((e.body.error.details as { turn_started_at: unknown }).turn_started_at);
+    await rejects(env.admin.endSession(sid), 409, 'turn_in_progress');
+    await it1.return?.(undefined);   // client went away mid-stream: nothing recorded, lock released
+    expect((await env.admin.getSession(sid)).turns).toHaveLength(1);
+    expect((await drain(env.admin.sendTurn(sid, { text: '왜?' }))).at(-1)?.type).toBe('done');
+  });
+});
+
+describeMock('A-2 turn rules: reload, turnLimit', () => {
+  it('a reload mid-turn leaves no stuck turn_started_at: the reloaded store can send and end', async () => {
+    const storage = memoryStorage();
+    const env = await setup(mockTarget({ store: new Store(storage, () => seedDb(T0)) }));
+    const sid = (await env.admin.startSession({ scenario_id: env.ids.gabriel })).session.id;
+    await env.admin.sendTurn(sid, { text: '어떻게 풀었는지 말해 줄래?' })[Symbol.asyncIterator]().next();   // tab closes mid-stream
+    expect((await rejects(firstNext(env.admin.sendTurn(sid, { text: '왜?' })), 409, 'turn_in_progress')).body.error.details).toEqual({ turn_started_at: T0 });
+    const admin2 = createMockApi({ realm: 'admin', store: new Store(storage, () => seedDb(T0)), now: () => T0, adminPassword: ADMIN_PW }) as unknown as AdminApi;
+    expect((await drain(admin2.sendTurn(sid, { text: '왜?' }))).at(-1)?.type).toBe('done');
+    expect(await admin2.endSession(sid)).not.toBeUndefined();
+  });
+  it('422 turn_limit_reached + details at the limit; END SESSION still ends the session', async () => {
+    const env = await setup(mockTarget({ turnLimit: 2 }));
+    const d = await env.admin.startSession({ scenario_id: env.ids.gabriel });
+    expect(d.turn_limit).toBe(2);
+    await replay(env.admin, d.session.id, ['안녕!', '왜?'], S.AdminSseEvent);
+    const e = await rejects(firstNext(env.admin.sendTurn(d.session.id, { text: '어떻게?' })), 422, 'turn_limit_reached');
+    expect(e.body.error.details).toEqual({ turn_count: 2, turn_limit: 2 });
+    const [end] = await replay(env.admin, d.session.id, ['end session'], S.AdminSseEvent);
+    expect(end.at(-1)).toMatchObject({ type: 'done', ended: true });
+    expect((await env.admin.getSession(d.session.id)).session.turn_count).toBe(2);
   });
 });
 
@@ -241,7 +248,7 @@ describe('A-6 admin state', () => {
     const log = await replay(env.teacher, sid, [...L1.slice(0, 2), 'END SESSION']);   // replay parses every event with S.SseEvent
     expect(log.flat().some(e => e.type === 'state')).toBe(false);
     expect((await env.admin.getAdminSession(sid)).state).toEqual({ mis: [0, 0, 0], counts: { Other: 1, Eliciting: 1 }, goal_reached: false, last_trigger: null });
-    const otherBrowser = createMockApi({ realm: 'teacher', store: env.store, now: () => T0, cookies: { teacher: null, admin: null } });
+    const otherBrowser = env.t.browser()('teacher');
     await rejects(otherBrowser.getAdminSession(sid), 401, 'unauthorized');
   });
 });

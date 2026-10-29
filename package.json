@@ -6,9 +6,12 @@
     "client",
     "shared",
     "prompts",
-    "db/seed"
+    "db/seed",
+    "db/migrations",
+    "server"
   ],
   "scripts": {
+    "admin:reset-password": "npm run admin:reset-password -w server",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "lint": "eslint . && npm run lint:env",
     "lint:env": "! git grep --untracked -n VITE_MOCK_ADMIN_PASSWORD -- client/src client/index.html client/vite.config.ts client/public shared prompts ':(exclude)client/src/api/mock' ':(exclude)client/src/vite-env.d.ts'",

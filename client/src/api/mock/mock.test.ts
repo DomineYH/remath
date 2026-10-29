@@ -1,19 +1,18 @@
-// A-9 (initial state · env admin password · persist/restore · one key) and the A-5 auth rules, against the mock API.
+// A-9 (initial state · env admin password · persist/restore · one key) and the A-5 auth rules.
+// HTTP groups (A-5, C-10) run on any target (seam.ts); A-9 and the audit helper (A-8) are [mock] groups.
 import * as S from '@remath/shared';
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../types.ts';
-import { createMockApi, type MockOptions } from './index.ts';
+import { ADMIN_PW, describeMock, mockTarget, T0, target, type Target } from '../seam.ts';
+import { createMockApi } from './index.ts';
 import { memoryStorage, seedDb, Store, STORAGE_KEY, type Storage } from './store.ts';
 
-const T0 = '2026-10-28T00:00:00.000Z';
-const ADMIN_PW = 'Admin1234';
 const creds = { nickname: 'Haneul', password: 'abcd1234' };
 
-function setup(storage: Storage = memoryStorage(), extra: Partial<MockOptions> = {}) {
-  const store = new Store(storage, () => seedDb(T0));
-  const mk = (realm: 'teacher' | 'admin', more: Partial<MockOptions> = {}) => createMockApi({ realm, store, now: () => T0, adminPassword: ADMIN_PW, ...extra, ...more });
-  return { store, storage, mk, teacher: mk('teacher'), admin: mk('admin') };
+function setup(t: Target = target()) {
+  return { t, teacher: t.api('teacher'), admin: t.api('admin') };
 }
+const stored = (storage: Storage) => mockTarget({ store: new Store(storage, () => seedDb(T0)) });
 
 async function rejects(p: Promise<unknown>, status: number, code: string): Promise<ApiError> {
   try { await p; } catch (e) {
@@ -29,9 +28,9 @@ const recording = () => {
   return { keys, storage: { ...inner, setItem: (k: string, v: string) => { keys.push(k); inner.setItem(k, v); } } };
 };
 
-describe('initial state (G-33)', () => {
+describeMock('A-9 initial state (G-33)', () => {
   it('no teachers, groups or sessions; one admin; the five published samples', async () => {
-    const { store, teacher, admin } = setup();
+    const t = mockTarget(), { store } = t, { teacher, admin } = setup(t);
     expect(store.db.users.map(u => [u.nickname, u.role])).toEqual([['admin', 'admin']]);
     await admin.adminLogin({ nickname: 'admin', password: ADMIN_PW });
     expect(await admin.listUsers()).toEqual([]);
@@ -45,15 +44,15 @@ describe('initial state (G-33)', () => {
   });
 });
 
-describe('admin password from env (G-33)', () => {
+describeMock('A-9 admin password from env (G-33)', () => {
   for (const adminPassword of [undefined, '']) {
     it(`unset (${JSON.stringify(adminPassword)}) → every admin login is 401`, async () => {
-      const { admin } = setup(undefined, { adminPassword });
+      const { admin } = setup(mockTarget({ adminPassword }));
       await rejects(admin.adminLogin({ nickname: 'admin', password: ADMIN_PW }), 401, 'invalid_credentials');
     });
   }
   it('set → admin logs in; realms do not cross', async () => {
-    const { teacher, admin } = setup();
+    const { teacher, admin } = setup(mockTarget());
     expect((await admin.adminLogin({ nickname: 'admin', password: ADMIN_PW })).role).toBe('admin');
     await rejects(teacher.login({ nickname: 'admin', password: ADMIN_PW }), 401, 'invalid_credentials');
     await teacher.signup(creds);
@@ -61,9 +60,9 @@ describe('admin password from env (G-33)', () => {
   });
 });
 
-describe('storage (G-32)', () => {
+describeMock('A-9 storage (G-32)', () => {
   it('persists and restores without reseeding', async () => {
-    const { storage, teacher } = setup();
+    const storage = memoryStorage(), { teacher } = setup(stored(storage));
     await teacher.signup(creds);
     const store2 = new Store(storage, () => { throw new Error('reseeded'); });
     const again = createMockApi({ realm: 'teacher', store: store2, now: () => T0, adminPassword: ADMIN_PW });
@@ -71,7 +70,7 @@ describe('storage (G-32)', () => {
   });
   it('writes only the remath.mock.v1 key', async () => {
     const { keys, storage } = recording();
-    const { teacher } = setup(storage);
+    const { teacher } = setup(stored(storage));
     await teacher.signup(creds);
     await teacher.logout();
     await teacher.login(creds);
@@ -82,7 +81,7 @@ describe('storage (G-32)', () => {
     expect(STORAGE_KEY).toBe('remath.mock.v1');
   });
   it('stores hashes, never plaintext', async () => {
-    const { storage, teacher, admin } = setup();
+    const storage = memoryStorage(), { teacher, admin } = setup(stored(storage));
     await teacher.signup(creds);
     await admin.adminLogin({ nickname: 'admin', password: ADMIN_PW });
     await admin.adminChangePassword({ current: ADMIN_PW, next: 'NewAdmin99' });
@@ -94,7 +93,7 @@ describe('storage (G-32)', () => {
   });
 });
 
-describe('signup and validation (A-5)', () => {
+describe('A-5 signup and validation', () => {
   it('signup logs in', async () => {
     const { teacher } = setup();
     const me = await teacher.signup(creds);
@@ -112,9 +111,9 @@ describe('signup and validation (A-5)', () => {
     });
   }
   it('duplicate nickname (case-insensitive, any role) → 409', async () => {
-    const { teacher, mk } = setup();
+    const { teacher, t } = setup();
     await teacher.signup(creds);
-    const other = mk('teacher', { cookies: { teacher: null, admin: null } });
+    const other = t.browser()('teacher');
     await rejects(other.signup({ ...creds, nickname: 'Haneul' }), 409, 'nickname_taken');
     await rejects(other.signup({ ...creds, nickname: 'haneul' }), 409, 'nickname_taken');
     await rejects(other.signup({ ...creds, nickname: 'admin' }), 409, 'nickname_taken');
@@ -129,11 +128,11 @@ describe('signup and validation (A-5)', () => {
   });
 });
 
-describe('password change ends other logins', () => {
+describe('A-5 password change ends other logins', () => {
   it('teacher', async () => {
-    const { teacher: a, mk } = setup();
+    const { teacher: a, t } = setup();
     await a.signup(creds);
-    const b = mk('teacher', { cookies: { teacher: null, admin: null } });
+    const b = t.browser()('teacher');
     await b.login(creds);
     await rejects(a.changePassword({ current: 'wrong999', next: 'efgh5678' }), 401, 'invalid_credentials');
     expect((await b.me()).nickname).toBe('Haneul');
@@ -144,8 +143,8 @@ describe('password change ends other logins', () => {
     await b.login({ ...creds, password: 'efgh5678' });
   });
   it('admin', async () => {
-    const { admin: a, mk } = setup();
-    const b = mk('admin', { cookies: { teacher: null, admin: null } });
+    const { admin: a, t } = setup();
+    const b = t.browser()('admin');
     await a.adminLogin({ nickname: 'admin', password: ADMIN_PW });
     await b.adminLogin({ nickname: 'admin', password: ADMIN_PW });
     await a.adminChangePassword({ current: ADMIN_PW, next: 'NewAdmin99' });
@@ -156,7 +155,7 @@ describe('password change ends other logins', () => {
   });
 });
 
-describe('logout and realm separation (C-10)', () => {
+describe('A-5 logout and realm separation (C-10)', () => {
   it('logout ends the login', async () => {
     const { teacher } = setup();
     await teacher.signup(creds);
@@ -182,9 +181,9 @@ describe('logout and realm separation (C-10)', () => {
   });
 });
 
-describe('audit helper (D-21)', () => {
+describeMock('A-8 audit helper (D-21)', () => {
   it('failed login → one auth.login_failed; password change → one auth.password_change', async () => {
-    const { store, teacher, admin } = setup();
+    const t = mockTarget(), { store } = t, { teacher, admin } = setup(t);
     await rejects(admin.adminLogin({ nickname: 'admin', password: 'wrong999' }), 401, 'invalid_credentials');
     expect(store.db.audit_log).toHaveLength(1);
     const failed = S.AuditEntry.parse(store.db.audit_log[0]);

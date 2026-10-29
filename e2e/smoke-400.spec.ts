@@ -16,6 +16,7 @@ const GREET = '안녕하세요… 저는 가브리엘이에요.';
  *  a label on every form control (I-55) and no mockup-only demo element (I-41). */
 async function fits(page: Page, where: string) {
   await expect(page.locator('.top')).toBeVisible();
+  await expect(page.locator('.top .in > *').last()).toBeVisible();
   const m = await page.evaluate(() => ({
     sw: document.documentElement.scrollWidth,
     cw: document.documentElement.clientWidth,
