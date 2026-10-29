@@ -545,4 +545,20 @@ describe('POST …/turns with MOCK_LLM=0 takes the injected providersFor and the
     expect(evs.at(-1)).toMatchObject({ type: 'done', ended: false });
     expect(p.called.map(c => [c.role, c.key])).toEqual([['analysis', 'sk-ant-2'], ['student', 'sk-student-1']]);
   });
+  it('POST …/end keeps Q7\'s code: the analysis provider rejects the summary → provider_rejected; unavailable stays provider_unavailable; nothing recorded', async () => {
+    const liveConfig = loadConfig({ SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_KEY: 'k', MOCK_LLM: '0', KEY_VAULT_SECRET: SECRET },
+      p => readFileSync(new URL(p, new URL('../../', import.meta.url)), 'utf8'));
+    for (const [status, code] of [[401, 'provider_rejected'], [503, 'provider_unavailable']] as const) {
+      const p = fakeProviders(async provider => {
+        if (provider === 'anthropic') throw new AdapterError('anthropic', code, `${status} no`, { status, retryable: status >= 500 });
+        return undefined as never;
+      });
+      const f = fakeDb({ ai: AI }), app = await buildApp({ db: f.db, config: liveConfig, providersFor: p.providersFor });
+      const r = await app.inject({ method: 'POST', url: `/api/sessions/${SID}/end`, headers: { cookie: TEACHER.cookie, 'x-remath-realm': 'teacher' } });
+      expect(p.called.map(c => c.role)).toContain('analysis');
+      expect(r.statusCode).toBe(502);
+      expect(r.json().error.code).toBe(code);
+      expect(labels(f.calls)).not.toContain('record_turn');
+    }
+  });
 });

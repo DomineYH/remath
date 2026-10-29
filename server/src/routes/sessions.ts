@@ -98,7 +98,7 @@ export function sessionHandlers({ db, config, now, providersFor }: Deps): Handle
     'POST /api/sessions/:id/end': async req => {
       return withTurn({ ...turnOpts, log: req.log }, await sessionOf(req, 'light'), 'END SESSION', async events => {
         for await (const ev of events) {
-          if (ev.type === 'error') throw new ApiFail('provider_unavailable', ev.message);
+          if (ev.type === 'error') throw new ApiFail(ev.code === 'provider_rejected' ? 'provider_rejected' : 'provider_unavailable', ev.message);   // Q7 코드 유지(둘 다 502)
           if (ev.type === 'done' && ev.ended) return ev.report;
         }
         // 결과를 모른다(이벤트 없이 끝남): 리포트를 지어내지 않는다. 화면의 end() 는 오류를 보이고 finally 에서 GET 으로 맞춘다.
