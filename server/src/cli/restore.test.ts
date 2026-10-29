@@ -7,7 +7,7 @@ import { PGlite } from '@electric-sql/pglite';
 import Database from 'better-sqlite3';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { FKS, TABLES } from '../backup.ts';
-import { backupCounts, copyText, ORDER, psqlScript, restore, restoreSteps, topoSort, type Step } from './restore.ts';
+import { backupCounts, copyText, ORDER, psqlScript, restore, restoreSteps, type Step } from './restore.ts';
 
 type Row = Record<string, unknown>;
 const u = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -72,13 +72,8 @@ const sortRows = (rows: Row[]) => [...rows].sort((a, b) => JSON.stringify(a) < J
 describe('restore order (T-1 e)', () => {
   it('is the H-31 order and a topological order of the FK graph', () => {
     expect(ORDER).toEqual(TEN);
-    expect(topoSort(ORDER, FKS)).toEqual(ORDER);   // FKS = 0001 의 FK 그래프(backup.test.ts 가 PGlite 로 맞춰 본다)
-  });
-  it('topoSort fixes a wrong order and rejects a cycle', () => {
-    const wrong = ['turns', ...TEN.filter(t => t !== 'turns')];
-    expect(topoSort(wrong, FKS)).not.toEqual(wrong);
-    expect(topoSort(wrong, FKS).indexOf('turns')).toBeGreaterThan(topoSort(wrong, FKS).indexOf('sessions'));
-    expect(() => topoSort(['a', 'b'], [{ table: 'a', ref: 'b' }, { table: 'b', ref: 'a' }])).toThrow(/cycle/);
+    // FKS = 0001 의 FK 그래프(backup.test.ts 가 PGlite 로 맞춰 본다): 부모가 자식보다 앞
+    for (const fk of FKS.filter(f => f.ref !== f.table)) expect(ORDER.indexOf(fk.ref), `${fk.table} → ${fk.ref}`).toBeLessThan(ORDER.indexOf(fk.table));
   });
 });
 

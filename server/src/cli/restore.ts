@@ -13,17 +13,6 @@ import { DbUrl } from './migrate.ts';
 
 export const ORDER = Object.keys(TABLES);   // backup.ts 의 테이블 순서 = H-31 복구 순서
 
-/** 부모(ref)가 자식(table)보다 앞에 오는 순서. 가능한 한 주어진 순서를 지킨다(맞는 순서면 그대로 돌려준다). */
-export function topoSort(tables: string[], fks: { table: string; ref: string }[]) {
-  const out: string[] = [], left = [...tables];
-  while (left.length) {
-    const i = left.findIndex(t => fks.every(f => f.table !== t || f.ref === t || out.includes(f.ref) || !tables.includes(f.ref)));
-    if (i < 0) throw new Error(`FK cycle among ${left.join(', ')}`);
-    out.push(...left.splice(i, 1));
-  }
-  return out;
-}
-
 /** 읽기 전용으로 열고 10개 테이블·열이 다 있는지 본다. 백업이 아닌 파일은 여기서 실패한다. */
 function open(file: string) {
   const sq = new Database(file, { readonly: true, fileMustExist: true });
