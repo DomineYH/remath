@@ -57,8 +57,11 @@ export REMATH_ENV_FILE
 env_get() { local l v=; while IFS= read -r l || [ -n "$l" ]; do case $l in "$1="*) v="${l#*=}" ;; esac; done < "$REMATH_ENV_FILE"; printf %s "$v"; }
 # Q25: MOCK_LLM=0 이면 서버는 KEY_VAULT_SECRET 이 32바이트(hex 64자 또는 base64, vault.ts parseSecret)여야 뜬다. 값은 출력하지 않는다.
 check_vault_secret() {
-  [ "$(env_get MOCK_LLM | tr -d ' \t\r')" = 0 ] || return 0
-  local s n how="make one with: openssl rand -base64 32 and put it in that file"
+  local m s n how="make one with: openssl rand -base64 32 and put it in that file"
+  # 서버(config.ts)와 같은 규칙: 정확히 0 또는 1. CRLF 파일의 줄 끝 CR 만 뗀다.
+  m="$(env_get MOCK_LLM)"; m="${m%$'\r'}"
+  [ "$m" = 0 ] || [ "$m" = 1 ] || fail "MOCK_LLM in $REMATH_ENV_FILE must be exactly 0 or 1 (no spaces)"
+  [ "$m" = 0 ] || return 0
   s="$(env_get KEY_VAULT_SECRET | tr -d ' \t\r')"
   [ -n "$s" ] || fail "MOCK_LLM=0 but KEY_VAULT_SECRET is not set in $REMATH_ENV_FILE; $how"
   [[ $s =~ ^[0-9a-fA-F]{64}$ ]] && return 0

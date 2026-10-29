@@ -27,7 +27,7 @@ export function anthropicProvider(key: string, o: AdapterOpts): Provider {
           case 'content_block_delta': return d.delta?.type === 'text_delta' ? d.delta.text as string : undefined;   // thinking_delta 등은 버린다
           case 'message_delta': stop = STOP[d.delta?.stop_reason] ?? 'other'; output = d.usage?.output_tokens ?? output; input = d.usage?.input_tokens ?? input; return;
           case 'message_stop': return { type: 'done', model, stopReason: stop, usage: { input, output } };
-          case 'error': throw streamError('anthropic', d.error?.message);
+          case 'error': throw streamError('anthropic', d.error?.message, d.error?.type);
         }
       });
     },

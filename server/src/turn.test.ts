@@ -10,6 +10,8 @@ import { buildApp } from './app.ts';
 import { loadConfig } from './config.ts';
 import type { Db } from './db.ts';
 import { ApiFail } from './errors.ts';
+import { providersFor } from './providers/index.ts';
+import { fakeFetch, sseResponse, sseText } from './providers/testkit.ts';
 import type { ProvidersFor } from './providers/types.ts';
 import { frame, withTurn } from './turn.ts';
 import { seal } from './vault.ts';
@@ -502,6 +504,20 @@ describe('withTurn live mode (MOCK_LLM=0): Bots from ai_settings, read once per 
     const f = fakeDb({ ai: AI });
     expect(await withTurn(live(f.db, failWith(500)), session, '그림을 설명해 줄래?', collect))
       .toEqual([{ type: 'error', code: 'provider_unavailable', message: 'turn failed', retryable: true }]);
+    expect(labels(f.calls)).not.toContain('record_turn');
+  });
+  it('a request error inside a 200 stream (real adapter) → provider_rejected, not retryable (Q7)', async () => {
+    const midRejected = {
+      openai: sseText(`event: error
+data: {"type":"error","sequence_number":1,"code":"invalid_api_key","message":"Incorrect API key provided: sk-stu****ent1","param":null}`),
+      anthropic: sseText(`event: error
+data: {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}`),
+      gemini: sseText(`data: {"error":{"code":403,"message":"denied","status":"PERMISSION_DENIED"}}`),
+    };
+    const real: ProvidersFor = (provider, key, o) => providersFor(provider, key, { ...o, fetch: fakeFetch(() => sseResponse(midRejected[provider])).fetch } as typeof o);
+    const f = fakeDb({ ai: AI });
+    expect(await withTurn({ ...live(f.db, fakeProviders()), live: { providersFor: real, secret: SECRET } }, session, '그림을 설명해 줄래?', collect))
+      .toEqual([{ type: 'error', code: 'provider_rejected', message: 'provider rejected the request', retryable: false }]);
     expect(labels(f.calls)).not.toContain('record_turn');
   });
   it('the turn deadline hit inside a provider call → turn timed out, retryable (detected from our signal, not the error name)', async () => {

@@ -24,8 +24,8 @@ export function openaiProvider(key: string, o: AdapterOpts): Provider {
       switch (d.type) {
         case 'response.output_text.delta': return d.delta as string;
         case 'response.completed': case 'response.incomplete': return done(d.response);
-        case 'response.failed': throw streamError('openai', d.response?.error?.message);
-        case 'error': throw streamError('openai', d.message);
+        case 'response.failed': throw streamError('openai', d.response?.error?.message, d.response?.error?.code);
+        case 'error': throw streamError('openai', d.message, d.code);
       }
     }),
     listModels: () => listModels('openai', o, { url: `${API}/models`, headers }, (j: { data: { id: string }[] }) => j.data.map(m => m.id)),

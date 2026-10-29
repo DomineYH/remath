@@ -205,7 +205,18 @@ describe('scripts/deploy.sh KEY_VAULT_SECRET preflight (Q25)', () => {
     });
   }
 
-  for (const [what, body] of [['base64', live(B64)], ['hex', live(HEX)], ['base64 with CRLF', live(`${B64}\r`)], ['MOCK_LLM=1 without a secret', 'MOCK_LLM=1\n']] as const) {
+  // 서버(config.ts)는 MOCK_LLM 이 정확히 '0'·'1' 이어야 뜬다. 사전 점검도 줄 끝 CR 하나만 떼고 같은 규칙.
+  for (const [what, body] of [['padded', `MOCK_LLM= 0\nKEY_VAULT_SECRET=${B64}\n`], ['trailing space', `MOCK_LLM=1 \n`], ['not 0/1', 'MOCK_LLM=true\n'], ['missing', 'COOKIE_SECURE=false\n']] as const) {
+    it(`MOCK_LLM ${what} stops before anything`, () => {
+      for (const r of [deploy([], {}, SCRIPT, body), deploy(['--new'], MGMT, SCRIPT, body), deploy(['remath-20261028.sqlite'], MGMT, join(ROOT, 'scripts/restore.sh'), body)]) {
+        expect(r.status).toBe(1);
+        expect(r.stderr).toMatch(/MOCK_LLM in .* must be exactly 0 or 1/);
+        expect(r.steps).toEqual([]);
+      }
+    });
+  }
+
+  for (const [what, body] of [['base64', live(B64)], ['hex', live(HEX)], ['base64 with CRLF', live(`${B64}\r`)], ['MOCK_LLM=1 without a secret', 'MOCK_LLM=1\n'], ['MOCK_LLM=1 with CRLF', 'MOCK_LLM=1\r\n'], ['MOCK_LLM=0 with CRLF', `MOCK_LLM=0\r\nKEY_VAULT_SECRET=${B64}\r\n`]] as const) {
     it(`passes with ${what}`, () => {
       const r = deploy([], {}, SCRIPT, body);
       expect(r.stderr).toBe('');

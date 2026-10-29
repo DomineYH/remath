@@ -16,9 +16,14 @@ export function httpError(id: RealProviderId, status: number, message: string): 
   return new AdapterError(id, retryable ? 'provider_unavailable' : 'provider_rejected', `${status} ${message}`.slice(0, 300), { status, retryable });
 }
 
-/** 200 뒤에 온 `event: error`·실패 이벤트. 공급자 측 장애라 재시도 가능으로 둔다. */
-export const streamError = (id: RealProviderId, message: unknown) =>
-  new AdapterError(id, 'provider_unavailable', `stream error: ${String(message ?? 'unknown')}`.slice(0, 300), { retryable: true });
+/** 영구 오류 이름(Q7 거절): Anthropic `*_error` type, OpenAI type/code, Gemini status — docs/research/llm-providers-2026-10.md. */
+const REJECTED = /invalid|auth|permission|not_found/i;
+
+/** 200 뒤에 온 `event: error`·실패 이벤트. kind = 공급자의 오류 type/code/status. 요청·인증 문제는 거절, 그 밖(과부하·한도·서버·모름)은 재시도 가능. */
+export function streamError(id: RealProviderId, message: unknown, kind?: unknown): AdapterError {
+  const rejected = typeof kind === 'string' && REJECTED.test(kind);
+  return new AdapterError(id, rejected ? 'provider_rejected' : 'provider_unavailable', `stream error: ${String(message ?? 'unknown')}`.slice(0, 300), { retryable: !rejected });
+}
 
 /** fetch·본문 읽기에서 던져진 것 → AdapterError. 기한 초과(TimeoutError)·네트워크는 재시도 가능, 호출자 abort 는 아니다. */
 function asAdapterError(id: RealProviderId, err: unknown, signal?: AbortSignal): AdapterError {
@@ -50,7 +55,10 @@ export async function* stream(id: RealProviderId, o: AdapterOpts, req: CompleteR
     const res = await send(id, o, http, req.signal);
     if (!res.body) throw streamError(id, 'empty body');
     for await (const ev of sse(res.body)) {
-      for (const out of [read(ev) ?? []].flat()) {
+      let r: ReturnType<Reader>;
+      // JSON.parse 실패 = 공급자 스트림 이상. 메시지에 본문 조각이 섞이므로 싣지 않는다.
+      try { r = read(ev); } catch (err) { throw err instanceof SyntaxError ? streamError(id, 'unparseable event data') : err; }
+      for (const out of [r ?? []].flat()) {
         if (typeof out !== 'string') { done = out; yield out; return; }
         if (out) yield { type: 'delta', text: out };
       }
@@ -65,7 +73,9 @@ export async function* stream(id: RealProviderId, o: AdapterOpts, req: CompleteR
   }
 }
 
-/** 키 확인용 모델 목록 GET(Q23). 2xx = 유효. */
+/** 키 확인용 모델 목록 GET(Q23). 2xx = 유효(#55) — 본문이 없거나 모양이 다르면 빈 목록. */
 export async function listModels(id: RealProviderId, o: AdapterOpts, http: Http, ids: (json: never) => string[]): Promise<string[]> {
-  try { return ids(await (await send(id, o, http)).json() as never); } catch (err) { throw asAdapterError(id, err); }
+  let res: Response;
+  try { res = await send(id, o, http); } catch (err) { throw asAdapterError(id, err); }
+  try { return ids(await res.json() as never); } catch { return []; }
 }
