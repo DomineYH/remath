@@ -117,7 +117,9 @@ async function record(o: TurnOpts, id: string, token: string, args: Record<strin
 
 /** 실 모드에서 역할에 공급자·암호문·모델이 없거나(Q4) 암호문을 풀지 못함(Q18). 턴은 기록하지 않고 재시도해도 소용없다. */
 class Unconfigured extends Error {
-  constructor(readonly role: Role, readonly code: 'ai_not_configured' | 'vault_decrypt_failed') { super(code); }
+  readonly role: Role; readonly code: 'ai_not_configured' | 'vault_decrypt_failed';
+  // 매개변수 속성은 쓰지 않는다: 서버는 Node 타입 제거(erasable 문법만)로 돈다.
+  constructor(role: Role, code: 'ai_not_configured' | 'vault_decrypt_failed') { super(code); this.role = role; this.code = code; }
 }
 type AiRow = { role: Role; key_source: Role | 'own'; provider: RealProviderId | null; key_ciphertext: string | null; model: string | null; effort: Effort | null };
 
