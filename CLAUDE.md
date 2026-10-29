@@ -32,9 +32,6 @@ Proceed with development by referring to the following files.
 
 도메인 문서는 단일 컨텍스트 구조를 사용한다. `docs/agents/domain.md`를 참고한다.
 
-### Checks
-
-검사 명령(pytest, ruff, black, 브라우저 검사, live 스트리밍 검사)은 `README.md`의 테스트 절에 있다. CI와 pre-commit이 같은 명령을 실행하며, 모두 통과해야 변경이 끝난 것이다.
 
 # Code Quality
 
