@@ -57,10 +57,11 @@ const Env = z.object({
   LOAD_SCENARIO: z.uuid().optional(),
 });
 
-if (import.meta.main) main('load', async () => {
-  const env = readEnv(Env, process.env), base = env.LOAD_BASE.replace(/\/$/, '');
-  const browser = (realm: 'teacher' | 'admin') => createHttpApi({ realm, fetch: jarFetch(), base });
-  const admin = browser('admin');
+export type LoadEnv = z.infer<typeof Env>;
+
+/** 한 번 실행. browser(realm) = 쿠키 따로 쓰는 새 클라이언트. 부하·검사 실패가 하나라도 있으면 false, 준비 실패는 throw. */
+export async function runLoad(env: LoadEnv, browser: (realm: 'teacher' | 'admin') => Api): Promise<boolean> {
+  const base = env.LOAD_BASE.replace(/\/$/, ''), admin = browser('admin');
   await admin.adminLogin({ nickname: 'admin', password: env.LOAD_ADMIN_PASSWORD });
   const run = Math.random().toString(36).slice(2, 6), prefix = `load-${run}-`, password = `Load${run}x2026`;
   const t: Tally = { first: [], turn: [], http429: 0, http5xx: 0, sseError: 0, check: 0, other: 0, notes: [] };
@@ -70,11 +71,15 @@ if (import.meta.main) main('load', async () => {
     else t.other++;
     t.notes.push(`${who}: ${err instanceof ApiError ? `${err.status} ${err.code}` : (err as Error).message}`);
   };
-  let group: string | undefined;
+  let group: string | undefined, dirty = false;   // dirty = 정리 실패·잔여 → 실행 실패
   try {
     const scenario = env.LOAD_SCENARIO ?? (await admin.listScenarios()).find(s => s.status === 'published')?.id;
     if (!scenario) throw new Error('no published scenario');
-    const users = await Promise.all(Array.from({ length: env.LOAD_USERS }, (_, i) => admin.createUser({ nickname: prefix + (i + 1), password })));
+    // 모두 끝날 때까지 기다린다: 하나가 먼저 실패해도 느린 생성이 정리 뒤에 커밋되면 남는다.
+    const created = await Promise.allSettled(Array.from({ length: env.LOAD_USERS }, (_, i) => admin.createUser({ nickname: prefix + (i + 1), password })));
+    const failed = created.filter(r => r.status === 'rejected');
+    if (failed.length) throw new Error(`${failed.length}/${env.LOAD_USERS} users not created: ${(failed[0]!.reason as Error).message}`);
+    const users = created.map(r => (r as PromiseFulfilledResult<z.infer<typeof S.UserRow>>).value);
     group = (await admin.createGroup({ name: `load-${run}`, member_ids: users.map(u => u.id), scenario_ids: [scenario] })).id;
     const t0 = performance.now();
     await Promise.all(users.map(u => teacher(browser('teacher'), u.nickname, password, scenario, env.LOAD_TURNS, run, t).catch(err => fail(u.nickname, err))));
@@ -88,11 +93,17 @@ if (import.meta.main) main('load', async () => {
     for (const n of t.notes) console.log('  ' + n);
   } finally {
     // 목록에서 접두어로 찾는다: 생성이 중간에 실패했어도 만들어진 것은 모두 지운다.
-    if (group) await admin.deleteGroup(group).catch(err => console.error(`cleanup: group delete failed: ${(err as Error).message}`));
+    if (group) await admin.deleteGroup(group).catch(err => { dirty = true; console.error(`cleanup: group delete failed: ${(err as Error).message}`); });
     for (const u of (await admin.listUsers()).filter(u => u.nickname.startsWith(prefix)))
-      await admin.deleteUser(u.id).catch(err => console.error(`cleanup: ${u.nickname} delete failed: ${(err as Error).message}`));
+      await admin.deleteUser(u.id).catch(err => { dirty = true; console.error(`cleanup: ${u.nickname} delete failed: ${(err as Error).message}`); });
     const left = (await admin.listUsers()).filter(u => u.nickname.startsWith(prefix)).length;
+    if (left) dirty = true;
     console.log(`cleanup: ${left} ${prefix}* users left${group ? `, group load-${run} deleted` : ''}`);
   }
-  if (t.http429 + t.http5xx + t.sseError + t.check + t.other) process.exitCode = 1;
+  return !(dirty || t.http429 + t.http5xx + t.sseError + t.check + t.other);
+}
+
+if (import.meta.main) main('load', async () => {
+  const env = readEnv(Env, process.env), base = env.LOAD_BASE.replace(/\/$/, '');
+  if (!await runLoad(env, realm => createHttpApi({ realm, fetch: jarFetch(), base }))) process.exitCode = 1;
 });
