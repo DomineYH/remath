@@ -246,6 +246,7 @@ q "select actor_id is null, target = (select id::text from users where role='adm
 
 - 브라우저의 기존 관리자 탭도 다음 요청에서 401 → 로그인 화면.
 - SQL은 **1행** `t|t|<컨테이너 호스트명>`(actor null, target = 관리자 id, `meta.host`; Docker 기본 호스트명은 컨테이너 id 앞 12자: `dc exec -T server hostname`).
+- 이 단계부터 스테이징 관리자 비밀번호는 새 비밀번호(`NP`)다. `ADMIN_INITIAL_PASSWORD`는 더 이상 통하지 않는다.
 
 ## 8. 실패 경로: anon 키 자리에 service key → `deploy.sh --new`
 
