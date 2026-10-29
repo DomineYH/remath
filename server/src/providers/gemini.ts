@@ -19,7 +19,7 @@ export function geminiProvider(key: string, o: AdapterOpts): Provider {
   return {
     id: 'gemini',
     complete: req => stream('gemini', o, req, {
-      url: `${API}/models/${encodeURIComponent(req.model)}:streamGenerateContent?alt=sse`, headers,
+      url: `${API}/models/${encodeURIComponent(req.model)}:streamGenerateContent?alt=sse`, headers, key,
       body: {
         system_instruction: { parts: [{ text: req.system }] },
         contents: req.messages.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
@@ -34,6 +34,6 @@ export function geminiProvider(key: string, o: AdapterOpts): Provider {
       const u = d.usageMetadata;
       return [text, { type: 'done', model: d.modelVersion ?? req.model, stopReason: STOP[c.finishReason] ?? 'other', ...u && { usage: { input: u.promptTokenCount ?? 0, output: (u.candidatesTokenCount ?? 0) + (u.thoughtsTokenCount ?? 0) } } }];
     }),
-    listModels: () => listModels('gemini', o, { url: `${API}/models`, headers }, (j: { models?: { name: string }[] }) => (j.models ?? []).map(m => m.name.replace(/^models\//, ''))),
+    listModels: () => listModels('gemini', o, { url: `${API}/models`, headers, key }, (j: { models?: { name: string }[] }) => (j.models ?? []).map(m => m.name.replace(/^models\//, ''))),
   };
 }

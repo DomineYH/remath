@@ -6,7 +6,7 @@ import { geminiProvider } from './gemini.ts';
 import { openaiProvider } from './openai.ts';
 import { providersFor } from './index.ts';
 import type { AdapterOpts } from './call.ts';
-import { fakeFetch, jsonResponse, memLog, sseResponse, sseText } from './testkit.ts';
+import { fakeFetch, jsonResponse, leaksKey, memLog, sseResponse, sseText } from './testkit.ts';
 
 const KEY = 'sk-test-SECRET-KEY-123';
 const REQ: CompleteRequest = { system: 'SYSTEM-PROMPT-TEXT', messages: [{ role: 'user', content: 'USER-UTTERANCE' }, { role: 'assistant', content: 'BOT-REPLY' }, { role: 'user', content: '두 번째 발화' }], model: 'm-1' };
@@ -300,6 +300,33 @@ describe.each(Object.entries(CASES))('%s adapter', (_, c) => {
       const p = c.make(KEY, { log: memLog().log, fetch: noHeaders });
       await expect(p.listModels()).rejects.toMatchObject({ name: 'AdapterError', code: 'provider_unavailable', retryable: true, message: 'timeout' });
     } finally { spy.mockRestore(); }
+  });
+});
+
+// #55: 공급자 오류 글이 키를 되풀이해도, 300자로 자르기 전에 가려 키 앞부분이 남지 않는다.
+const LONG_KEY = 'sk-ant-api03-' + Array.from({ length: 194 }, (_, i) => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[i % 32]).join('');   // 207자
+describe('provider text that echoes the key is masked before truncation (#55)', () => {
+  const echo = `${'p'.repeat(110)}${LONG_KEY}${'q'.repeat(60)}`;
+  const midError: Record<string, string> = {
+    openai: sseText(`event: error\ndata: ${JSON.stringify({ type: 'error', code: 'invalid_api_key', message: echo })}`),
+    anthropic: sseText(`event: error\ndata: ${JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: echo } })}`),
+    gemini: sseText(`data: ${JSON.stringify({ error: { code: 400, message: echo, status: 'INVALID_ARGUMENT' } })}`),
+  };
+  it.each(Object.entries(CASES))('%s: HTTP error body (listModels and complete) and a mid-stream error', async (id, c) => {
+    expect(leaksKey(echo.slice(0, 300), LONG_KEY)).toBe(true);   // 가리지 않고 자르면 새는 입력이다
+    const make = (respond: () => Response) => c.make(LONG_KEY, { log: memLog().log, fetch: fakeFetch(respond).fetch });
+    const http = () => jsonResponse(c.errorBody(echo), 401);
+    const errs = [
+      await make(http).listModels().catch((e: unknown) => e),
+      await collect(make(http).complete(REQ)).catch((e: unknown) => e),
+      await collect(make(() => sseResponse(midError[id]!)).complete(REQ)).catch((e: unknown) => e),
+    ] as AdapterError[];
+    for (const e of errs) {
+      expect(e).toBeInstanceOf(AdapterError);
+      expect(e.message).toContain('ppp');
+      expect(e.message.length).toBeLessThanOrEqual(300);
+      expect(leaksKey(e.message, LONG_KEY)).toBe(false);
+    }
   });
 });
 

@@ -17,7 +17,7 @@ export function openaiProvider(key: string, o: AdapterOpts): Provider {
   return {
     id: 'openai',
     complete: req => stream('openai', o, req, {
-      url: `${API}/responses`, headers,
+      url: `${API}/responses`, headers, key,
       body: { model: req.model, instructions: req.system, input: req.messages, stream: true, ...req.effort && { reasoning: { effort: req.effort } } },
     }, ev => {
       const d = JSON.parse(ev.data);
@@ -28,6 +28,6 @@ export function openaiProvider(key: string, o: AdapterOpts): Provider {
         case 'error': throw streamError('openai', d.message, d.code);
       }
     }),
-    listModels: () => listModels('openai', o, { url: `${API}/models`, headers }, (j: { data: { id: string }[] }) => j.data.map(m => m.id)),
+    listModels: () => listModels('openai', o, { url: `${API}/models`, headers, key }, (j: { data: { id: string }[] }) => j.data.map(m => m.id)),
   };
 }
