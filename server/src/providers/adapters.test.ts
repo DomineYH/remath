@@ -235,6 +235,13 @@ describe.each(Object.entries(CASES))('%s adapter', (_, c) => {
     expect(await rejection(p.complete(REQ))).toBeInstanceOf(AdapterError);
   });
 
+  it('an unparseable data line is a stream error, not a network error (still retryable)', async () => {
+    const { p } = setup(() => sseResponse('data: {not json\n\n'));
+    const e = await rejection(p.complete(REQ)) as AdapterError;
+    expect(e).toMatchObject({ code: 'provider_unavailable', retryable: true });
+    expect(e.message).toMatch(/^stream error: /);
+  });
+
   it('abort → AdapterError, not retryable; a timeout abort is retryable', async () => {
     const { p, calls } = setup(() => sseResponse(c.ok));
     const e = await rejection(p.complete({ ...REQ, signal: AbortSignal.abort() }));
@@ -273,6 +280,12 @@ describe.each(Object.entries(CASES))('%s adapter', (_, c) => {
     expect(calls).toEqual([{ url: c.models.url, method: 'GET', headers: expect.any(Object), body: undefined }]);
     const bad = setup(() => jsonResponse(c.errorBody('bad key'), 401)).p;
     await expect(bad.listModels()).rejects.toMatchObject({ code: 'provider_rejected', status: 401, retryable: false });
+  });
+
+  it('listModels: any 2xx is a valid key — 204, or 200 without a model list, returns [] (#55)', async () => {
+    expect(await setup(() => new Response(null, { status: 204 })).p.listModels()).toEqual([]);
+    expect(await setup(() => jsonResponse({})).p.listModels()).toEqual([]);
+    expect(await setup(() => new Response('not json', { status: 200 })).p.listModels()).toEqual([]);
   });
 });
 

@@ -55,7 +55,10 @@ export async function* stream(id: RealProviderId, o: AdapterOpts, req: CompleteR
     const res = await send(id, o, http, req.signal);
     if (!res.body) throw streamError(id, 'empty body');
     for await (const ev of sse(res.body)) {
-      for (const out of [read(ev) ?? []].flat()) {
+      let r: ReturnType<Reader>;
+      // JSON.parse 실패 = 공급자 스트림 이상. 메시지에 본문 조각이 섞이므로 싣지 않는다.
+      try { r = read(ev); } catch (err) { throw err instanceof SyntaxError ? streamError(id, 'unparseable event data') : err; }
+      for (const out of [r ?? []].flat()) {
         if (typeof out !== 'string') { done = out; yield out; return; }
         if (out) yield { type: 'delta', text: out };
       }
@@ -70,7 +73,9 @@ export async function* stream(id: RealProviderId, o: AdapterOpts, req: CompleteR
   }
 }
 
-/** 키 확인용 모델 목록 GET(Q23). 2xx = 유효. */
+/** 키 확인용 모델 목록 GET(Q23). 2xx = 유효(#55) — 본문이 없거나 모양이 다르면 빈 목록. */
 export async function listModels(id: RealProviderId, o: AdapterOpts, http: Http, ids: (json: never) => string[]): Promise<string[]> {
-  try { return ids(await (await send(id, o, http)).json() as never); } catch (err) { throw asAdapterError(id, err); }
+  let res: Response;
+  try { res = await send(id, o, http); } catch (err) { throw asAdapterError(id, err); }
+  try { return ids(await res.json() as never); } catch { return []; }
 }
