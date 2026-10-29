@@ -193,6 +193,8 @@ describe('scripts/deploy.sh KEY_VAULT_SECRET preflight (Q25)', () => {
     ['missing', live(), /KEY_VAULT_SECRET is not set/], ['empty', live(''), /KEY_VAULT_SECRET is not set/],
     ['16 bytes', live(SHORT), /KEY_VAULT_SECRET in .* is not 32 bytes \(base64 or 64 hex chars\)/], ['63 hex chars', live(HEX.slice(1)), /KEY_VAULT_SECRET in .* is not 32 bytes \(base64 or 64 hex chars\)/],
     ['not base64', live('!'.repeat(44)), /KEY_VAULT_SECRET in .* is not 32 bytes \(base64 or 64 hex chars\)/],
+    // 서버는 끝만 trim 한다: 가운데 공백이 있으면 hex 가 아니라 base64 48바이트로 읽혀 뜨지 못한다.
+    ['32 hex + space + 32 hex', live(`${HEX.slice(0, 32)} ${HEX.slice(32)}`), /KEY_VAULT_SECRET in .* is not 32 bytes \(base64 or 64 hex chars\)/],
   ] as const) {
     it(`MOCK_LLM=0 with a ${what} secret stops before anything, with how to make one`, () => {
       for (const r of [deploy([], {}, SCRIPT, body), deploy(['--new'], MGMT, SCRIPT, body), deploy(['remath-20261028.sqlite'], MGMT, join(ROOT, 'scripts/restore.sh'), body)]) {
@@ -216,7 +218,7 @@ describe('scripts/deploy.sh KEY_VAULT_SECRET preflight (Q25)', () => {
     });
   }
 
-  for (const [what, body] of [['base64', live(B64)], ['hex', live(HEX)], ['base64 with CRLF', live(`${B64}\r`)], ['MOCK_LLM=1 without a secret', 'MOCK_LLM=1\n'], ['MOCK_LLM=1 with CRLF', 'MOCK_LLM=1\r\n'], ['MOCK_LLM=0 with CRLF', `MOCK_LLM=0\r\nKEY_VAULT_SECRET=${B64}\r\n`]] as const) {
+  for (const [what, body] of [['base64', live(B64)], ['hex', live(HEX)], ['base64 with CRLF', live(`${B64}\r`)], ['MOCK_LLM=1 without a secret', 'MOCK_LLM=1\n'], ['MOCK_LLM=1 with CRLF', 'MOCK_LLM=1\r\n'], ['MOCK_LLM=0 with CRLF', `MOCK_LLM=0\r\nKEY_VAULT_SECRET=${B64}\r\n`], ['base64 with spaces around', live(`  ${B64} \t`)], ['hex with spaces around', live(` ${HEX}  \r`)]] as const) {
     it(`passes with ${what}`, () => {
       const r = deploy([], {}, SCRIPT, body);
       expect(r.stderr).toBe('');

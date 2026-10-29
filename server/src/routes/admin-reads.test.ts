@@ -11,6 +11,8 @@ import { buildApp } from '../app.ts';
 import { sha256 } from '../auth.ts';
 import { loadConfig } from '../config.ts';
 import type { Db } from '../db.ts';
+import { providersFor } from '../providers/index.ts';
+import { fakeFetch, jsonResponse, leaksKey } from '../providers/testkit.ts';
 import type { ProvidersFor } from '../providers/types.ts';
 import { open } from '../vault.ts';
 
@@ -291,6 +293,16 @@ describe('AI settings, MOCK_LLM=0: listModels check and key vault (Q5, Q6, Q23, 
     expect(f.calls).toEqual([['anthropic', ANT, 'student']]);
     expect(s.calls.filter(c => c.startsWith('upsert') || c.startsWith('insert'))).toEqual([]);
     expect(s.t.ai_settings).toEqual(before);
+  });
+
+  it('a provider 401 body that echoes a long key: details.message carries no 8+ characters of it (masked before truncation)', async () => {
+    const key = 'sk-ant-api03-' + Array.from({ length: 194 }, (_, i) => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[i % 32]).join('');   // 207자
+    const body = { type: 'error', error: { type: 'authentication_error', message: `${'p'.repeat(110)}${key}${'q'.repeat(60)}` } };
+    const viaFetch: ProvidersFor = (provider, k, o) => providersFor(provider, k, { ...o, fetch: fakeFetch(() => jsonResponse(body, 401)).fetch } as typeof o);
+    const s = await setup({ config: real, providersFor: viaFetch });
+    const r = await s.req('PUT', '/api/admin/ai/student', { ...ANT_BODY, api_key: key }), j = r.json();
+    expect(j.error).toMatchObject({ code: 'provider_rejected', details: { status: 401, message: expect.stringMatching(/^401 p+/) } });
+    expect(leaksKey(r.body, key)).toBe(false);
   });
 
   it('a network error (no HTTP status) is provider_rejected too', async () => {

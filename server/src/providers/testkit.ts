@@ -29,3 +29,6 @@ export function memLog() {
   const log: ProviderLog = { info: (obj, msg) => lines.push({ level: 'info', obj, msg }), warn: (obj, msg) => lines.push({ level: 'warn', obj, msg }) };
   return { log, lines };
 }
+
+/** 키의 8자 이상 연속 조각이 text 에 있는가(#55 키 노출 검사). */
+export const leaksKey = (text: string, key: string) => Array.from({ length: key.length - 7 }, (_, i) => key.slice(i, i + 8)).some(k => text.includes(k));

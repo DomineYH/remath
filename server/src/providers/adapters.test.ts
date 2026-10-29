@@ -1,12 +1,12 @@
 // 어댑터 3종 픽스처 테스트(#56). 픽스처 = docs/research/llm-providers-2026-10.md 의 실제 응답 형태를 손으로 적은 SSE.
 import { AdapterError, collect, type CompleteRequest, type Provider, type Role, type StreamEvent } from '@remath/shared/engine';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { anthropicProvider } from './anthropic.ts';
 import { geminiProvider } from './gemini.ts';
 import { openaiProvider } from './openai.ts';
 import { providersFor } from './index.ts';
 import type { AdapterOpts } from './call.ts';
-import { fakeFetch, jsonResponse, memLog, sseResponse, sseText } from './testkit.ts';
+import { fakeFetch, jsonResponse, leaksKey, memLog, sseResponse, sseText } from './testkit.ts';
 
 const KEY = 'sk-test-SECRET-KEY-123';
 const REQ: CompleteRequest = { system: 'SYSTEM-PROMPT-TEXT', messages: [{ role: 'user', content: 'USER-UTTERANCE' }, { role: 'assistant', content: 'BOT-REPLY' }, { role: 'user', content: '두 번째 발화' }], model: 'm-1' };
@@ -286,6 +286,47 @@ describe.each(Object.entries(CASES))('%s adapter', (_, c) => {
     expect(await setup(() => new Response(null, { status: 204 })).p.listModels()).toEqual([]);
     expect(await setup(() => jsonResponse({})).p.listModels()).toEqual([]);
     expect(await setup(() => new Response('not json', { status: 200 })).p.listModels()).toEqual([]);
+  });
+
+  it('listModels never hangs: one 10 s signal — stalled 2xx body → [], stalled headers → retryable provider_unavailable', async () => {
+    const real = AbortSignal.timeout.bind(AbortSignal);
+    const spy = vi.spyOn(AbortSignal, 'timeout').mockImplementation(() => real(20));   // 운영값 10 s 를 20 ms 로 줄여 본다
+    try {
+      const stalled = new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('{"data":[')); } }), { status: 200 });
+      expect(await setup(() => stalled).p.listModels()).toEqual([]);
+      expect(spy).toHaveBeenCalledWith(10_000);
+      // 헤더가 오지 않는 fetch: 실제 fetch 처럼 signal 이 끊기면 그 reason 으로 거절한다.
+      const noHeaders = ((_: string, init: RequestInit) => new Promise((_, reject) => init.signal!.addEventListener('abort', () => reject(init.signal!.reason)))) as typeof fetch;
+      const p = c.make(KEY, { log: memLog().log, fetch: noHeaders });
+      await expect(p.listModels()).rejects.toMatchObject({ name: 'AdapterError', code: 'provider_unavailable', retryable: true, message: 'timeout' });
+    } finally { spy.mockRestore(); }
+  });
+});
+
+// #55: 공급자 오류 글이 키를 되풀이해도, 300자로 자르기 전에 가려 키 앞부분이 남지 않는다.
+const LONG_KEY = 'sk-ant-api03-' + Array.from({ length: 194 }, (_, i) => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[i % 32]).join('');   // 207자
+describe('provider text that echoes the key is masked before truncation (#55)', () => {
+  const echo = `${'p'.repeat(110)}${LONG_KEY}${'q'.repeat(60)}`;
+  const midError: Record<string, string> = {
+    openai: sseText(`event: error\ndata: ${JSON.stringify({ type: 'error', code: 'invalid_api_key', message: echo })}`),
+    anthropic: sseText(`event: error\ndata: ${JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: echo } })}`),
+    gemini: sseText(`data: ${JSON.stringify({ error: { code: 400, message: echo, status: 'INVALID_ARGUMENT' } })}`),
+  };
+  it.each(Object.entries(CASES))('%s: HTTP error body (listModels and complete) and a mid-stream error', async (id, c) => {
+    expect(leaksKey(echo.slice(0, 300), LONG_KEY)).toBe(true);   // 가리지 않고 자르면 새는 입력이다
+    const make = (respond: () => Response) => c.make(LONG_KEY, { log: memLog().log, fetch: fakeFetch(respond).fetch });
+    const http = () => jsonResponse(c.errorBody(echo), 401);
+    const errs = [
+      await make(http).listModels().catch((e: unknown) => e),
+      await collect(make(http).complete(REQ)).catch((e: unknown) => e),
+      await collect(make(() => sseResponse(midError[id]!)).complete(REQ)).catch((e: unknown) => e),
+    ] as AdapterError[];
+    for (const e of errs) {
+      expect(e).toBeInstanceOf(AdapterError);
+      expect(e.message).toContain('ppp');
+      expect(e.message.length).toBeLessThanOrEqual(300);
+      expect(leaksKey(e.message, LONG_KEY)).toBe(false);
+    }
   });
 });
 

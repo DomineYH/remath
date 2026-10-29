@@ -18,7 +18,7 @@ export function anthropicProvider(key: string, o: AdapterOpts): Provider {
       // message_start 의 model·입력 토큰과 message_delta 의 stop_reason·출력 토큰을 모아 message_stop 에서 낸다.
       let model = req.model, input = 0, output = 0, stop: Done['stopReason'] = 'other';
       return stream('anthropic', o, req, {
-        url: `${API}/messages`, headers,
+        url: `${API}/messages`, headers, key,
         body: { model: req.model, max_tokens: maxTokens, system: req.system, messages: req.messages, stream: true, ...req.effort && { output_config: { effort: req.effort } } },
       }, ev => {
         const d = JSON.parse(ev.data);
@@ -31,6 +31,6 @@ export function anthropicProvider(key: string, o: AdapterOpts): Provider {
         }
       });
     },
-    listModels: () => listModels('anthropic', o, { url: `${API}/models`, headers }, (j: { data: { id: string }[] }) => j.data.map(m => m.id)),
+    listModels: () => listModels('anthropic', o, { url: `${API}/models`, headers, key }, (j: { data: { id: string }[] }) => j.data.map(m => m.id)),
   };
 }
