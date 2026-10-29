@@ -1,7 +1,7 @@
 // 투영 (E-19, M-10): Data API 조인 결과 → 목 projection.ts 와 같은 응답 모양.
 import * as S from '@remath/shared';
 import { describe, expect, it } from 'vitest';
-import { toAdmin, toSummary, userRow, type ScenarioDbRow } from './projection.ts';
+import { SESSION_SELECT, toAdmin, toSummary, userRow, type ScenarioDbRow } from './projection.ts';
 
 const G1 = '11111111-1111-4111-8111-111111111111', G2 = '22222222-2222-4222-8222-222222222222';
 const SA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', SB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -52,5 +52,12 @@ describe('user projection', () => {
     });
     expect(u).toEqual({ id: SA, nickname: 'kim', groups: [{ id: G1, name: 'A' }, { id: G2, name: 'B' }], scenario_count: 2,
       session_count: 2, created_at: T, pw_updated_at: T });
+  });
+});
+
+describe('SESSION_SELECT (ADR-0003 규칙 4 예외)', () => {
+  it('embeds scenarios only for translation names, never internal or compiled_prompt', () => {
+    expect(SESSION_SELECT).not.toMatch(/internal|compiled_prompt/);
+    expect(SESSION_SELECT).toContain('scenario:scenarios!inner(scenario_translations(lang, name))');
   });
 });
