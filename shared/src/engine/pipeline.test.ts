@@ -62,15 +62,19 @@ const chunks = (parts: string[], seen: CompleteRequest[]): Provider => ({ ...moc
 } });
 
 describe('cumulative streaming and per-role bots (ADR-0004, Q2·Q20·Q21)', () => {
-  const seen = { student: [] as CompleteRequest[], analysis: [] as CompleteRequest[], mentor: [] as CompleteRequest[] };
   const cls = renderClassification({ leverage: 'Taking Over', object: 'Other' });
-  const fake: Bots = {
-    student: { provider: chunks(['a', 'b', 'c'], seen.student), model: 'student-model', effort: 'low' },
-    analysis: { provider: chunks([cls.slice(0, 10), cls.slice(10, 20), cls.slice(20)], seen.analysis), model: 'analysis-model', effort: null },
-    mentor: { provider: chunks(['x', 'y', 'z'], seen.mentor), model: 'mentor-model', effort: 'high' },
+  /** 테스트마다 새 가짜 봇으로 한 턴을 돌린다: 받은 요청(seen)이 다른 테스트에 기대지 않게. */
+  const turn = async () => {
+    const seen = { student: [] as CompleteRequest[], analysis: [] as CompleteRequest[], mentor: [] as CompleteRequest[] };
+    const fake: Bots = {
+      student: { provider: chunks(['a', 'b', 'c'], seen.student), model: 'student-model', effort: 'low' },
+      analysis: { provider: chunks([cls.slice(0, 10), cls.slice(10, 20), cls.slice(20)], seen.analysis), model: 'analysis-model', effort: null },
+      mentor: { provider: chunks(['x', 'y', 'z'], seen.mentor), model: 'mentor-model', effort: 'high' },
+    };
+    return { seen, evs: await events(runTurn({ bots: fake, compiled, criteria, tr: gabriel.translations.ko, lang: 'ko', state: fresh(), history: [], text: '통분하면 돼.' })) };
   };
   it('student and mentor stream the text so far (final:false per delta) then the whole text once (final:true); analysis is one classification', async () => {
-    const evs = await events(runTurn({ bots: fake, compiled, criteria, tr: gabriel.translations.ko, lang: 'ko', state: fresh(), history: [], text: '통분하면 돼.' }));
+    const { evs } = await turn();
     expect(evs.filter(e => e.type !== 'done')).toEqual([
       { type: 'classification', cls: { leverage: 'Taking Over', object: 'Other' } },
       { type: 'student', text: 'a', final: false }, { type: 'student', text: 'ab', final: false }, { type: 'student', text: 'abc', final: false }, { type: 'student', text: 'abc', final: true },
@@ -78,7 +82,8 @@ describe('cumulative streaming and per-role bots (ADR-0004, Q2·Q20·Q21)', () =
       { type: 'mentor', text: 'x', final: false }, { type: 'mentor', text: 'xy', final: false }, { type: 'mentor', text: 'xyz', final: false }, { type: 'mentor', text: 'xyz', final: true },
     ]);
   });
-  it("each call carries its own role's model and effort; a null effort leaves the key out", () => {
+  it("each call carries its own role's model and effort; a null effort leaves the key out", async () => {
+    const { seen } = await turn();
     expect(seen.student.map(r => [r.model, r.effort])).toEqual([['student-model', 'low']]);
     expect(seen.mentor.map(r => [r.model, r.effort])).toEqual([['mentor-model', 'high']]);
     expect(seen.analysis.map(r => r.model)).toEqual(['analysis-model']);
