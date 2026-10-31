@@ -41,7 +41,7 @@ Vercel 런타임 로그는 Hobby에서 **1시간**만 남는다(README "운영 �
   W=$(mktemp -d)                          # 700
   B=https://remath.vercel.app
   rv() { grep "^$1=" "$REMATH_ENV_FILE" | cut -d= -f2-; }                  # 런타임 env 파일의 값 (source 하지 않는다)
-  dv() { grep "^$1=" ~/.config/remath/deploy.env | cut -d= -f2-; }         # 1단계에서 적는 새 프로젝트의 SUPABASE_*
+  dv() { grep "^$1=" ~/.config/remath/deploy.env | cut -d= -f2-; }         # 1단계가 쓰는 새 프로젝트의 SUPABASE_*
   q() { psql "$(dv SUPABASE_DB_URL)" -XAt -c "$1"; }                      # 실서버 DB 에 SQL
   logs() { vercel logs -e production --since 1h -n 1000 "$@"; }           # 최근 1시간 production 런타임 로그
   code() { curl -s -o /dev/null -w '%{http_code}\n' "$@"; }
@@ -59,7 +59,7 @@ scripts/deploy.sh --new --with-samples; echo "exit $?"
 
 기대값:
 - 사전 점검 통과(출력 없음). 실패하면 그 이유(`vercel whoami failed`, `.vercel/project.json is missing`, `git tree is not clean`, `CRON_SECRET is not set`, `KEY_VAULT_SECRET … not set`/`not 32 bytes` 등) 한 줄, 프로젝트를 만들지 않는다.
-- `== 1/6 new Supabase project` … 새 ref 출력.
+- `== 1/6 new Supabase project` … 새 ref 출력, 이어서 `deploy.sh: new project's SUPABASE_* saved to …/.config/remath/deploy.env (600)`(값은 출력되지 않는다).
 - `== 2/6 migrations`(0001–0006), `== 3/6 seed`, `== 4/6 smoke`: 스모크 줄이 모두 `ok`(관리자 1, `ai_settings` 3, 샘플 5, 번역 10, anon 거부 `42501`).
 - `== 5/6 switch to https://<ref>.supabase.co` → `deploy.sh: Production env set (SUPABASE_URL SUPABASE_SERVICE_KEY SUPABASE_ANON_KEY MOCK_LLM KEY_VAULT_SECRET CRON_SECRET)` → `deploying commit <sha>` → Vercel 빌드 진행 표시 → `deployed https://remath-<id>-domines-projects.vercel.app` → `switched (…/healthz 200, new DB answers)`.
 - `== 6/6 backup` → `deploy.sh: backup ok remath-<YYYYMMDD>.sqlite (Blob)` → `deploy.sh: ok (commit <sha>, <url>)`, **`exit 0`**.
@@ -77,9 +77,11 @@ logs -q 'llm' | grep -c 'llm: mock'                  # 0
 vercel env ls production                             # SUPABASE_URL·SERVICE_KEY·ANON_KEY·MOCK_LLM·KEY_VAULT_SECRET·CRON_SECRET 이 Sensitive
 ```
 
-새 프로젝트의 `SUPABASE_*` 4개는 스크립트가 지웠다. Supabase 대시보드(그 ref → Project Settings → API의 URL·`anon`·`service_role`, Connect → Session pooler 문자열 + DB 비밀번호)에서 `~/.config/remath/deploy.env`(600)에 `SUPABASE_URL=`·`SUPABASE_SERVICE_KEY=`·`SUPABASE_DB_URL=`·`SUPABASE_ANON_KEY=` 네 줄로 적는다(재배포·비밀번호 초기화에 쓴다).
+새 프로젝트의 `SUPABASE_*` 4개는 1단계가 `~/.config/remath/deploy.env`(600)에 남겼다(재배포·비밀번호 초기화에 쓴다).
 
 ```sh
+ls -l ~/.config/remath/deploy.env | cut -c1-10                                  # -rw-------
+cut -d= -f1 ~/.config/remath/deploy.env | tr '\n' ' '; echo                     # SUPABASE_URL SUPABASE_SERVICE_KEY SUPABASE_DB_URL SUPABASE_ANON_KEY
 dv SUPABASE_URL                                     # https://<ref>.supabase.co — 1단계 출력의 ref
 q "select count(*) from ai_settings where key_ciphertext is not null"   # 0 (아직 키 없음)
 ```
@@ -191,7 +193,7 @@ logs -q 'backup' | grep -c 'backup ok'                                          
 
 ## 되돌리기
 
-1단계 5/6 이후 실패(배포·`/healthz`·DB 응답)면 출력의 안내대로 `vercel rollback`(직전 production 배포 = 자리표시 페이지)으로 되돌리고 `vercel rollback status`로 확인한다. 되돌린 배포는 자기 env를 쓴다. Production env는 새 값으로 남는다. 원인을 고친 뒤 셸에 새 프로젝트의 `SUPABASE_*`(`deploy.env`)를 넣고 `--new` 없이 `scripts/deploy.sh`를 다시 실행한다. 롤백 뒤에는 production 도메인 자동 할당이 꺼지므로, 그 실행이 출력한 URL을 확인한 뒤 `vercel promote <url>`로 올린다. 4단계 전 실패면 Vercel은 그대로이고, 출력된 새 Supabase 프로젝트는 대시보드에서 지운다.
+1단계 5/6 이후 실패(배포·`/healthz`·DB 응답)면 출력의 안내대로 `vercel rollback`(직전 production 배포 = 자리표시 페이지)으로 되돌리고 `vercel rollback status`로 확인한다. 되돌린 배포는 자기 env를 쓴다. Production env는 새 값으로 남는다. 원인을 고친 뒤 `set -a; . ~/.config/remath/deploy.env; set +a`로 새 프로젝트를 셸에 넣고 `--new` 없이 `scripts/deploy.sh`를 다시 실행한다. 롤백 뒤에는 production 도메인 자동 할당이 꺼지므로, 그 실행이 출력한 URL을 확인한 뒤 `vercel promote <url>`로 올린다. 4단계 전 실패면 Vercel은 그대로이고, 출력된 새 Supabase 프로젝트는 대시보드에서 지운다.
 
 ## 정리
 

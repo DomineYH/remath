@@ -89,7 +89,7 @@ ENV_FILE=$HOME/.config/remath/dev.env SERVER_URL=http://127.0.0.1:3946 npm run t
    read -rs ADMIN_INITIAL_PASSWORD && export ADMIN_INITIAL_PASSWORD   # 에코 없이 입력
    ```
 
-   `--new`가 만든 프로젝트의 `SUPABASE_*` 4개는 임시 파일로만 쓰이고 지워진다(Vercel에는 Sensitive라 다시 읽을 수 없다). 재배포·`admin:reset-password`에 필요하므로 Supabase 대시보드(Project Settings → API의 URL·`anon`·`service_role` 키, Connect → Session pooler 문자열 + DB 비밀번호)에서 `deploy.env`(600, 저장소 밖)에 적어 둔다.
+   `--new`·`restore.sh`는 1단계 직후 새 프로젝트의 `SUPABASE_*` 4개를 `DEPLOY_ENV_FILE`(기본 = 런타임 env 파일 옆 `deploy.env`, 예: `~/.config/remath/deploy.env`)에 쓴다: umask 077 임시 파일 → `mv`라 600이고, 이미 있던 파일은 `<파일>.prev`(600)로 남는다. 출력에는 경로만 나온다. Vercel에는 Sensitive라 다시 읽을 수 없으므로, 재배포·`admin:reset-password`는 이 파일을 읽는다: `set -a; . ~/.config/remath/deploy.env; set +a`.
 3. **Vercel 프로젝트 env**: Production은 `deploy.sh` 5단계가 쓴다(아래 표). Preview는 dev DB + `MOCK_LLM=1`(V10)이고 손으로 관리한다. env 값은 배포를 만들 때 고정된다: env를 바꿔도 이미 떠 있는 배포는 그대로이고, 다음 배포부터 반영된다.
 
 변수 이름 목록은 `.env.example`.
@@ -117,6 +117,7 @@ ENV_FILE=$HOME/.config/remath/dev.env SERVER_URL=http://127.0.0.1:3946 npm run t
 | `BACKUP_DIR` | PRD 7절 경로 | `backup` | 로컬만 | `backup` | 로컬 CLI(`npm run backup`)의 출력 디렉터리(`server/` 기준). Vercel에서는 쓰지 않는다 |
 | `SUPABASE_ACCESS_TOKEN`, `SUPABASE_ORG_ID`, `SUPABASE_REGION`, `SUPABASE_DB_PASSWORD` | PRD 7절 1단계 "Management API" (O-4) | 없음(`--new`·`restore.sh`에 필수) | 운영자 셸만 | `deploy.sh --new`, `restore.sh` | `SUPABASE_ORG_ID` = 조직 slug. 토큰은 `db:new-project`에만 넘어간다 |
 | `REMATH_ENV_FILE` | V10 | 없음(필수) | 운영자 셸만 | `deploy.sh`, `restore.sh` | production 런타임 env 파일 경로(위 1) |
+| `DEPLOY_ENV_FILE` | #78 | `REMATH_ENV_FILE` 옆 `deploy.env` | 운영자 셸만 | `deploy.sh --new`, `restore.sh` | 새 프로젝트의 `SUPABASE_*` 4개를 남기는 파일(600, 이전 판 `.prev`). 재배포에서 `set -a; . <파일>; set +a`로 읽는다 |
 | `NEW_PROJECT_TIMEOUT_S` | O-4 | `600` | 운영자 셸만 | `db:new-project` | 새 프로젝트 `ACTIVE_HEALTHY` 대기 한도 |
 | `DEPLOY_NEW_FAULT` | G3 | 없음 | 운영자 셸만 | `db:new-project` | G3 8단계 전용: `anon_as_service`면 anon 키 자리에 service key를 적어 스모크가 FAIL 해야 한다 |
 
@@ -124,7 +125,7 @@ ENV_FILE=$HOME/.config/remath/dev.env SERVER_URL=http://127.0.0.1:3946 npm run t
 
 **`scripts/deploy.sh --new [--with-samples]`** — 새 서버(H-29, 사용자 스토리 19·21·22·25, V10).
 0. 사전 점검(아무것도 만들기 전): 도구(`node npm psql curl git vercel`), `vercel whoami`, `.vercel/project.json`, 깨끗한 git 트리, 셸 변수, 런타임 env 파일(`MOCK_LLM` 0/1, `MOCK_LLM=0`이면 `KEY_VAULT_SECRET` 32바이트, `CRON_SECRET` 있음, `COOKIE_SECURE=false` 아님, 빈 값 줄 없음).
-1. Management API로 새 Supabase 프로젝트 생성 → `ACTIVE_HEALTHY` 대기 → 키·pooler 연결 문자열을 임시 env 파일(600, 종료 시 삭제)로 받는다.
+1. Management API로 새 Supabase 프로젝트 생성 → `ACTIVE_HEALTHY` 대기 → 키·pooler 연결 문자열을 임시 env 파일(600, 종료 시 삭제)로 받고, 같은 4개를 `DEPLOY_ENV_FILE`(600)에 남긴다(`deploy.sh: new project's SUPABASE_* saved to <파일> (600)`).
 2. 미적용 마이그레이션 적용(새 프로젝트면 0001–0006 전부).
 3. 시드: 관리자 `admin` 1(해시만), `ai_settings` 3, `--with-samples`면 샘플 시나리오 5(게시·컴파일본, 번역 10). 데모 계정·그룹·기록은 어떤 옵션에도 없다.
 4. 스모크: service key로 관리자 1·`ai_settings` 3(샘플 5·번역 10), anon 키로 `scenarios?select=internal` 거부(42501).
@@ -135,15 +136,16 @@ ENV_FILE=$HOME/.config/remath/dev.env SERVER_URL=http://127.0.0.1:3946 npm run t
 
 - 사전 점검 실패: 아무것도 만들지 않고 Vercel도 건드리지 않는다.
 - 프로젝트 생성 뒤 4단계까지 실패: 종료코드 ≠ 0, Vercel은 그대로(이전 배포가 계속 서비스), 새 프로젝트는 남겨 두고 ref를 출력한다 — 사람이 대시보드에서 지운다.
-- 5단계 `vercel env add` 실패: 떠 있는 production은 그대로다(env는 배포마다 고정). Production env가 일부만 새 값일 수 있다: 원인을 고치고 출력된 ref 프로젝트의 `SUPABASE_*`를 셸에 넣어 `--new` 없이 다시 실행한다.
+- 5단계 `vercel env add` 실패: 떠 있는 production은 그대로다(env는 배포마다 고정). Production env가 일부만 새 값일 수 있다: 원인을 고치고 출력대로 `set -a; . <DEPLOY_ENV_FILE>; set +a` 뒤 `--new` 없이 다시 실행한다.
 - 배포·`/healthz`·DB 응답 실패: 새 배포가 production이 됐을 수 있다. 되돌리기 = `vercel rollback`(직전 production 배포가 자기 env로 다시 서비스한다, 아래 "되돌리기"). Production env는 새 값으로 남으므로 다음 배포 전에 고친다.
 - 6단계 백업만 실패: 전환은 끝났고 서버는 돈다. Vercel 런타임 로그의 `backup failed: …`를 보고, 출력된 `curl -H @<헤더 파일> <url>/api/cron/backup`으로 다시 하거나 다음 크론을 기다린다.
 - 이전 Supabase 프로젝트는 어떤 경로도 읽거나 옮기거나 지우지 않는다.
 
-**`scripts/deploy.sh [--with-samples]`** — 같은 DB로 새 코드 배포(사용자 스토리 20). 새 프로젝트를 만들지 않고 셸의 `SUPABASE_*` 4개(= 지금 production의 프로젝트, `deploy.env`)로 2~6단계를 탄다: 미적용 마이그레이션만, 시드는 멱등이라 건너뛴 것과 같고, 스모크, 같은 값으로 Production env 다시 쓰기, 새 production 배포, 백업(같은 날짜 파일 덮어씀). 셸에 넣기(`source` 하지 않는다):
+**`scripts/deploy.sh [--with-samples]`** — 같은 DB로 새 코드 배포(사용자 스토리 20). 새 프로젝트를 만들지 않고 셸의 `SUPABASE_*` 4개(= 지금 production의 프로젝트, `--new`가 쓴 `deploy.env`)로 2~6단계를 탄다: 미적용 마이그레이션만, 시드는 멱등이라 건너뛴 것과 같고, 스모크, 같은 값으로 Production env 다시 쓰기, 새 production 배포, 백업(같은 날짜 파일 덮어씀). `deploy.env`는 고치지 않는다:
 
 ```sh
-while IFS= read -r l; do case $l in SUPABASE_*=*|ADMIN_INITIAL_PASSWORD=*) export "$l";; esac; done < ~/.config/remath/deploy.env
+set -a; . ~/.config/remath/deploy.env; set +a
+read -rs ADMIN_INITIAL_PASSWORD && export ADMIN_INITIAL_PASSWORD   # 관리자가 이미 있으면 쓰이지 않지만 요구한다
 scripts/deploy.sh
 ```
 - 마이그레이션은 파일마다 한 트랜잭션: 실패한 파일은 흔적이 없고 앞서 성공한 파일은 남는다. 거기서 멈추고 Vercel은 그대로다. 마이그레이션이 이전 코드와 호환되지 않으면 배포 전까지 떠 있는 서버가 영향을 받는다. 그 밖의 실패 상태는 `--new`와 같다.
@@ -167,9 +169,9 @@ scripts/deploy.sh
 - `auth_sessions`는 복구하지 않는다: 모든 로그인이 끝나고, 예비교사·관리자는 백업 시점의 같은 비밀번호로 다시 로그인한다. `ai_settings`는 키 없이 돌아오므로(공급자·모델·노력·마스킹만) 관리자 AI 설정에서 키를 다시 등록한다. `KEY_VAULT_SECRET`은 백업에 없으니 런타임 env 파일의 값을 그대로 둔다.
 - 실패 시 상태는 `--new`와 같다. 이전 프로젝트는 지우지 않는다.
 
-**`KEY_VAULT_SECRET` 교체** — 재암호화는 없다(Q6). 런타임 env 파일의 값을 바꾸고 셸에 지금 프로젝트의 `SUPABASE_*`를 넣어 `scripts/deploy.sh`(재배포) → 관리자 AI 설정에서 세 역할의 키를 모두 다시 등록한다. 다시 등록하기 전에는 이전 비밀로 만든 키를 복호하지 못해 턴이 실패한다.
+**`KEY_VAULT_SECRET` 교체** — 재암호화는 없다(Q6). 런타임 env 파일의 값을 바꾸고 `set -a; . ~/.config/remath/deploy.env; set +a` 뒤 `scripts/deploy.sh`(재배포) → 관리자 AI 설정에서 세 역할의 키를 모두 다시 등록한다. 다시 등록하기 전에는 이전 비밀로 만든 키를 복호하지 못해 턴이 실패한다.
 
-**`npm run admin:reset-password`** — 관리자 비밀번호 초기화(H-32, 사용자 스토리 26). 운영자 머신의 터미널에서, 셸에 production의 `SUPABASE_URL`·`SUPABASE_SERVICE_KEY`(`deploy.env`)를 넣고 실행한다. 프롬프트에서 에코 없이 두 번 받는다(인수·환경변수·파이프 거부).
+**`npm run admin:reset-password`** — 관리자 비밀번호 초기화(H-32, 사용자 스토리 26). 운영자 머신의 터미널에서, `set -a; . ~/.config/remath/deploy.env; set +a`로 production의 `SUPABASE_URL`·`SUPABASE_SERVICE_KEY`를 셸에 넣고 실행한다. 프롬프트에서 에코 없이 두 번 받는다(인수·환경변수·파이프 거부).
 - 성공: 일치·비밀번호 규칙 검사 → 해시 갱신과 관리자 로그인 전부 종료를 한 트랜잭션으로 → `audit_log` `admin.password_reset`(actor null, `meta.host` = 운영자 머신 호스트명) → `admin password reset; every admin login has ended`. 예비교사 로그인은 그대로다.
 - 실패(불일치·규칙 미달·중단·TTY 아님·인수 있음·관리자 없음): 종료코드 1, 아무것도 바뀌지 않는다.
 

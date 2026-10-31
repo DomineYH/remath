@@ -8,11 +8,13 @@
 # env 값은 배포를 만들 때 고정된다: 실행 중인 production 은 새 배포가 올라갈 때까지 이전 DB 를 쓴다. 되돌리기 = vercel rollback.
 # 두 번째 실행은 DB 를 바꾸지 않는다(같은 env 로 새 production 배포가 하나 더 생긴다).
 #
-#   set -a; . ./deploy.env; set +a      # SUPABASE_URL SUPABASE_SERVICE_KEY SUPABASE_DB_URL SUPABASE_ANON_KEY ADMIN_INITIAL_PASSWORD
+#   set -a; . ~/.config/remath/deploy.env; set +a      # SUPABASE_URL SUPABASE_SERVICE_KEY SUPABASE_DB_URL SUPABASE_ANON_KEY (--new 가 썼다)
+#   read -rs ADMIN_INITIAL_PASSWORD && export ADMIN_INITIAL_PASSWORD
 #   REMATH_ENV_FILE=~/.config/remath/prod.env scripts/deploy.sh [--with-samples]
 #
 # 새 프로젝트(--new): 셸에 SUPABASE_ACCESS_TOKEN SUPABASE_ORG_ID(조직 slug) SUPABASE_REGION SUPABASE_DB_PASSWORD ADMIN_INITIAL_PASSWORD.
 #   SUPABASE_* 4개는 새 프로젝트에서 받아 임시 env 파일(mktemp, 600, 종료 시 삭제)로 2~5단계에 넘긴다(SUPABASE_DB_URL 은 Vercel 에 넣지 않는다).
+#   1단계 직후 그 4개를 DEPLOY_ENV_FILE(기본 = REMATH_ENV_FILE 옆 deploy.env, 600, 이전 판 .prev)에 남긴다: 재배포는 set -a; . <그 파일>; set +a.
 #   REMATH_ENV_FILE=~/.config/remath/prod.env scripts/deploy.sh --new [--with-samples]
 #   사전 점검이 모두 통과해야 프로젝트를 만든다(과금). 토큰은 db:new-project 에만 넘어가고 vercel·다른 단계·파일에는 없다.
 #   Vercel env 를 건드리기 전에 실패하면 새 프로젝트는 남겨 두고 ref 를 알린다(사람이 삭제). 어떤 경로도 프로젝트를 지우거나 바꾸지 않는다.
@@ -56,6 +58,10 @@ for v in "${need[@]}" REMATH_ENV_FILE; do
 done
 [ -f "$REMATH_ENV_FILE" ] || fail "REMATH_ENV_FILE $REMATH_ENV_FILE is not a file"
 REMATH_ENV_FILE="$(realpath "$REMATH_ENV_FILE")"
+# --new·--restore 가 만든 프로젝트의 SUPABASE_* 4개를 남기는 파일(재배포·admin:reset-password 가 쓴다). 기본 = 런타임 env 파일 옆 deploy.env.
+DEPLOY_ENV_FILE="${DEPLOY_ENV_FILE:-$(dirname "$REMATH_ENV_FILE")/deploy.env}"
+case $DEPLOY_ENV_FILE in /*) ;; *) DEPLOY_ENV_FILE="$PWD/$DEPLOY_ENV_FILE" ;; esac   # 스크립트는 곧 저장소 루트로 cd 한다
+[ -z "$new" ] || [ -d "$(dirname "$DEPLOY_ENV_FILE")" ] || fail "DEPLOY_ENV_FILE $DEPLOY_ENV_FILE: its directory does not exist"
 # 런타임 env 파일의 값: 그 키의 마지막 줄, 첫 = 뒤 글자 그대로, 줄 끝 CR 하나만 뗀다. 없으면 빈 문자열. 값은 출력하지 않는다.
 env_get() { local l v=; while IFS= read -r l || [ -n "$l" ]; do case $l in "$1="*) v="${l#*=}" ;; esac; done < "$REMATH_ENV_FILE"; printf %s "${v%$'\r'}"; }
 env_has() { grep -q "^$1=" "$REMATH_ENV_FILE"; }
@@ -96,6 +102,21 @@ link="$(cat .vercel/project.json)"
 [ -z "$restore" ] || npm run --silent db:restore -w server -- --check "$restore" || fail "$restore is not a usable backup file"
 
 tmp_env= copy= hdr= ref= switched=
+# 새 프로젝트의 SUPABASE_* 4개를 DEPLOY_ENV_FILE 에 원자적으로(umask 077 임시 파일 → mv) 쓴다. 이전 파일은 <파일>.prev(600).
+# 값은 printf(셸 내장)로 파일에만: 인자·출력에 없다. set -a; . <파일>; set +a 로 읽힌다(셸에 안전한 글자가 아니면 %q 로 따옴).
+save_deploy_env() {
+  local k v t
+  t="$(umask 077; mktemp "$DEPLOY_ENV_FILE.tmp.XXXXXX")" || fail "cannot write $DEPLOY_ENV_FILE"
+  for k in SUPABASE_URL SUPABASE_SERVICE_KEY SUPABASE_DB_URL SUPABASE_ANON_KEY; do
+    v="${!k}"
+    if [[ $v =~ ^[A-Za-z0-9._~:/?=%@+,-]*$ ]]; then printf '%s=%s\n' "$k" "$v"; else printf '%s=%q\n' "$k" "$v"; fi
+  done > "$t"
+  if [ -f "$DEPLOY_ENV_FILE" ]; then
+    (umask 077; cp "$DEPLOY_ENV_FILE" "$DEPLOY_ENV_FILE.prev") && chmod 600 "$DEPLOY_ENV_FILE.prev" || { rm -f "$t"; fail "cannot keep $DEPLOY_ENV_FILE.prev"; }
+  fi
+  mv -f "$t" "$DEPLOY_ENV_FILE" || { rm -f "$t"; fail "cannot write $DEPLOY_ENV_FILE"; }
+  echo "deploy.sh: new project's SUPABASE_* saved to $DEPLOY_ENV_FILE (600)"
+}
 # 끝날 때 임시 파일·사본을 지운다. Vercel 을 건드리기 전 실패 = 새 프로젝트는 쓰이지 않는다: ref 를 알리고 남겨 둔다.
 cleanup() {
   local st=$?
@@ -112,6 +133,7 @@ if [ -n "$new" ]; then
   # source 하지 않는다: 값(DB 비밀번호 등)을 셸 문법으로 해석하지 않게 줄마다 첫 = 에서 나눈다.
   while IFS= read -r line; do export "${line%%=*}=${line#*=}"; done < "$tmp_env"
   ref="${SUPABASE_URL#https://}"; ref="${ref%%.*}"
+  save_deploy_env
 fi
 
 echo "== 2/6 migrations"
@@ -131,10 +153,12 @@ fi
 echo "== 5/6 switch to $SUPABASE_URL"
 switched=1   # 여기부터 Vercel Production env 가 새 프로젝트를 가리킬 수 있다: 프로젝트를 지우라고 하지 않는다
 where="${ref:+ (new Supabase project $ref)}"
+again="fix and run scripts/deploy.sh again"
+[ -z "$ref" ] || again="fix, load the new project with set -a; . $DEPLOY_ENV_FILE; set +a and run scripts/deploy.sh again without --new"
 # 값은 printf(셸 내장)로 stdin 에만: 인자·로그·파일에 남지 않는다. --force = 같은 환경의 기존 값 덮어쓰기.
 set_env() {
   printf %s "$2" | vercel env add "$1" --environment production --sensitive --force --yes >/dev/null \
-    || fail "vercel env add $1 failed; the running production deployment is unchanged (env is fixed per deployment), but the Production env may be partly updated$where: fix and run again without --new, with these SUPABASE_* in the shell"
+    || fail "vercel env add $1 failed; the running production deployment is unchanged (env is fixed per deployment), but the Production env may be partly updated$where: $again"
 }
 set_env SUPABASE_URL "$SUPABASE_URL"
 set_env SUPABASE_SERVICE_KEY "$SUPABASE_SERVICE_KEY"
@@ -153,8 +177,17 @@ echo "deploy.sh: deploying commit $sha from a git archive copy"
 out="$(cd "$copy" && VERCEL_ORG_ID="$org" VERCEL_PROJECT_ID="$project" vercel deploy --prod --yes)" \
   || fail "vercel deploy --prod failed; production keeps the previous deployment unless the output above shows a new one ready, then $rollback"
 rm -rf "$copy"; copy=
-url="$(printf '%s\n' "$out" | grep -E '^https://[^ ]+$' | tail -n 1)" || true
-[ -n "$url" ] || fail "vercel deploy --prod printed no deployment URL; check vercel ls --prod, and if a new one is serving, $rollback"
+# stdout 이 TTY 가 아니면 CLI 는 JSON({status, deployment:{url, readyState, …}})을 낸다. JSON 이 아니면 마지막 *.vercel.app URL 줄.
+st=0
+url="$(printf '%s' "$out" | node -e '
+  let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+    let j; try { j = JSON.parse(s); } catch { process.exit(3); }
+    const d = j && j.deployment;
+    if (j.status !== "ok" || !d || d.readyState !== "READY" || typeof d.url !== "string" || !d.url) process.exit(4);
+    console.log(d.url.startsWith("https://") ? d.url : `https://${d.url}`);
+  });')" || st=$?
+[ $st -ne 3 ] || { st=0; url="$(printf '%s\n' "$out" | grep -E '^https://[^ ]+\.vercel\.app$' | tail -n 1)" || true; }
+[ $st -eq 0 ] && [ -n "$url" ] || fail "vercel deploy --prod printed no ready deployment URL; check vercel ls --prod, and if a new one is serving, $rollback"
 echo "deploy.sh: deployed $url"
 
 code() { curl -s -o /dev/null -w '%{http_code}' "$@" || true; }   # 연결 실패 = 000
