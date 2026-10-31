@@ -147,10 +147,10 @@ describe('restore into a migrated database (PGlite, 0001~)', () => {
 describe('psql transport', () => {
   it('sends one script on stdin: terse errors (no row values), stop on error, single transaction, \\copy per table in order', () => {
     const calls: { args: string[]; input: string }[] = [];
-    const counts = restore('postgresql://u:p@h:5432/postgres', sqliteFile(DATA), (args, input) => { calls.push({ args, input }); });
+    const counts = restore(sqliteFile(DATA), (args, input) => { calls.push({ args, input }); });
     expect(counts.turns).toBe(2);
     expect(calls).toHaveLength(1);
-    expect(calls[0].args).toEqual(['postgresql://u:p@h:5432/postgres', '-X', '-q', '--single-transaction', '-v', 'ON_ERROR_STOP=1', '-v', 'VERBOSITY=terse', '-f', '-']);
+    expect(calls[0].args).toEqual(['-X', '-q', '--single-transaction', '-v', 'ON_ERROR_STOP=1', '-v', 'VERBOSITY=terse', '-f', '-']);
     const s = calls[0].input;
     expect(s).toBe(psqlScript(restoreSteps(sqliteFile(DATA))));
     expect(s.startsWith('\\encoding UTF8\n')).toBe(true);

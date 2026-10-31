@@ -34,20 +34,20 @@ describe('pending migrations (D-15)', () => {
 
   it('applies each pending file with --single-transaction and ON_ERROR_STOP', () => {
     const { psql, calls } = fakePsql(null);
-    expect(migrate('postgres://db', psql, files, '/m/')).toEqual({ applied: [], ran: ['0001_init.sql', '0002_auth_atomic.sql', '0010_later.sql'] });
+    expect(migrate(psql, files, '/m/')).toEqual({ applied: [], ran: ['0001_init.sql', '0002_auth_atomic.sql', '0010_later.sql'] });
     expect(calls.filter(c => c.includes('-f'))).toEqual(['0001_init.sql', '0002_auth_atomic.sql', '0010_later.sql']
-      .map(f => ['postgres://db', '--single-transaction', '-v', 'ON_ERROR_STOP=1', '-f', `/m/${f}`]));
+      .map(f => ['--single-transaction', '-v', 'ON_ERROR_STOP=1', '-f', `/m/${f}`]));
   });
 
   it('a second run applies nothing', () => {
     const { psql, calls } = fakePsql(['0001', '0002', '0010']);
-    expect(migrate('postgres://db', psql, files, '/m/').ran).toEqual([]);
+    expect(migrate(psql, files, '/m/').ran).toEqual([]);
     expect(calls.some(c => c.includes('-f'))).toBe(false);
   });
 
   it('stops at the first failing file', () => {
     const { psql, calls } = fakePsql(['0001'], '0002_auth_atomic.sql');
-    expect(() => migrate('postgres://db', psql, files, '/m/')).toThrow(/0002_auth_atomic/);
+    expect(() => migrate(psql, files, '/m/')).toThrow(/0002_auth_atomic/);
     expect(calls.filter(c => c.includes('-f')).map(c => c.at(-1))).toEqual(['/m/0002_auth_atomic.sql']);
   });
 });

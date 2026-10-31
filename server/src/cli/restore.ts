@@ -4,12 +4,12 @@
 // 실행(scripts/restore.sh → deploy.sh --restore):
 //   npm run db:restore -w server -- --check <file>   파일이 백업 모양인지 보고 테이블별 행 수를 찍는다(프로젝트를 만들기 전).
 //   npm run db:restore -w server -- --load <file>    SUPABASE_DB_URL 에 넣는다.
-import { spawnSync } from 'node:child_process';
 import Database from 'better-sqlite3';
 import { z } from 'zod';
 import { TABLES } from '../backup.ts';
 import { main, readEnv } from './main.ts';
 import { DbUrl } from './migrate.ts';
+import { spawnPsql } from './pg.ts';
 
 export const ORDER = Object.keys(TABLES);   // backup.ts 의 테이블 순서 = H-31 복구 순서
 
@@ -68,22 +68,21 @@ end $$;`;
 export const psqlScript = (steps: Step[]) => '\\encoding UTF8\n' + steps.map(s => 'sql' in s ? `${s.sql}\n`
   : `\\copy "${s.table}" (${s.cols.map(c => `"${c}"`).join(', ')}) from stdin\n${s.data}\\.\n`).join('');
 
-/** psql(args, stdin). 0 이 아닌 종료는 throw. */
+/** psql(args, stdin). 연결 정보는 args 가 아니라 runPsqlIn 이 env 로 준다. 0 이 아닌 종료는 throw. */
 export type PsqlIn = (args: string[], input: string) => void;
 
 /**
  * 스크립트는 stdin 으로만 넘긴다(비밀번호 해시가 디스크에 남지 않게). VERBOSITY=terse: 제약 위반의 DETAIL("Failing row contains …")에
  * 해시가 찍히지 않게 한 줄 메시지만. ponytail: 백업 전체를 메모리 문자열로 만든다; 파일이 수백 MB 가 되면 테이블별 스트리밍으로.
  */
-export function restore(dbUrl: string, file: string, psql: PsqlIn) {
+export function restore(file: string, psql: PsqlIn) {
   const counts = backupCounts(file);
-  psql([dbUrl, '-X', '-q', '--single-transaction', '-v', 'ON_ERROR_STOP=1', '-v', 'VERBOSITY=terse', '-f', '-'], psqlScript(restoreSteps(file)));
+  psql(['-X', '-q', '--single-transaction', '-v', 'ON_ERROR_STOP=1', '-v', 'VERBOSITY=terse', '-f', '-'], psqlScript(restoreSteps(file)));
   return counts;
 }
 
-const runPsql: PsqlIn = (args, input) => {
-  const r = spawnSync('psql', args, { input, encoding: 'utf8', stdio: ['pipe', 'inherit', 'inherit'], maxBuffer: 1 << 30 });
-  if (r.error) throw new Error(`psql not runnable: ${r.error.message}`);
+export const runPsqlIn = (dbUrl: string): PsqlIn => (args, input) => {
+  const r = spawnPsql(dbUrl, args, { stdout: 'inherit', input });
   if (r.status !== 0) throw new Error(`psql exited ${r.status}; nothing was loaded (one transaction)`);
 };
 
@@ -91,6 +90,6 @@ if (import.meta.main) main('db:restore', async () => {
   const [mode, file] = process.argv.slice(2);
   if (!file || (mode !== '--check' && mode !== '--load')) throw new Error('usage: npm run db:restore -w server -- --check|--load <file>');
   if (mode === '--check') return console.log(`db:restore check ok ${file} ${JSON.stringify(backupCounts(file))}`);
-  const counts = restore(readEnv(z.object({ SUPABASE_DB_URL: DbUrl }), process.env).SUPABASE_DB_URL, file, runPsql);
+  const counts = restore(file, runPsqlIn(readEnv(z.object({ SUPABASE_DB_URL: DbUrl }), process.env).SUPABASE_DB_URL));
   console.log(`db:restore ok ${JSON.stringify(counts)}`);
 });
