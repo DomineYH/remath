@@ -191,8 +191,3 @@ async function* stream(o: TurnOpts & { signal: AbortSignal }, id: string, token:
     yield failure(err, signal);
   }
 }
-
-/** F-24: 기동 시 진행 중 턴(표시·토큰)을 일괄 해제한다(이전 프로세스가 남긴 고아). 끝난 세션은 건드리지 않는다. */
-export async function releaseTurns(db: Db) {
-  must(await db.from('sessions').update({ turn_started_at: null, turn_claim: null }).not('turn_started_at', 'is', null).is('ended_at', null));
-}

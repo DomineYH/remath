@@ -179,6 +179,10 @@ scripts/deploy.sh
 
 `sudo systemctl reload caddy` 뒤 `curl -s https://<domain>/healthz` → `{"ok":true}`. 런타임 env 파일은 `MOCK_LLM=0`, `KEY_VAULT_SECRET`, `COOKIE_SECURE` 없음(기본 true, HTTPS라 `Secure` 쿠키가 돈다). `REMATH_PORT`를 바꿨으면 Caddyfile의 포트도 맞춘다. 수용 절차는 [`docs/g4-runbook.md`](docs/g4-runbook.md).
 
+### Vercel 빌드
+
+Vercel은 `vercel.json`의 `npm run build:vercel`(`scripts/build-vercel.mjs`)로 Build Output API v3 `.vercel/output`을 직접 만든다. `client/dist`는 정적 CDN(SPA 폴백)으로, `/api/*`·`/healthz`는 함수 하나로 간다. 함수 진입점은 `server/src/vercel.ts`이고, providers.json과 템플릿을 번들에서 읽는다(디스크 아님). 함수는 `dub1`, `maxDuration` 300, `supportsCancellation`이다. Git 연동은 PR Preview만 만든다(main 자동 배포 끔). Production 배포는 CLI로만 한다(#78). 로컬 dev·e2e·`npm start`는 그대로 `server/src/index.ts`를 쓴다.
+
 ## G2 demo checklist
 
 Mock mode (`npm run dev:mock -w client`, see Setup), in a fresh browser profile. Open `/admin`.
