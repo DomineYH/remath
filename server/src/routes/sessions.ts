@@ -2,6 +2,7 @@
 import { Readable } from 'node:stream';
 import { finished } from 'node:stream/promises';
 import * as S from '@remath/shared';
+import { waitUntil } from '@vercel/functions';
 import type { FastifyRequest } from 'fastify';
 import type { z } from 'zod';
 import type { Deps, Handlers } from '../app.ts';
@@ -86,13 +87,17 @@ export function sessionHandlers({ db, config, now, providersFor }: Deps): Handle
       reply.raw.on('close', () => { if (!reply.raw.writableFinished) ac.abort(); });
       if (reply.raw.destroyed || req.raw.socket?.destroyed) ac.abort();
       const { text } = req.body as z.infer<typeof S.TurnBody>;
-      return withTurn({ ...turnOpts, log: req.log, signal: ac.signal }, await sessionOf(req, 'light'), text, async events => {
+      const turn = withTurn({ ...turnOpts, log: req.log, signal: ac.signal }, await sessionOf(req, 'light'), text, async events => {
         const body = Readable.from((async function* () { for await (const ev of events) yield frame(ev); })());
         ac.signal.addEventListener('abort', () => body.destroy(), { once: true });
         reply.header('content-type', 'text/event-stream; charset=utf-8').header('cache-control', 'no-cache').send(body);
         await finished(body).catch(() => {});   // 끝까지 보냈거나, 끊겨 생성기 return() 까지 끝났을 때
         return reply;
       });
+      // F-24: Vercel supportsCancellation 은 끊기면 인스턴스를 바로 끝낸다. withTurn 의 finally(release_turn)까지 살려 두도록 맡긴다.
+      // 거부하지 않는 promise 를 넘긴다(오류는 아래 return 이 처리). Vercel 밖(dev·vitest·e2e)에서는 아무것도 하지 않는다.
+      waitUntil(turn.catch(() => {}));
+      return turn;
     },
     /** F-25: 종료 버튼 = END SESSION 발화와 같은 함수·같은 SessionReport|null. 재열람은 sessions.report 저장본. */
     'POST /api/sessions/:id/end': async req => {

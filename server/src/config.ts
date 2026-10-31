@@ -1,4 +1,4 @@
-// 기동 검증 (B절, O-6, E-21, G-28): 하나라도 틀리면 throw → index.ts가 기동하지 않는다.
+// 기동 검증 (B절, O-6, E-21, G-28): 하나라도 틀리면 throw → index.ts는 기동하지 않고, vercel.ts는 그 요청에 500으로 답한다.
 import { ProvidersFile } from '@remath/shared';
 import { checkTemplates, type Templates } from '@remath/prompts';
 import { z } from 'zod';

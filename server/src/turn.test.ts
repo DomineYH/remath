@@ -16,6 +16,10 @@ import type { ProvidersFor } from './providers/types.ts';
 import { frame, withTurn } from './turn.ts';
 import { seal } from './vault.ts';
 
+// Vercel 밖에서 waitUntil 은 아무것도 하지 않는다. 무엇을 넘기는지만 본다.
+const { waitUntil } = vi.hoisted(() => ({ waitUntil: vi.fn() }));
+vi.mock('@vercel/functions', () => ({ waitUntil }));
+
 type AdminSseEvent = z.infer<typeof S.AdminSseEvent>;
 const T0 = '2026-10-28T03:00:00.123456+00:00';
 const report: z.infer<typeof S.SessionReport> = { total: 1, reached: true, verdict: 'clean', rows: [{ name: 'Eliciting', desc: 'd', count: 1, turns: [{ seq: 2, text: '줄\n바꿈 "따옴표"' }] }], summary: '요약\n둘째 줄' };
@@ -361,6 +365,39 @@ describe('POST …/turns notices a dropped client before any awaited step (F-24)
     await new Promise(res => setTimeout(res, 50));
     expect(labels(r.calls).filter(l => l !== 'select auth_sessions')).toEqual(['select sessions']);
     await r.close();
+  });
+});
+
+describe('POST …/turns hands the turn to waitUntil (F-24 on Vercel: supportsCancellation ends the instance on a drop)', () => {
+  it('the promise never rejects and settles only after the dropped turn released its claim', async () => {
+    const read = gate(), release = gate();
+    const fake = fakeDb({ before: (label, cols) => {
+      if (label === 'select sessions' && String(cols).includes('progress')) return read.wait();
+      if (label === 'release_turn') return release.wait();
+    } });
+    const app = await buildApp({ db: fake.db, config });
+    const socketClosed = new Promise<void>(r => app.server.on('connection', s => s.on('close', () => r())));
+    const url = await app.listen({ port: 0, host: '127.0.0.1' });
+    waitUntil.mockClear();
+    const ac = new AbortController();
+    const req = fetch(`${url}/api/sessions/${SID}/turns`, { method: 'POST', headers: TEACHER, body: JSON.stringify({ text: '그림을 설명해 줄래?' }), signal: ac.signal }).catch(() => 'aborted');
+    await read.arrived;
+    expect(waitUntil).toHaveBeenCalledTimes(1);
+    const kept = waitUntil.mock.calls[0]![0] as Promise<unknown>;
+    let settled = false;
+    void kept.then(() => { settled = true; });
+    ac.abort();
+    expect(await req).toBe('aborted');
+    await socketClosed;
+    read.release();
+    await release.arrived;   // 끊김 → withTurn 의 finally 가 release_turn 에 닿았다
+    await new Promise(r => setTimeout(r, 20));
+    expect(settled).toBe(false);
+    release.release();
+    await expect(kept).resolves.toBeUndefined();   // withTurn 은 'client disconnected' 로 던지지만 넘긴 promise 는 거부하지 않는다
+    expect(labels(fake.calls).at(-1)).toBe('release_turn');
+    expect(labels(fake.calls)).not.toContain('record_turn');
+    await app.close();
   });
 });
 

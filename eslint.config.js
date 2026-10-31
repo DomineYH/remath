@@ -17,7 +17,7 @@ const COPY = [
 ].map(selector => ({ selector, message: COPY_MSG }));
 
 export default tseslint.config(
-  { ignores: ['**/dist/**', '**/dist-mock/**', 'playwright-report/**', 'test-results/**', 'base_ui/**'] },
+  { ignores: ['**/dist/**', '**/dist-mock/**', 'playwright-report/**', 'test-results/**', 'base_ui/**', '.vercel/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   { rules: { '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', destructuredArrayIgnorePattern: '^_' }] } },

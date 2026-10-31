@@ -7,3 +7,4 @@ dist/
 dist-mock/
 playwright-report/
 test-results/
+.vercel

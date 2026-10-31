@@ -26,6 +26,7 @@
     "@remath/prompts": "*",
     "@remath/shared": "*",
     "@supabase/supabase-js": "^2.118.0",
+    "@vercel/functions": "^3.10.5",
     "argon2": "^0.45.1",
     "better-sqlite3": "^13.0.3",
     "fastify": "^5.12.7",

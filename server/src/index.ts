@@ -1,4 +1,5 @@
-// 기동: 검증(fail-fast) → 앱 → listen. 실행은 `npm run start -w server`(raw-hooks 필요, package.json).
+// 로컬 단일 프로세스 기동(dev·e2e·npm start): 검증(fail-fast) → 앱 → listen. 실행은 `npm run start -w server`(raw-hooks 필요, package.json).
+// Vercel 진입점은 vercel.ts 다. 기동 시 턴 해제는 하지 않는다(V6): 고아 턴은 claim_turn 의 시간 초과 재획득(0003)이 맡는다.
 import { readFileSync } from 'node:fs';
 import { buildApp } from './app.ts';
 import { backup, BackupEnv, scheduleBackups } from './backup.ts';
@@ -6,7 +7,6 @@ import { readEnv } from './cli/main.ts';
 import { loadConfig, type Config } from './config.ts';
 import { createDb } from './db.ts';
 import { providersFor } from './providers/index.ts';
-import { releaseTurns } from './turn.ts';
 
 const ROOT = new URL('../../', import.meta.url);
 let config: Config, backupEnv: ReturnType<typeof BackupEnv.parse>;
@@ -18,7 +18,6 @@ try {
   process.exit(1);
 }
 const db = createDb(config.env.SUPABASE_URL, config.env.SUPABASE_SERVICE_KEY);
-await releaseTurns(db);
 const app = await buildApp({ db, config, providersFor }, { logger: true });
 app.log.info(`llm: ${config.env.MOCK_LLM === '0' ? 'live' : 'mock'}`);
 await app.listen({ port: config.env.PORT, host: '0.0.0.0' });
