@@ -1,5 +1,5 @@
 // SQLite 백업 CLI (H-29 6단계, H-30): `npm run backup -w server` → BACKUP_DIR/remath-<YYYYMMDD>.sqlite.
-// 운영에서는 컨테이너 안에서 돈다(deploy.sh 6단계 = docker compose exec): 컨테이너의 env·볼륨을 그대로 쓴다.
+// 로컬·운영자 머신용. Vercel 의 매일 백업은 크론 경로(server/src/cron.ts → Blob)이고 deploy.sh 6단계도 그 경로를 부른다.
 import { z } from 'zod';
 import { backup, BackupEnv } from '../backup.ts';
 import { createDb } from '../db.ts';

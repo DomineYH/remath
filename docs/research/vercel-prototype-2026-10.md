@@ -67,7 +67,7 @@
   "supportsResponseStreaming": true, "maxDuration": 300, "regions": ["dub1"], "supportsCancellation": true }
 ```
 
-`config.json`에는 `{ "version": 3, "routes": [...위 3개...], "crons": [{ "path": "/api/cron/backup", "schedule": "0 3 * * *" }] }`를 둔다. 크론은 BOA `config.json`의 `crons` 필드다(#78).
+`config.json`에는 `{ "version": 3, "routes": [...위 3개...], "crons": [{ "path": "/api/cron/backup", "schedule": "0 3 * * *" }] }`를 둔다. 크론은 BOA `config.json`의 `crons` 필드다(#78) 출시된 일정은 `0 18 * * *`(18:00 UTC = 03:00 KST, #77)이다.
 
 - **#76(T3)**
   - 진입점 `server/src/vercel.ts`(번들 맵으로 `loadConfig`, `releaseTurns` 없음)

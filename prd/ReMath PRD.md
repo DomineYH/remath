@@ -125,7 +125,7 @@ ReMath는 가상 학생(챗봇)의 오개념을 예비교사가 **설명 대신 
 | 운영 DB | Supabase (PostgreSQL) · 서버는 service role, RLS는 2차 방어 | 관리 콘솔·백업·확장이 쉽고, 배포마다 새 프로젝트/스키마를 스크립트로 생성 가능 |
 | 백업 DB | SQLite3 (better-sqlite3) · 서버 로컬 파일 | 외부 서비스 없이 복구·오프라인 조회 가능 |
 | LLM | 공급자 어댑터 인터페이스 1개 + OpenAI/Anthropic/Gemini 구현 3개 | 역할별로 다른 공급자·모델·effort를 같은 호출 형태로 처리 |
-| 배포 | Docker 이미지 1개(서버 + 정적 클라이언트), `deploy.sh`가 DB 생성 절차를 강제 | 7절 |
+| 배포 | Vercel(서버 = Node 함수 1개, 클라이언트 = 정적 CDN), `deploy.sh`가 DB 생성 절차를 강제 | 7절 |
 
 ## 6. 데이터 모델 (Supabase / PostgreSQL)
 
@@ -168,7 +168,7 @@ ReMath는 가상 학생(챗봇)의 오개념을 예비교사가 **설명 대신 
 **SQLite 백업 규칙**
 
 - 운영 DB의 모든 테이블을 같은 컬럼으로 옵긴다(JSONB는 TEXT). `ai_settings.key_ciphertext`는 제외한다. 백업 파일에 키가 남지 않게 하기 위해서다.
-- 배포 직후 1회, 이후 서버 스케줄러가 매일 1회 갱신. 보관 개수와 시각은 환경변수(`BACKUP_KEEP`, `BACKUP_AT`)로 정한다.
+- 배포 직후 1회, 이후 Vercel Cron이 매일 1회 갱신(18:00 UTC = 03:00 KST). 파일은 Vercel Blob 비공개 저장소에 두고, 보관 개수는 환경변수(`BACKUP_KEEP`)로 정한다.
 - 관리자 화면에서 최근 백업 시각과 파일 크기를 보여 준다(P1).
 - 복구 스크립트 `restore.sh <file>`은 위 1−5단계를 같이 타면서 3단계의 시드 대신 백업 데이터를 넣는다.
 

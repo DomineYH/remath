@@ -1,4 +1,4 @@
-// `npm run admin:reset-password` (H-32, PRD 9절): 관리자 비밀번호를 되찾는 유일한 길. 컨테이너 안에서 `docker exec -it`로 실행.
+// `npm run admin:reset-password` (H-32, PRD 9절): 관리자 비밀번호를 되찾는 유일한 길. 운영자 머신의 터미널에서 실행(셸에 production 의 SUPABASE_URL·SERVICE_KEY).
 // 새 비밀번호는 TTY 프롬프트로만 받는다(인수·환경변수·파이프 금지). 환경에서는 DB 접속 정보만 읽는다.
 import { hostname } from 'node:os';
 import argon2 from 'argon2';
@@ -13,7 +13,7 @@ function fail(msg: string): never {
 }
 
 if (process.argv.length > 2) fail('takes no arguments; the new password is read only from the terminal prompt');
-if (!process.stdin.isTTY) fail('stdin is not a terminal. Run it interactively, e.g. docker exec -it <container> npm run admin:reset-password');
+if (!process.stdin.isTTY) fail('stdin is not a terminal. Run it interactively, e.g. npm run admin:reset-password in a terminal');
 const env = z.object({ SUPABASE_URL: z.url(), SUPABASE_SERVICE_KEY: z.string().min(1) }).safeParse(process.env);
 if (!env.success) fail('invalid environment:\n' + z.prettifyError(env.error));
 

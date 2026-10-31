@@ -26,11 +26,3 @@ jobs:
           name: playwright-report
           path: playwright-report/
           if-no-files-found: ignore
-
-  # The deployable image (#35 A-4). Its build runs npm run check:bundle, so a mock leak fails this job.
-  # test:http needs a running server and a Supabase project: not in CI (T-2, O-11).
-  image:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t remath:ci .

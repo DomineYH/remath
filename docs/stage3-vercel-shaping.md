@@ -44,6 +44,10 @@
 - **V14** `deploy/compose.yaml`, Caddy README 절, CI `image` 잡, `Dockerfile`은 T1 PASS 뒤 문서 티켓에서 지운다. 배포 경로는 하나만 둔다.
 - **V15** 관측: pino 로그는 Vercel 런타임 로그로 간다(Hobby 보관이 짧다). 집계 테이블은 두지 않는다(Q9 유지). README에 보관 한도를 적는다.
 
+### 구현 보정 (2026-10-31, #76·#77·#78)
+- 크론은 `vercel.json`이 아니라 Build Output `config.json`의 `crons`에 있다(`scripts/build-vercel.mjs`가 쓴다). 일정은 `0 18 * * *`(18:00 UTC = 03:00 KST)이다. `BACKUP_AT`은 없앴다(V9).
+- main 자동 배포 끄기는 Ignored Build Step이 아니라 `vercel.json` `git.deploymentEnabled.main: false`다(Ignored Build Step은 CLI 배포에 적용되지 않는다). Production은 `deploy.sh`의 `vercel deploy --prod`로만 나간다(V10).
+
 ### 검증 / 게이트
 - **V16** G4 전 확인: Preview(`MOCK_LLM=1`, dev DB)에 `npm run load -w server` 30세션 동시 턴을 돌린다(Q14와 같은 기준: 섞임 0, 429/5xx 0, SSE 오류 0). 로그 위생 점검도 다시 한다. 결과는 `docs/load-security-2026-10.md`에 덧붙인다.
 - **V17** `docs/g4-runbook.md`를 Vercel 기준으로 다시 쓴다: 실서버 배포 → 키 등록 → 그룹·사용자 → 예비교사 세션 종료 → CSV → 첫 백업 Blob 확인. #62(G4 서명)는 이 런북으로 한다.
