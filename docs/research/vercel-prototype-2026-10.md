@@ -88,7 +88,8 @@
 1. **Ignored Build Step은 CLI 배포에 적용되지 않는다.**
    - #73 코멘트는 "모든 production 빌드(CLI 포함)가 막혀 있다"고 했다. 실제로는 `vercel deploy`가 production으로 빌드·READY 됐다.
    - 빌드 로그는 `vercel build` → `npm ci` → 빌드 명령 순으로 돌았고, 건너뛰기 줄은 없었다.
-   - Git 연동 배포에만 적용된다고 보고, #76은 `git.deploymentEnabled`로 바꾼다.
+   - Git 연동 배포에는 적용된다. PR #80·#81 병합으로 생긴 main의 Git production 빌드 2건은 Canceled였다(조정자 확인).
+   - #76은 이것을 `git.deploymentEnabled`로 바꾼다.
 2. **프로젝트의 첫 배포는 항상 Production이다.**
    - `--prod` 없는 `vercel deploy`도 첫 배포면 production에 할당되고 production 주소에 붙는다.
    - 배포가 0건일 때 `--environment preview`를 주면 CLI가 거절한다.
@@ -97,7 +98,7 @@
 4. **CLI 배포는 HEAD 커밋 작성자를 본다(Hobby).**
    - 로컬 git 작성자 `…@…MacBookPro.local`로 만든 커밋에서 배포하자 "commit author doesn't have permission"으로 **Blocked**됐다.
    - git 메타데이터가 없는 `git archive HEAD` 사본에서 배포하면 된다.
-   - #76·#78·`deploy.sh`는 작성자 이메일을 Vercel·GitHub 계정과 맞추거나 사본에서 배포한다. Git PR Preview도 같은 제한을 받을 수 있다(확인 안 함).
+   - #76·#78·`deploy.sh`는 작성자 이메일을 Vercel·GitHub 계정과 맞추거나 사본에서 배포한다. Git PR Preview는 이 제한을 받지 않았다. 같은 시기 PR #80·#81의 Git 연동 Preview는 Ready였다(조정자 확인).
 5. **`vercel curl`은 Protection Bypass for Automation 비밀을 프로젝트에 자동으로 만든다.**
    - 2026-10-31 08:21 UTC에 1개가 만들어졌다. 이것은 프로젝트 설정 변경이다.
    - 이 작업 중 그 값이 세션 출력에 한 번 보였다. **교체하거나 지워야 한다**(#79가 쓸 거면 교체).
@@ -106,7 +107,7 @@
 
 ## 배포 기록 · 정리
 
-배포는 6건이다(상한 15).
+프로토타입이 낸 배포는 6건이다(상한 15). 프로젝트 목록에는 이 밖에 Git 연동 배포 4건(PR #80·#81 Preview, main production Canceled 2건)이 더 있다.
 
 | # | 대상 | 내용 | 상태 |
 |---|---|---|---|
