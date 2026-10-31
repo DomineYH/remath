@@ -17,6 +17,12 @@ describe('loadConfig: startup fail-fast (B, O-6, E-21, G-28)', () => {
     expect(loadConfig({ ...ENV, COOKIE_SECURE: 'false' }, disk).env.COOKIE_SECURE).toBe(false);
     expect(() => loadConfig({ ...ENV, COOKIE_SECURE: 'no' }, disk)).toThrow(/COOKIE_SECURE/);
   });
+  it('backup cron env (V9): CRON_SECRET optional, BACKUP_KEEP positive int default 7, VERCEL_ENV passed through', () => {
+    const e = loadConfig(ENV, disk).env;
+    expect([e.CRON_SECRET, e.BACKUP_KEEP, e.VERCEL_ENV]).toEqual([undefined, 7, undefined]);
+    expect(loadConfig({ ...ENV, CRON_SECRET: 's', BACKUP_KEEP: '3', VERCEL_ENV: 'preview' }, disk).env).toMatchObject({ CRON_SECRET: 's', BACKUP_KEEP: 3, VERCEL_ENV: 'preview' });
+    for (const BACKUP_KEEP of ['0', 'x', '1.5']) expect(() => loadConfig({ ...ENV, BACKUP_KEEP }, disk)).toThrow(/BACKUP_KEEP/);
+  });
   it('a missing env var fails', () => {
     const { SUPABASE_SERVICE_KEY: _, ...env } = ENV;
     expect(() => loadConfig(env, disk)).toThrow(/SUPABASE_SERVICE_KEY/);

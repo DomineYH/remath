@@ -2,9 +2,10 @@
 import { ProvidersFile } from '@remath/shared';
 import { checkTemplates, type Templates } from '@remath/prompts';
 import { z } from 'zod';
+import { BackupEnv } from './backup.ts';
 import { parseSecret } from './vault.ts';
 
-// 서버 런타임이 읽는 변수만. SUPABASE_DB_URL·ANON_KEY·ADMIN_INITIAL_PASSWORD·BACKUP_*는 각 CLI·스크립트 티켓이 검증한다.
+// 서버 런타임이 읽는 변수만. SUPABASE_DB_URL·ANON_KEY·ADMIN_INITIAL_PASSWORD·BACKUP_DIR 는 각 CLI·스크립트 티켓이 검증한다.
 const Env = z.object({
   SUPABASE_URL: z.url(),
   SUPABASE_SERVICE_KEY: z.string().min(1),
@@ -15,6 +16,10 @@ const Env = z.object({
   TURN_TIMEOUT_MS: z.coerce.number().int().positive().default(120000),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   COOKIE_SECURE: z.enum(['true', 'false']).default('true').transform(v => v === 'true'),
+  // 백업 크론(V9). CRON_SECRET 이 없거나 비면 크론 경로는 늘 401. 로그에 남기지 않는다.
+  CRON_SECRET: z.string().optional(),
+  BACKUP_KEEP: BackupEnv.shape.BACKUP_KEEP,
+  VERCEL_ENV: z.string().optional(),   // Vercel 이 넣는다(production·preview·development). 없으면 로컬
 });
 export type Config = ReturnType<typeof loadConfig>;
 

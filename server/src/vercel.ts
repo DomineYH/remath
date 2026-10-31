@@ -1,12 +1,13 @@
 // Vercel Node 함수 진입점(V3). scripts/build-vercel.mjs 가 rolldown 으로 묶는다(`?raw` 로더 포함). 로컬 단일 프로세스 기동은 index.ts.
 // 디스크 대신 번들에 넣은 텍스트로 loadConfig 를 부른다(V5): providers.json 은 `?raw`, 템플릿은 @remath/prompts 의 TEMPLATES.
-// 앱은 인스턴스마다 첫 요청 때 한 번 만든다. 기동 시 턴 해제는 없다(V6). 백업·크론은 #77·#78.
+// 앱은 인스턴스마다 첫 요청 때 한 번 만든다. 기동 시 턴 해제는 없다(V6). 매일 백업 = 크론 경로(cron.ts, V9).
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { TEMPLATES } from '@remath/prompts';
 import type { FastifyInstance } from 'fastify';
 import providersText from '../../shared/providers.json?raw';
 import { buildApp } from './app.ts';
 import { loadConfig } from './config.ts';
+import { vercelBlob } from './cron.ts';
 import { createDb } from './db.ts';
 import { providersFor } from './providers/index.ts';
 
@@ -31,7 +32,7 @@ async function init() {
     throw err;
   }
   const db = createDb(config.env.SUPABASE_URL, config.env.SUPABASE_SERVICE_KEY);
-  const app = await buildApp({ db, config, providersFor }, { logger: true });
+  const app = await buildApp({ db, config, providersFor, blob: vercelBlob() }, { logger: true });
   await app.ready();
   app.log.info(`llm: ${config.env.MOCK_LLM === '0' ? 'live' : 'mock'}`);
   return app;

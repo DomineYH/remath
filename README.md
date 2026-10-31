@@ -103,9 +103,9 @@ ENV_FILE=$HOME/.config/remath/dev.env SERVER_URL=http://127.0.0.1:3946 npm run t
 | `MAX_TURNS` | GLOSSARY 턴 상한, 티켓 19 | `40` | 서버 | `SessionDetail.turn_limit` |
 | `TURN_TIMEOUT_MS` | GLOSSARY 턴 시간 제한, 티켓 19 | `120000` | 서버 | |
 | `MOCK_LLM` | PRD 8절, Q4 | 없음(필수) | 서버, `deploy.sh`·`restore.sh`(사전 점검) | `0` = 실 공급자(OpenAI·Anthropic·Gemini, 관리자 AI 설정의 키), `1` = 세 역할 모두 목. 그 밖의 값이면 기동 실패. 기동 로그 `llm: live`/`llm: mock` |
-| `BACKUP_KEEP` | PRD 7절 | `7` | 서버(매일 백업), `backup` | 보관 개수. 넘으면 오래된 파일부터 지운다 |
-| `BACKUP_AT` | PRD 7절 | `03:00` | 서버 | 매일 백업 시각 `HH:MM`, 컨테이너 로컬 시각(기본 UTC). 런타임 env 파일에 `TZ=Asia/Seoul`을 넣으면 그 시각대(파일명 날짜도) |
-| `BACKUP_DIR` | PRD 7절 경로 | `backup` | 서버, `backup` | 컨테이너 작업 디렉터리(`/app/server`) 기준. compose 볼륨이 이 자리라 비우거나 `backup`으로 둔다 |
+| `BACKUP_KEEP` | PRD 7절, V9 | `7` | 서버(백업 크론), `backup` | 보관 개수. Vercel: 크론 경로가 Blob에 환경 접두어별로 새것부터 N개만 남긴다. 로컬 CLI: `BACKUP_DIR`에서 넘으면 오래된 파일부터 지운다 |
+| `BACKUP_DIR` | PRD 7절 경로 | `backup` | `backup` | 로컬 CLI(`npm run backup`)에서만. 컨테이너 작업 디렉터리(`/app/server`) 기준. compose 볼륨이 이 자리라 비우거나 `backup`으로 둔다. Vercel에서는 쓰지 않는다 |
+| `CRON_SECRET` | V9, V13 | 없음 | 서버(백업 크론) | `GET /api/cron/backup`의 `Authorization: Bearer <값>`. Vercel Cron이 자동으로 붙인다. 없거나 비면 크론 경로는 늘 401. Sensitive로 두고 로그에 남기지 않는다 |
 | `PORT` | — (O-10) | `3000` | 서버 | 로컬 `npm run dev`용. 컨테이너 env 파일에는 넣지 않는다 |
 | `COOKIE_SECURE` | — (O-10) | `true` | 서버 | 실서버는 미설정. `false`는 HTTP 스테이징·개발만 |
 | `SUPABASE_ACCESS_TOKEN`, `SUPABASE_ORG_ID`, `SUPABASE_REGION`, `SUPABASE_DB_PASSWORD` | PRD 7절 1단계 "Management API" (O-4) | 없음(`--new`·`restore.sh`에 필수) | `deploy.sh --new`, `restore.sh` | 운영자 셸만, 서버 컨테이너에는 넣지 않는다. `SUPABASE_ORG_ID` = 조직 slug. 토큰은 `db:new-project`에만 넘어간다 |
@@ -148,10 +148,20 @@ scripts/deploy.sh
 ```
 - 마이그레이션은 파일마다 한 트랜잭션: 실패한 파일은 흔적이 없고 앞서 성공한 파일은 남는다. 거기서 멈추고 env 파일·컨테이너는 그대로다. 그 밖의 실패 상태는 `--new`와 같다.
 
-**백업** — `docker compose -f deploy/compose.yaml exec server npm run backup` (= 컨테이너 안의 `npm run backup -w server`; 셸에 `REMATH_ENV_FILE` 필요) (H-30, 사용자 스토리 23). 서버도 매일 `BACKUP_AT`에, `deploy.sh`·`restore.sh`도 전환 직후 같은 백업을 만든다.
+**백업** — `docker compose -f deploy/compose.yaml exec server npm run backup` (= 컨테이너 안의 `npm run backup -w server`; 셸에 `REMATH_ENV_FILE` 필요) (H-30, 사용자 스토리 23). `deploy.sh`·`restore.sh`도 전환 직후 같은 백업을 만든다. Vercel의 매일 백업은 아래 크론 경로다.
 - 결과: `REMATH_BACKUP_DIR/remath-<YYYYMMDD>.sqlite`(기본 저장소 루트 `backup/`), 출력 `backup ok <파일> {테이블별 행 수}`. 테이블 10개(`users`·`groups`·`group_members`·`scenarios`·`scenario_translations`·`group_scenarios`·`sessions`·`turns`·`ai_settings`·`audit_log`)를 같은 이름·같은 열로, JSONB는 TEXT. `ai_settings.key_ciphertext` 열은 없고 `auth_sessions`·`schema_migrations`는 넣지 않는다. 같은 날짜면 덮어쓰고, `BACKUP_KEEP`개를 넘으면 오래된 순으로 지운다.
 - 비밀번호 해시가 들어 있다: 파일 권한·보관 위치에 주의한다.
 - 실패: 임시 파일에 쓰고 끝나면 rename 하므로 반쯤 쓴 파일은 없다. 종료코드 ≠ 0, 기존 백업 파일은 그대로.
+
+**매일 백업(Vercel Cron, V9)** — Vercel Cron이 매일 18:00 UTC(= 03:00 KST, Hobby는 그 한 시간 안 임의 시각, production 배포에서만) `GET /api/cron/backup`을 `Authorization: Bearer $CRON_SECRET`으로 부른다. 함수가 `/tmp`에 위와 같은 SQLite 파일을 만들어 Blob 비공개 저장소 `remath-backups`에 올리고, 같은 접두어 안에서 새것부터 `BACKUP_KEEP`개만 남긴다.
+- 이름: production은 `remath-<YYYYMMDD>.sqlite`(저장소 뿌리), 그 밖의 환경은 `<VERCEL_ENV>/remath-<YYYYMMDD>.sqlite`(예: `preview/…`, 로컬 `local/…`). 그래서 Preview를 수동 호출해도 production 백업은 지워지지 않는다. 날짜는 함수 시각(UTC) 기준이고 같은 날 다시 돌면 덮어쓴다.
+- 성공: 200 `{ ok, pathname, rows, pruned, deleted }`. 실패: 500 + 로그 1줄 `backup failed: <오류 문구>`. 서비스는 그대로다(H-30).
+
+**Blob 백업에서 복구** — 백업 파일을 내려받아 아래 `restore.sh`에 넘긴다.
+1. 파일 고르기: 대시보드(Storage → `remath-backups` → Browser) 또는 `vercel blob list --prefix remath- --limit 100`(연결된 프로젝트 디렉터리에서).
+2. 내려받기: `vercel blob get remath-<YYYYMMDD>.sqlite --access private -o remath-<YYYYMMDD>.sqlite`. 자격은 연결된 프로젝트 또는 셸의 `BLOB_READ_WRITE_TOKEN`에서 온다(토큰을 명령줄 인수로 쓰지 않는다). 대시보드에서 내려받아도 된다.
+3. 비밀번호 해시가 들어 있으니 `chmod 600` 하고, 복구가 끝나면 지운다.
+4. `REMATH_ENV_FILE=… scripts/restore.sh remath-<YYYYMMDD>.sqlite`(아래).
 
 **`REMATH_ENV_FILE=… scripts/restore.sh <backup.sqlite>`** — 백업에서 새 DB로 복구(H-31, 사용자 스토리 24·25). 셸에 Management 변수 4개(`ADMIN_INITIAL_PASSWORD`는 쓰지 않는다).
 - 순서: 백업 파일 검사(잘못된 파일이면 프로젝트를 만들기 전에 실패) → 새 프로젝트 → 마이그레이션 → 백업 데이터를 FK 순서로 한 트랜잭션에 `psql \copy` → 스모크(기대 행 수 = 백업의 행 수) → env 교체·컨테이너 재생성·`/healthz` → 백업.
