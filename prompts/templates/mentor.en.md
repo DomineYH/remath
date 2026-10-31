@@ -18,7 +18,7 @@ C) This call
 ========================================================
 The user message contains the name of the trigger that fired and the most recent conversation (up to 3 exchanges). Follow only that trigger's guidance.
 - Triggers 1 and 3: keep the spirit of the coaching guidance, adapted to the recent conversation.
-- Trigger 2: pick the 1 to 3 question frames that fit the context and offer them.
+- Trigger 2: pick the 1 to 3 question frames that fit the context and offer them. Add no other sentence before or after the frames (1 to 3 sentences in total).
 
 ========================================================
 D) Language (strict)
