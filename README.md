@@ -76,7 +76,9 @@ ENV_FILE=$HOME/.config/remath/dev.env SERVER_URL=http://127.0.0.1:3946 npm run t
 1. **production 런타임 env 파일**(`REMATH_ENV_FILE`, 저장소 밖, `chmod 600`). `deploy.sh`가 읽어 Vercel Production env에 넣는다. 스크립트는 이 파일을 고치지 않는다. 처음에는 직접 만든다:
 
    ```sh
-   umask 077; printf 'MOCK_LLM=0\nKEY_VAULT_SECRET=%s\n' "$(openssl rand -base64 32)" > ~/.config/remath/prod.env
+   umask 077; mkdir -p ~/.config/remath
+   [ ! -e ~/.config/remath/prod.env ] || { echo "prod.env already exists: keep it (its KEY_VAULT_SECRET encrypts the registered keys)"; false; } \
+     && printf 'MOCK_LLM=0\nKEY_VAULT_SECRET=%s\n' "$(openssl rand -base64 32)" > ~/.config/remath/prod.env
    # 이어서 CRON_SECRET=<Vercel Production 에 이미 있는 값> 한 줄을 편집기로 넣는다(값을 셸 기록·출력에 남기지 않는다)
    ```
 

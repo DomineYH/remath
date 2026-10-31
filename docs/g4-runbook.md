@@ -21,7 +21,9 @@ Vercel 런타임 로그는 Hobby에서 **1시간**만 남는다(README "운영 �
 - **production 런타임 env 파일**(저장소 밖, 600). `MOCK_LLM=0`, 새 `KEY_VAULT_SECRET`, 그리고 `CRON_SECRET`은 **Vercel Production에 이미 있는 값을 그대로** 쓴다(운영자가 로컬에 가지고 있다). 새로 만들지 않고, 화면·셸 기록에 출력하지 않는다.
 
   ```sh
-  umask 077; printf 'MOCK_LLM=0\nKEY_VAULT_SECRET=%s\n' "$(openssl rand -base64 32)" > ~/.config/remath/prod.env
+  umask 077; mkdir -p ~/.config/remath
+  [ ! -e ~/.config/remath/prod.env ] || { echo "prod.env already exists: keep it (its KEY_VAULT_SECRET encrypts the registered keys)"; false; } \
+    && printf 'MOCK_LLM=0\nKEY_VAULT_SECRET=%s\n' "$(openssl rand -base64 32)" > ~/.config/remath/prod.env
   ${EDITOR:-vi} ~/.config/remath/prod.env      # CRON_SECRET=<기존 값> 한 줄을 더한다
   grep -c '^CRON_SECRET=.' ~/.config/remath/prod.env   # 1
   ```
