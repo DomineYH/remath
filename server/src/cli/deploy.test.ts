@@ -1,7 +1,7 @@
 // scripts/deploy.sh 의 순서·멈춤과 deploy/compose.yaml 의 설정을 고정한다. npm·docker·curl·psql 은 가짜; 실 psql·Docker 는 수동(T-4).
 // env 파일 교체 자체는 env-swap.test.ts 가 본다.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,7 +22,8 @@ const STUBS: Record<string, string> = {
 const NEW = { SUPABASE_URL: 'https://new.supabase.co', SUPABASE_SERVICE_KEY: 'new-service', SUPABASE_DB_URL: 'postgres://u:p@new:5432/postgres', SUPABASE_ANON_KEY: 'new-anon' };
 
 function deploy(args: string[] = [], extra: Record<string, string> = {}, script = SCRIPT, serverEnv = 'MOCK_LLM=1\n') {
-  const dir = mkdtempSync(join(tmpdir(), 'deploy-test-')), bin = join(dir, 'bin');
+  // macOS 의 tmpdir 은 symlink(/var → /private/var)다. 스크립트가 cwd 로 만든 절대 경로와 맞추려고 실제 경로를 쓴다.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'deploy-test-'))), bin = join(dir, 'bin');
   mkdirSync(bin);
   for (const [name, body] of Object.entries(STUBS)) { writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`); chmodSync(join(bin, name), 0o755); }
   writeFileSync(join(dir, 'server.env'), serverEnv, { mode: 0o600 });

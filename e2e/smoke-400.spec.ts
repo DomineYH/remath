@@ -17,21 +17,30 @@ const GREET = '안녕하세요… 저는 가브리엘이에요.';
 async function fits(page: Page, where: string) {
   await expect(page.locator('.top')).toBeVisible();
   await expect(page.locator('.top .in > *').last()).toBeVisible();
-  const m = await page.evaluate(() => ({
-    sw: document.documentElement.scrollWidth,
-    cw: document.documentElement.clientWidth,
-    lastRight: [...document.querySelectorAll('.top .in > *')].at(-1)!.getBoundingClientRect().right,
-    mids: [...document.querySelectorAll('.top .in > *')].map(e => e.getBoundingClientRect()).filter(r => r.height > 0).map(r => r.top + r.height / 2),
-    bar: (() => {
-      const top = document.querySelector('.top')!, inner = document.querySelector('.top .in')!, cs = getComputedStyle(inner);
-      const tallest = Math.max(...[...inner.children].map(e => e.getBoundingClientRect().height));
-      return { height: top.getBoundingClientRect().height, oneLine: tallest + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) + parseFloat(getComputedStyle(top).borderBottomWidth) };
-    })(),
-    brandCut: [...document.querySelectorAll('.brand b')].some(e => e.scrollWidth > e.clientWidth),
-    demo: /\bdemo\b|데모/i.test(document.body.innerText),
-    unlabelled: [...document.querySelectorAll<HTMLInputElement>('input, select, textarea')]
-      .filter(e => !e.labels?.length && !e.getAttribute('aria-label') && !e.getAttribute('aria-labelledby')).map(e => e.outerHTML.slice(0, 80)),
-  }));
+  // The bar can re-render between the checks above and the measurement (seen right after the teacher login), leaving
+  // `.top .in` empty for a moment: measure again until the bar is there; the assertions below run once, on that measurement.
+  const measure = () => page.evaluate(() => {
+    const top = document.querySelector('.top'), inner = document.querySelector('.top .in'), items = [...document.querySelectorAll('.top .in > *')];
+    if (!top || !inner || !items.length) return null;
+    return {
+      sw: document.documentElement.scrollWidth,
+      cw: document.documentElement.clientWidth,
+      lastRight: items.at(-1)!.getBoundingClientRect().right,
+      mids: items.map(e => e.getBoundingClientRect()).filter(r => r.height > 0).map(r => r.top + r.height / 2),
+      bar: (() => {
+        const cs = getComputedStyle(inner);
+        const tallest = Math.max(...[...inner.children].map(e => e.getBoundingClientRect().height));
+        return { height: top.getBoundingClientRect().height, oneLine: tallest + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) + parseFloat(getComputedStyle(top).borderBottomWidth) };
+      })(),
+      brandCut: [...document.querySelectorAll('.brand b')].some(e => e.scrollWidth > e.clientWidth),
+      demo: /\bdemo\b|데모/i.test(document.body.innerText),
+      unlabelled: [...document.querySelectorAll<HTMLInputElement>('input, select, textarea')]
+        .filter(e => !e.labels?.length && !e.getAttribute('aria-label') && !e.getAttribute('aria-labelledby')).map(e => e.outerHTML.slice(0, 80)),
+    };
+  });
+  let m = null as Awaited<ReturnType<typeof measure>>;
+  await expect.poll(async () => (m = await measure()) !== null, { message: `${where}: top bar items present` }).toBe(true);
+  if (!m) throw new Error(`${where}: no measurement`);
   // against clientWidth, not 400: a classic scrollbar leaves only 385px, and a bar running under it must fail
   expect(m.sw, `${where}: scrollWidth`).toBeLessThanOrEqual(m.cw);
   expect(m.lastRight, `${where}: last top-bar item inside the viewport`).toBeLessThanOrEqual(m.cw);
@@ -55,7 +64,9 @@ async function menuByKeyboard(page: Page, button: ReturnType<Page['getByRole']>)
   await expect(button).toBeFocused();
   await page.keyboard.press('Space');
   await expect(menu).toBeVisible();
-  await page.mouse.click(200, 700);
+  // outside = the top bar's left padding, which holds nothing: a fixed point in the page (e.g. 200,700) lands on a different
+  // control with each platform's fonts (on macOS: a card's "View prompt", whose dialog then blocks the rest of the test)
+  await page.locator('.top').click({ position: { x: 2, y: 2 } });
   await expect(menu).toHaveCount(0);
 }
 
@@ -233,9 +244,14 @@ test.describe('1280px', () => {
 
 async function fits1280(page: Page) {
   await expect(page.locator('.brand .sub')).toBeVisible();
-  const m = await page.evaluate(() => {
-    const inner = document.querySelector('.top .in')!, box = inner.getBoundingClientRect();
-    const kids = [...inner.children].map(e => e.getBoundingClientRect());
+  await expect(page.locator('.top .acct-name')).toBeVisible();
+  // as in fits(): the bar can re-render before the measurement (an empty `.acct` is display:none, a 0×0 box at the
+  // corner), so measure again until every bar item has a box; the assertions below run once, on that measurement
+  const measure = () => page.evaluate(() => {
+    const inner = document.querySelector('.top .in');
+    if (!inner) return null;
+    const box = inner.getBoundingClientRect(), kids = [...inner.children].map(e => e.getBoundingClientRect());
+    if (!kids.length || kids.some(r => r.width === 0)) return null;
     return {
       lefts: kids.map(r => Math.round(r.left - box.left)), rights: kids.map(r => Math.round(box.right - r.right)),
       gaps: kids.slice(1, -1).map((r, i) => Math.round(kids[i + 2].left - r.right)),
@@ -243,6 +259,9 @@ async function fits1280(page: Page) {
       cut: [...document.querySelectorAll('.brand b, .acct-name span')].some(e => e.scrollWidth > e.clientWidth),
     };
   });
+  let m = null as Awaited<ReturnType<typeof measure>>;
+  await expect.poll(async () => (m = await measure()) !== null, { message: '1280: every top-bar item has a box' }).toBe(true);
+  if (!m) throw new Error('1280: no measurement');
   expect(m.lefts[0]).toBe(16);
   expect(m.rights.at(-1)).toBe(16);
   expect(m.gaps).toEqual([14, 14]);

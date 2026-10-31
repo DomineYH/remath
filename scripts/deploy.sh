@@ -104,9 +104,9 @@ if [ -n "$restore" ]; then
   npm run --silent db:smoke -w server -- --restore "$restore"
 else
   echo "== 3/6 seed"
-  npm run --silent db:seed -w server "${with_samples[@]}"
+  npm run --silent db:seed -w server ${with_samples[@]+"${with_samples[@]}"}
   echo "== 4/6 smoke"
-  npm run --silent db:smoke -w server "${with_samples[@]}"
+  npm run --silent db:smoke -w server ${with_samples[@]+"${with_samples[@]}"}
 fi
 echo "== 5/6 switch to $SUPABASE_URL"
 npm run --silent env:swap -w server   # 실패하면 set -e 로 여기서 끝: 컨테이너는 그대로
