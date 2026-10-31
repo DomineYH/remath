@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createLimiter, resolveRealm } from './auth.ts';
+import type { Db } from './db.ts';
 
 describe('resolveRealm (C-9)', () => {
   const both = { teacher: 't-tok', admin: 'a-tok' };
@@ -23,38 +24,35 @@ describe('resolveRealm (C-9)', () => {
   });
 });
 
-describe('login failure counter (C-8, O-12)', () => {
-  const failN = (l: ReturnType<typeof createLimiter>, n: number, nick = 'Kim', at = 0, realm: 'teacher' | 'admin' = 'teacher') => { for (let i = 0; i < n; i++) l.fail(realm, nick, at); };
-  it('the 5th failure locks the (realm, nickname) for 60 s with retry_after in seconds', () => {
-    const l = createLimiter();
-    failN(l, 4);
-    expect(l.check('teacher', 'Kim', 0)).toBeNull();
-    l.fail('teacher', 'Kim', 1000);
-    expect(l.check('teacher', 'Kim', 1000)).toBe(60);
-    expect(l.check('teacher', 'Kim', 60_500)).toBe(1);
-    expect(l.check('teacher', 'Kim', 61_000)).toBeNull();
-    l.fail('teacher', 'Kim', 61_000);   // after the lock the count starts again
-    expect(l.check('teacher', 'Kim', 61_000)).toBeNull();
+describe('login failure counter over rpc (C-8, O-12, V12)', () => {
+  // The rule itself (5 fails → 60 s lock, window, reset, case, realms, concurrency) is 0006_login_limits.sql, tested on PGlite.
+  // Here: each operation is exactly one rpc with the right arguments, its answer is passed through, and a DB error is thrown.
+  const fakeDb = (answers: Record<string, unknown> = {}, error: unknown = null) => {
+    const calls: [string, unknown][] = [];
+    const db = { rpc: async (name: string, args: unknown) => { calls.push([name, args]); return error ? { data: null, error } : { data: answers[name] ?? null, error: null }; } } as unknown as Db;
+    return { db, calls };
+  };
+  it('check → login_check(realm, nickname as typed); null or retry_after seconds', async () => {
+    const f = fakeDb({ login_check: 42 });
+    expect(await createLimiter(f.db).check('admin', 'Kim')).toBe(42);
+    expect(await createLimiter(fakeDb().db).check('teacher', 'Kim')).toBeNull();
+    expect(f.calls).toEqual([['login_check', { p_realm: 'admin', p_nick: 'Kim' }]]);
   });
-  it('nickname is case-insensitive', () => {
-    const l = createLimiter();
-    failN(l, 3, 'Kim'); failN(l, 2, 'KIM');
-    expect(l.check('teacher', 'kim', 0)).toBe(60);
+  it('fail → one login_fail, which answers whether this failure locked it', async () => {
+    const f = fakeDb({ login_fail: 60 });
+    expect(await createLimiter(f.db).fail('teacher', 'Kim')).toBe(60);
+    expect(await createLimiter(fakeDb().db).fail('teacher', 'Kim')).toBeNull();
+    expect(f.calls).toEqual([['login_fail', { p_realm: 'teacher', p_nick: 'Kim' }]]);
   });
-  it('realms are counted separately', () => {
-    const l = createLimiter();
-    failN(l, 5, 'admin', 0, 'teacher');
-    expect(l.check('admin', 'admin', 0)).toBeNull();
-    expect(l.check('teacher', 'admin', 0)).toBe(60);
+  it('reset → login_reset', async () => {
+    const f = fakeDb();
+    await createLimiter(f.db).reset('teacher', 'Kim');
+    expect(f.calls).toEqual([['login_reset', { p_realm: 'teacher', p_nick: 'Kim' }]]);
   });
-  it('success resets the count', () => {
-    const l = createLimiter();
-    failN(l, 4); l.reset('teacher', 'kim'); failN(l, 1);
-    expect(l.check('teacher', 'Kim', 0)).toBeNull();
-  });
-  it('failures more than 60 s apart do not add up', () => {
-    const l = createLimiter();
-    failN(l, 4, 'Kim', 0); l.fail('teacher', 'Kim', 60_001);
-    expect(l.check('teacher', 'Kim', 60_001)).toBeNull();
+  it('a DB error is thrown, never read as "not locked"', async () => {
+    const l = createLimiter(fakeDb({}, { code: 'XX000', message: 'down' }).db);
+    await expect(l.check('teacher', 'Kim')).rejects.toMatchObject({ code: 'XX000' });
+    await expect(l.fail('teacher', 'Kim')).rejects.toMatchObject({ code: 'XX000' });
+    await expect(l.reset('teacher', 'Kim')).rejects.toMatchObject({ code: 'XX000' });
   });
 });

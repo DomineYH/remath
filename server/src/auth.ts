@@ -1,4 +1,4 @@
-// 쿠키·auth_sessions·실 해석·로그인 실패 카운터 (C-7~C-10, O-1, O-12).
+// 쿠키·auth_sessions·실 해석·로그인 실패 카운터 (C-7~C-10, O-1, O-12, V12).
 import { createHash, randomBytes } from 'node:crypto';
 import type { Realm } from '@remath/shared';
 import { must, type Db } from './db.ts';
@@ -16,32 +16,23 @@ export function resolveRealm(route: Exclude<Realm, 'none'>, header: string | und
   return pick(tokens.admin ? 'admin' : 'teacher');
 }
 
-const MAX_FAILS = 5, WINDOW_MS = 60_000;
-
-/** 메모리 Map, 키 = (실, 소문자 닉네임). 5회째 실패부터 60초 잠금, 실패 사이가 60초를 넘으면 처음부터, 성공하면 리셋. 단일 프로세스(C3) 전제. */
-export function createLimiter() {
-  const m = new Map<string, { fails: number; last: number }>();
-  const key = (realm: ClientRealm, nick: string) => `${realm}:${nick.toLowerCase()}`;
-  const live = (k: string, now: number) => {
-    const e = m.get(k);
-    if (e && now - e.last >= WINDOW_MS) { m.delete(k); return undefined; }
-    return e;
-  };
+/**
+ * 로그인 실패 카운터(C3, V12): 규칙은 DB 에 있다(0006_login_limits.sql, 키 = (실, 소문자 닉네임), DB 시계).
+ * 5회째 실패부터 마지막 실패 뒤 60초 잠금, 실패 사이가 60초 이상이면 처음부터, 성공하면 리셋. 연산마다 rpc 한 번(= 한 문장)이라
+ * 인스턴스가 여럿이어도 같은 카운터를 본다. 인스턴스 메모리에는 아무것도 두지 않는다. DB 오류는 던진다(잠기지 않음으로 읽지 않는다).
+ */
+export function createLimiter(db: Db) {
+  const call = async (fn: 'login_check' | 'login_fail' | 'login_reset', realm: ClientRealm, nick: string) =>
+    must(await db.rpc(fn, { p_realm: realm, p_nick: nick })) as number | null;
   return {
     /** 잠겨 있으면 남은 초(retry_after), 아니면 null. */
-    check(realm: ClientRealm, nick: string, now: number): number | null {
-      const e = live(key(realm, nick), now);
-      return e && e.fails >= MAX_FAILS ? Math.ceil((e.last + WINDOW_MS - now) / 1000) : null;
-    },
-    fail(realm: ClientRealm, nick: string, now: number) {
-      // ponytail: 입력 닉네임마다 키가 생기므로 커지면 만료분을 한 번에 쓸어낸다. 다중 프로세스가 되면 공유 저장소로.
-      if (m.size > 10_000) for (const k of m.keys()) live(k, now);
-      const k = key(realm, nick), e = live(k, now);
-      m.set(k, { fails: (e?.fails ?? 0) + 1, last: now });
-    },
-    reset(realm: ClientRealm, nick: string) { m.delete(key(realm, nick)); },
+    check: (realm: ClientRealm, nick: string) => call('login_check', realm, nick),
+    /** 실패 하나를 기록한다. 이 실패로 잠겼으면 retry_after, 아니면 null. */
+    fail: (realm: ClientRealm, nick: string) => call('login_fail', realm, nick),
+    reset: async (realm: ClientRealm, nick: string) => { await call('login_reset', realm, nick); },
   };
 }
+export type Limiter = ReturnType<typeof createLimiter>;
 
 // ---- 쿠키·auth_sessions (C-7, C-10) ----------------------------------------------------------
 export const COOKIE: Record<ClientRealm, string> = { teacher: 'remath_teacher', admin: 'remath_admin' };

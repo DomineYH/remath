@@ -63,6 +63,25 @@ function fakeDb(t: Record<string, Row[]>, hooks: Hooks = {}) {
       t.auth_sessions = t.auth_sessions.filter(r => r.user_id !== a.p_user_id || (a.p_keep_token_hash !== null && r.token_hash === a.p_keep_token_hash));
       return { data: true, error: null };
     }
+    // 0006_login_limits.sql: 키 = (실, 소문자 닉네임), 시계 = DB(여기서는 Date.now()), last_fail_at 은 ms.
+    const LIMIT = 60_000, key = (r: Row) => (x: Row) => x.realm === r.p_realm && x.nick === String(r.p_nick).toLowerCase();
+    const limits = t.login_limits ??= [];
+    if (name === 'login_check') {
+      const e = limits.find(key(a)), at = Date.now();
+      return { data: e && (e.fails as number) >= 5 && at - (e.last_fail_at as number) < LIMIT ? Math.ceil(((e.last_fail_at as number) + LIMIT - at) / 1000) : null, error: null };
+    }
+    if (name === 'login_fail') {
+      const at = Date.now();
+      t.login_limits = limits.filter(x => at - (x.last_fail_at as number) < LIMIT);   // 만료 쓸기
+      let e = t.login_limits.find(key(a));
+      if (!e) t.login_limits.push(e = { realm: a.p_realm, nick: String(a.p_nick).toLowerCase(), fails: 0 });
+      Object.assign(e, { fails: (e.fails as number) + 1, last_fail_at: at });
+      return { data: (e.fails as number) >= 5 ? 60 : null, error: null };
+    }
+    if (name === 'login_reset') {
+      t.login_limits = limits.filter(x => !key(a)(x));
+      return { data: null, error: null };
+    }
     throw new Error(`unknown rpc ${name}`);
   };
   return { from, rpc } as unknown as Db;
@@ -82,14 +101,15 @@ const PW = 'abcd1234', NEXT = 'efgh5678', OTHER = 'ijkl9012';
 async function setup(hooks: Hooks = {}) {
   const tables: Record<string, Row[]> = {
     users: [{ id: crypto.randomUUID(), nickname: 'Kim', role: 'teacher', password_hash: await argon2.hash(PW), pw_updated_at: new Date(Date.now() - 60_000).toISOString() }],
-    auth_sessions: [], audit_log: [],
+    auth_sessions: [], audit_log: [], login_limits: [],
   };
-  const app = await buildApp({ db: fakeDb(tables, hooks), config });
+  const db = fakeDb(tables, hooks);
+  const app = await buildApp({ db, config });
   const login = (password = PW) => app.inject({ method: 'POST', url: '/api/auth/login', payload: { nickname: 'kim', password } });
   const cookieOf = (r: { cookies: { name: string; value: string }[] }) => r.cookies.find(c => c.name === 'remath_teacher')?.value;
   const me = (cookie: string | undefined) => app.inject({ url: '/api/auth/me', cookies: { remath_teacher: cookie ?? '' } }).then(r => r.statusCode);
   const change = (cookie: string | undefined, next = NEXT) => app.inject({ method: 'PUT', url: '/api/auth/password', cookies: { remath_teacher: cookie ?? '' }, payload: { current: PW, next } });
-  return { tables, app, login, cookieOf, me, change };
+  return { tables, db, app, login, cookieOf, me, change };
 }
 
 describe('login failure lockout over HTTP (C-8, O-12)', () => {
@@ -102,6 +122,40 @@ describe('login failure lockout over HTTP (C-8, O-12)', () => {
     expect(fifth.json().error).toMatchObject({ code: 'too_many_attempts', details: { retry_after: 60 } });
     expect(s.tables.audit_log.map(a => (a.meta as Row).reason)).toEqual([
       ...Array(5).fill('invalid_credentials'), 'too_many_attempts', 'too_many_attempts']);
+  });
+
+  it('while locked even the right password is 429; once the lock has passed it logs in and resets the count', async () => {
+    const s = await setup();
+    for (let i = 0; i < 5; i++) await s.login('wrong9999');
+    expect((await s.login()).statusCode).toBe(429);
+    for (const r of s.tables.login_limits) r.last_fail_at = (r.last_fail_at as number) - 60_000;   // the DB clock moves on
+    expect((await s.login()).statusCode).toBe(200);
+    expect(s.tables.login_limits).toEqual([]);
+    for (let i = 0; i < 4; i++) expect((await s.login('wrong9999')).statusCode).toBe(401);
+  });
+
+  it('a success before the 5th failure resets the count', async () => {
+    const s = await setup();
+    for (let i = 0; i < 4; i++) await s.login('wrong9999');
+    expect((await s.login()).statusCode).toBe(200);
+    for (let i = 0; i < 4; i++) expect((await s.login('wrong9999')).statusCode).toBe(401);
+  });
+
+  it('the count lives in the DB: a second server instance on the same DB sees the lock (V12)', async () => {
+    const s = await setup();
+    const other = await buildApp({ db: s.db, config });
+    for (let i = 0; i < 3; i++) await s.login('wrong9999');
+    for (let i = 0; i < 2; i++) await other.inject({ method: 'POST', url: '/api/auth/login', payload: { nickname: 'KIM', password: 'wrong9999' } });
+    const r = await s.login();
+    expect(r.statusCode).toBe(429);
+    expect(r.json().error).toMatchObject({ code: 'too_many_attempts', details: { retry_after: 60 } });
+  });
+
+  it('a limiter DB error is a 500, not a login', async () => {
+    const s = await setup({ fail: (op, name) => op === 'rpc' && name === 'login_check' });
+    const r = await s.login();
+    expect(r.statusCode).toBe(500);
+    expect(s.cookieOf(r)).toBeUndefined();
   });
 });
 
