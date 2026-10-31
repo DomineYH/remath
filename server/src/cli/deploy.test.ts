@@ -1,7 +1,7 @@
 // scripts/deploy.sh·restore.sh 의 순서·멈춤·비밀 취급을 고정한다(V10, #78). npm·psql·node·git·vercel·curl·sleep 은 가짜:
 // 실제 배포·네트워크·Vercel 호출은 없다. 스크립트는 임시 "저장소"(scripts/ 사본 + .vercel/project.json)에서 돈다.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +13,18 @@ vi.setConfig({ testTimeout: 30_000 });
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const ORG = 'team_fakeorg', PROJECT = 'prj_fakeproject', SHA = '0123456789abcdef0123456789abcdef01234567';
 const URL_ = 'https://remath-abc123-domines-projects.vercel.app';
+// 우리 프로젝트의 production 도메인(deploy.sh 의 REMATH_PROD_URL 기본값). remath.vercel.app 은 남의 사이트다(#78 rev 4).
+const PROD = 'https://remath-eight.vercel.app';
+// 사전 점검이 vercel alias ls 로 찾는 "지금 production 뒤의 배포" (CLI 65.9.0 실측 모양: aliases[].alias·deploymentId·url(스킴 없음)).
+const PREV_ID = 'dpl_prevProd123', PREV_HOST = 'remath-prev999-domines-projects.vercel.app';
+const aliasJson = (host = 'remath-eight.vercel.app') => JSON.stringify({ aliases: [
+  { alias: 'remath-git-main-domines-projects.vercel.app', deploymentId: 'dpl_other', url: 'remath-other-domines-projects.vercel.app', createdAt: 1 },
+  { alias: host, deploymentId: PREV_ID, url: PREV_HOST, createdAt: 2 },
+  { alias: 'matzippulse.vercel.app', deploymentId: 'dpl_x', url: 'matzippulse-x.vercel.app', createdAt: 3 },
+], pagination: { count: 3, next: null, prev: 1 } });
+const ROLLBACK = `vercel rollback https://${PREV_HOST} --yes`;
+/** 되돌리기 안내는 늘 대상이 있다: 맨 vercel rollback 은 CLI 65.9.0 에서 상태만 보여 준다. */
+const bareRollback = /vercel rollback(?! (https:\/\/\S+|<previous READY production url>) --yes)/;
 const CRON = 'cron-secret-must-not-leak';
 const VERCEL_ERR = 'Inspect: https://vercel.com/x\n';   // vercel deploy 의 진행 표시(stderr)
 const B64 = Buffer.alloc(32, 7).toString('base64'), HEX = Buffer.alloc(32, 9).toString('hex'), SHORT = Buffer.alloc(16, 7).toString('base64');
@@ -31,20 +43,20 @@ const STUBS: Record<string, string> = {
   vercel: 'echo "vercel $*" >> "$LOG"; env >> "$LOG.env"; [ "$1" = deploy ] && { echo "dir=$PWD"; echo "org=$VERCEL_ORG_ID project=$VERCEL_PROJECT_ID"; ls -A; } > "$LOG.copy";'
     + ` ${failOn}; case "$1 $2" in "env add") v=$(cat); echo "$3=$v" >> "$LOG.stdin" ;;`
     + ` deploy*) printf '${VERCEL_ERR.replace('\n', '\\n')}' >&2; if [ -n "$DEPLOY_PLAIN" ]; then echo "${URL_}"; else cat "$DEPLOY_JSON"; fi ;;`
-    + ' whoami) echo someone ;; esac; exit 0',
+    + ' whoami) echo someone ;; "alias ls") cat "$ALIAS_JSON" ;; esac; exit 0',
   mv: 'case "$*" in *deploy.env*) [ "$FAIL" = mv ] && exit 1 ;; esac; exec /bin/mv "$@"',
   curl: 'echo "curl $*" >> "$LOG"; out=; hdr=; prev=; for a; do case "$prev" in -o) out="$a" ;; -H) case "$a" in @*) hdr="${a#@}" ;; esac ;; esac; prev="$a"; url="$a"; done;'
-    + ' case "$url" in https://remath.vercel.app/healthz) printf "${PROD_CODE:-200}" ;; */healthz) printf "${HEALTH_CODE:-200}" ;; */api/auth/me) printf "${ME_CODE:-401}" ;;'
+    + ' case "$url" in https://remath-eight.vercel.app/healthz) printf "${PROD_CODE:-200}" ;; */healthz) printf "${HEALTH_CODE:-200}" ;; */api/auth/me) printf "${ME_CODE:-401}" ;;'
     + ' */api/cron/backup) [ -n "$hdr" ] && { ls -l "$hdr" | cut -c1-10; cat "$hdr"; } >> "$LOG.hdr"; [ -n "$out" ] && cp "$CRON_JSON" "$out"; printf "${CRON_CODE:-200}" ;; esac',
 };
 const NEW = { SUPABASE_URL: 'https://new.supabase.co', SUPABASE_SERVICE_KEY: 'service-key-must-not-leak', SUPABASE_DB_URL: 'postgres://u:dbpass-must-not-leak@new:5432/postgres', SUPABASE_ANON_KEY: 'anon-key-must-not-leak' };
 
-interface Opts { script?: 'deploy' | 'restore'; serverEnv?: string; drop?: readonly string[]; noLink?: boolean; state?: string; deployEnv?: string; cronBody?: string }
+interface Opts { script?: 'deploy' | 'restore'; serverEnv?: string; drop?: readonly string[]; noLink?: boolean; state?: string; deployEnv?: string; cronBody?: string; aliasJson?: string; serverEnvName?: string; symlink?: [string, string] }
 const CRON_OK = '{"ok":true,"pathname":"remath-20261031.sqlite","rows":{},"pruned":{},"deleted":[]}';
 // stdout 이 TTY 가 아닐 때 vercel deploy 가 내는 JSON(CLI 65.9.0 실측 모양, #78 rev 2).
 const deployJson = (readyState: string) => JSON.stringify({
   status: 'ok',
-  deployment: { id: 'dpl_fake', url: URL_, productionUrl: 'https://remath.vercel.app', inspectorUrl: 'https://vercel.com/domines-projects/remath/x', readyState, target: 'production',
+  deployment: { id: 'dpl_fake', url: URL_, productionUrl: PROD, inspectorUrl: 'https://vercel.com/domines-projects/remath/x', readyState, target: 'production',
     deploymentApiUrl: 'https://api.vercel.com/v13/deployments/dpl_fake', buildMachine: { cores: 2, memory: 8192, machine: 'basic' }, deploymentProtection: [] },
   message: `Deployment ${URL_.slice(8)} ready.`, next: [{ command: `vercel curl ${URL_}`, when: 'x' }],
 }, null, 2) + '\n';
@@ -59,10 +71,12 @@ function deploy(args: string[] = [], extra: Record<string, string> = {}, o: Opts
   for (const s of ['deploy.sh', 'restore.sh']) copyFileSync(join(ROOT, 'scripts', s), join(repo, 'scripts', s));
   if (!o.noLink) { mkdirSync(join(repo, '.vercel')); writeFileSync(join(repo, '.vercel/project.json'), JSON.stringify({ projectId: PROJECT, orgId: ORG, projectName: 'remath' })); }
   writeFileSync(join(src, 'vercel.json'), '{}');   // git archive HEAD 의 내용 표지
-  writeFileSync(join(dir, 'server.env'), o.serverEnv ?? ENV_FILE, { mode: 0o600 });
+  writeFileSync(join(dir, o.serverEnvName ?? 'server.env'), o.serverEnv ?? ENV_FILE, { mode: 0o600 });
+  if (o.symlink) symlinkSync(o.symlink[1], join(dir, o.symlink[0]));
   writeFileSync(join(dir, 'remath-20261028.sqlite'), '');
   writeFileSync(join(dir, 'deploy.json'), deployJson(o.state ?? 'READY'));
   writeFileSync(join(dir, 'cron.json'), o.cronBody ?? CRON_OK);
+  writeFileSync(join(dir, 'alias.json'), o.aliasJson ?? aliasJson());
   mkdirSync(join(dir, 'tmp'));   // TMPDIR: 끝나면 비어 있어야 한다(헤더·본문·사본·임시 env)
   if (o.deployEnv !== undefined) writeFileSync(join(dir, 'deploy.env'), o.deployEnv, { mode: 0o600 });   // restore.sh 의 백업 파일(가짜 npm 은 읽지 않는다)
   const log = join(dir, 'log');
@@ -70,7 +84,7 @@ function deploy(args: string[] = [], extra: Record<string, string> = {}, o: Opts
   // REMATH_ENV_FILE 는 상대 경로로 준다(작업 디렉터리 = dir).
   const r = spawnSync('bash', [join(repo, 'scripts', `${o.script ?? 'deploy'}.sh`), ...args], {
     cwd: dir, encoding: 'utf8',
-    env: { PATH: `${bin}:/usr/bin:/bin`, LOG: log, SRC: src, DEPLOY_JSON: join(dir, 'deploy.json'), CRON_JSON: join(dir, 'cron.json'), TMPDIR: join(dir, 'tmp'), GIT_STATUS: '', REMATH_ENV_FILE: 'server.env', ADMIN_INITIAL_PASSWORD: 'admin1234', ...NEW, ...extra },
+    env: { PATH: `${bin}:/usr/bin:/bin`, LOG: log, SRC: src, DEPLOY_JSON: join(dir, 'deploy.json'), ALIAS_JSON: join(dir, 'alias.json'), CRON_JSON: join(dir, 'cron.json'), TMPDIR: join(dir, 'tmp'), GIT_STATUS: '', REMATH_ENV_FILE: 'server.env', ADMIN_INITIAL_PASSWORD: 'admin1234', ...NEW, ...extra },
   });
   const calls = readFileSync(log, 'utf8').trim().split('\n').filter(Boolean);
   const read = (f: string) => existsSync(f) ? readFileSync(f, 'utf8') : '';
@@ -118,7 +132,7 @@ describe('scripts/deploy.sh', () => {
     expect(r.stdin).toBe([`SUPABASE_URL=${NEW.SUPABASE_URL}`, `SUPABASE_SERVICE_KEY=${NEW.SUPABASE_SERVICE_KEY}`,
       'MOCK_LLM=0', `KEY_VAULT_SECRET=${B64}`, 'MAX_TURNS=30', 'BACKUP_KEEP=14', `CRON_SECRET=${CRON}`, ''].join('\n'));
     noSecrets(r, [NEW.SUPABASE_SERVICE_KEY, NEW.SUPABASE_ANON_KEY, 'dbpass-must-not-leak', B64, CRON]);
-    expect(r.curls).toEqual([`${URL_}/healthz`, `${URL_}/api/auth/me`, `${URL_}/api/cron/backup`, 'https://remath.vercel.app/healthz']);
+    expect(r.curls).toEqual([`${URL_}/healthz`, `${URL_}/api/auth/me`, `${URL_}/api/cron/backup`, `${PROD}/healthz`]);
     expect(r.stdout).toContain(`deploying commit ${SHA}`);
     expect(r.stdout).toContain(`deployed ${URL_}`);
     expect(r.leftovers).toEqual([]);
@@ -203,7 +217,8 @@ describe('scripts/deploy.sh', () => {
   it('a deployment that is not READY fails with the rollback hint and no checks', () => {
     const r = deploy([], {}, { state: 'ERROR' });
     expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/printed no ready deployment URL; check vercel ls --prod.*vercel rollback/);
+    expect(r.stderr).toContain(`printed no ready deployment URL; check vercel ls --prod, and if a new one is serving, roll back: ${ROLLBACK}`);
+    expect(r.stderr).not.toMatch(bareRollback);
     expect(r.curls).toEqual([]);
   });
 
@@ -219,7 +234,7 @@ describe('scripts/deploy.sh', () => {
       it(`${v}=${bad} stops before step 1 (positive integer, like config.ts)`, () => {
         const r = deploy([], {}, { serverEnv: `MOCK_LLM=1\nCRON_SECRET=${CRON}\n${v}=${bad}\r\n` });
         expect(r.status).toBe(1);
-        expect(r.stderr).toMatch(new RegExp(`${v} in .* must be a positive integer`));
+        expect(r.stderr).toMatch(new RegExp(`${v} in .* must be a positive safe integer`));
         expect(r.stderr).not.toContain(`=${bad}`);
         expect(r.calls.some(c => c.startsWith('npm'))).toBe(false);
         expect(touchedVercel(r)).toBe(false);
@@ -255,14 +270,52 @@ describe('scripts/deploy.sh', () => {
 
   it('says only the new deployment was checked, reads the production domain and reminds about promote', () => {
     const r = deploy();
-    expect(r.stdout).toContain('deploy.sh: production domain https://remath.vercel.app/healthz 200\n');
-    expect(r.stdout).toContain(`if production was rolled back before, https://remath.vercel.app stays on the old deployment until: vercel promote ${URL_}`);
+    expect(r.stdout).toContain(`deploy.sh: production domain ${PROD}/healthz 200\n`);
+    expect(r.stdout).toContain(`if production was rolled back before, ${PROD} stays on the old deployment until: vercel promote ${URL_}`);
     const w = deploy([], { PROD_CODE: '404' });
     expect(w.status).toBe(0);   // 경고일 뿐
-    expect(w.stderr).toContain('WARNING production domain https://remath.vercel.app/healthz answered 404, want 200');
+    expect(w.stderr).toContain(`WARNING production domain ${PROD}/healthz answered 404, want 200`);
     const o = deploy([], { REMATH_PROD_URL: 'https://example.vercel.app' });
     expect(o.curls.at(-1)).toBe('https://example.vercel.app/healthz');
     });
+
+  it('records the deployment behind the production domain before step 1 and names it in the rollback hint', () => {
+    const r = deploy([], { ME_CODE: '500' });
+    expect(r.calls.indexOf('vercel alias ls --json --limit 100')).toBeLessThan(r.calls.findIndex(c => c.startsWith('npm')));
+    expect(r.stdout).toContain(`deploy.sh: current production (remath-eight.vercel.app): https://${PREV_HOST} (${PREV_ID})`);
+    expect(r.stderr).toContain(`roll back: ${ROLLBACK}`);
+    expect(r.stderr).not.toMatch(bareRollback);
+  });
+
+  it('without a matching alias (or unreadable alias JSON) the hint says how to pick the target', () => {
+    for (const aliasJ of [aliasJson('someone-else.vercel.app'), 'not json']) {
+      const r = deploy([], { FAIL: 'deploy --prod' }, { aliasJson: aliasJ });
+      expect(r.status).toBe(1);
+      expect(r.stdout).toContain('no current production deployment found for remath-eight.vercel.app');
+      expect(r.stderr).toContain('roll back: vercel ls remath --prod, then vercel rollback <previous READY production url> --yes');
+      expect(r.stderr).not.toMatch(bareRollback);
+    }
+    // REMATH_PROD_URL 의 호스트로 찾는다
+    const o = deploy([], { FAIL: 'deploy --prod', REMATH_PROD_URL: 'https://custom.example.org/' }, { aliasJson: aliasJson('custom.example.org') });
+    expect(o.stderr).toContain(ROLLBACK);
+  });
+
+  for (const big of ['9007199254740992', '9'.repeat(400)]) {
+    it(`MAX_TURNS of ${big.length} digits beyond the safe integer range stops before step 1`, () => {
+      const r = deploy([], {}, { serverEnv: `MOCK_LLM=1\nCRON_SECRET=${CRON}\nMAX_TURNS=${big}\n` });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toMatch(/MAX_TURNS in .* must be a positive safe integer/);
+      expect(r.stderr).not.toContain(big);
+      expect(r.calls.some(c => c.startsWith('npm'))).toBe(false);
+      expect(touchedVercel(r)).toBe(false);
+    });
+  }
+
+  it('9007199254740991 (Number.MAX_SAFE_INTEGER) passes', () => {
+    const r = deploy([], {}, { serverEnv: `MOCK_LLM=1\nCRON_SECRET=${CRON}\nBACKUP_KEEP=9007199254740991\n` });
+    expect(r.status).toBe(0);
+    expect(r.stdin).toContain('BACKUP_KEEP=9007199254740991\n');
+  });
 
   it('a failed vercel env add stops before the deploy and says the running deployment is unchanged', () => {
     const r = deploy([], { FAIL: 'env add MOCK_LLM' });
@@ -275,7 +328,9 @@ describe('scripts/deploy.sh', () => {
   it('a failed deploy exits non-zero with the rollback hint and still removes the copy', () => {
     const r = deploy([], { FAIL: 'deploy --prod' });
     expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/vercel deploy --prod failed.*vercel rollback/);
+    expect(r.stderr).toMatch(/vercel deploy --prod failed/);
+    expect(r.stderr).toContain(ROLLBACK);
+    expect(r.stderr).not.toMatch(bareRollback);
     expect(r.curls).toEqual([]);
     const copy = r.copy.split('\n')[0].slice('dir='.length);
     expect(copy).not.toBe('');
@@ -286,10 +341,11 @@ describe('scripts/deploy.sh', () => {
     const h = deploy([], { HEALTH_CODE: '500' });
     expect(h.status).toBe(1);
     expect(h.curls.filter(u => u.endsWith('/healthz')).length).toBe(30);
-    expect(h.stderr).toMatch(new RegExp(`${URL_.replace(/[.]/g, '\\.')}/healthz did not answer 200 within 60s.*vercel rollback`));
+    expect(h.stderr).toMatch(new RegExp(`${URL_.replace(/[.]/g, '\\.')}/healthz did not answer 200 within 60s`));
     const db = deploy([], { ME_CODE: '500' });
     expect(db.status).toBe(1);
-    expect(db.stderr).toMatch(/answered 500, want 401.*vercel rollback/);
+    expect(db.stderr).toMatch(/answered 500, want 401/);
+    for (const r of [h, db]) { expect(r.stderr).toContain(ROLLBACK); expect(r.stderr).not.toMatch(bareRollback); }
     for (const r of [h, db]) expect(r.curls.some(u => u.endsWith('/api/cron/backup'))).toBe(false);
   });
 
@@ -316,7 +372,7 @@ describe('scripts/deploy.sh --new (H-29 1, O-4)', () => {
     const r = deployNew(['--with-samples']);
     expect(r.stderr).toBe(VERCEL_ERR);
     expect(r.status).toBe(0);
-    expect(r.calls.slice(0, 2)).toEqual(['vercel whoami', 'git status --porcelain']);
+    expect(r.calls.slice(0, 3)).toEqual(['vercel whoami', 'vercel alias ls --json --limit 100', 'git status --porcelain']);
     expect(r.steps).toEqual([
       `npm run --silent db:new-project -w server -- ${r.tmp}`,
       'npm run --silent db:migrate -w server',
@@ -378,6 +434,25 @@ describe('scripts/deploy.sh --new (H-29 1, O-4)', () => {
     expect(o.status).toBe(0);
     expect(existsSync(join(o.dir, 'deploy.env'))).toBe(false);
     expect(readFileSync(join(o.dir, 'other.env'), 'utf8')).toContain('SUPABASE_ANON_KEY=anon-new-secret\n');
+  });
+
+  it('refuses a DEPLOY_ENV_FILE (or its .prev) that is the runtime env file, before anything; the runtime file is untouched', () => {
+    const body = `MOCK_LLM=1\nCRON_SECRET=${CRON}\n`;
+    const cases: [Record<string, string>, Opts][] = [
+      [{ REMATH_ENV_FILE: 'deploy.env' }, { serverEnvName: 'deploy.env' }],          // 기본 DEPLOY_ENV_FILE = 같은 파일
+      [{ DEPLOY_ENV_FILE: 'server.env' }, {}],                                          // 직접 같은 경로
+      [{ REMATH_ENV_FILE: 'run.env.prev', DEPLOY_ENV_FILE: 'run.env' }, { serverEnvName: 'run.env.prev' }],   // .prev 가 런타임 파일
+      [{ DEPLOY_ENV_FILE: 'link.env' }, { symlink: ['link.env', 'server.env'] }],      // DEPLOY_ENV_FILE → symlink → 런타임 파일
+      [{ REMATH_ENV_FILE: 'rt-link.env' }, { serverEnvName: 'deploy.env', symlink: ['rt-link.env', 'deploy.env'] }],   // 런타임 파일 → symlink → deploy.env
+    ];
+    for (const [extra, o] of cases) {
+      const r = deployNew([], extra, { ...o, serverEnv: body });
+      expect(r.status, JSON.stringify(extra)).toBe(1);
+      expect(r.stderr).toMatch(/DEPLOY_ENV_FILE .* is the same file as REMATH_ENV_FILE /);
+      expect(r.calls.some(c => c.startsWith('npm'))).toBe(false);
+      expect(touchedVercel(r)).toBe(false);
+      expect(readFileSync(join(r.dir, o.serverEnvName ?? 'server.env'), 'utf8')).toBe(body);
+    }
   });
 
   it('a failed deploy.env write leaves no temp file and stops before step 2', () => {
@@ -516,7 +591,7 @@ describe('scripts/restore.sh <file> (H-31, #49)', () => {
       ...envAdds(['SUPABASE_URL', 'SUPABASE_SERVICE_KEY', 'MOCK_LLM', 'CRON_SECRET']),
       DEPLOY,
     ]);
-    expect(r.curls).toEqual([`${URL_}/healthz`, `${URL_}/api/auth/me`, `${URL_}/api/cron/backup`, 'https://remath.vercel.app/healthz']);
+    expect(r.curls).toEqual([`${URL_}/healthz`, `${URL_}/api/auth/me`, `${URL_}/api/cron/backup`, `${PROD}/healthz`]);
     expect(r.stdout).toContain(`== 3/6 restore ${r.file}`);
     expect(r.deployEnv).toContain(`SUPABASE_URL=https://${REF}.supabase.co\n`);   // 복구도 새 프로젝트를 남긴다
     expect(r.childEnv).not.toContain(TOKEN);

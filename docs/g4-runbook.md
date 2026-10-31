@@ -1,6 +1,6 @@
 # G4 수용 런북 (실서버, Vercel)
 
-#53 Q15 "실서버 배포 → 키 등록 → 그룹·사용자 → 예비교사 세션 종료 → CSV"와 V17 "첫 백업 Blob 확인"을 실행하는 순서표다(G3 런북과 같은 형식). 실서버는 Vercel 프로젝트 `remath`(Hobby)이고 주소는 `https://remath.vercel.app`(V11)이다. 각 단계는 **명령 → 기대값 → 확인**이다. 기대값과 다르면 거기서 멈추고 출력과 함께 기록한다. 명령·변수·실패 시 상태의 설명은 README "운영". 끝에 사람이 서명한다(#62).
+#53 Q15 "실서버 배포 → 키 등록 → 그룹·사용자 → 예비교사 세션 종료 → CSV"와 V17 "첫 백업 Blob 확인"을 실행하는 순서표다(G3 런북과 같은 형식). 실서버는 Vercel 프로젝트 `remath`(Hobby)이고 주소는 `https://remath-eight.vercel.app`(V11, `*.vercel.app`; `remath.vercel.app`은 남의 사이트다)이다. 확인(읽기만): `vercel project inspect remath`의 Domains. 각 단계는 **명령 → 기대값 → 확인**이다. 기대값과 다르면 거기서 멈추고 출력과 함께 기록한다. 명령·변수·실패 시 상태의 설명은 README "운영". 끝에 사람이 서명한다(#62).
 
 Vercel 런타임 로그는 Hobby에서 **1시간**만 남는다(README "운영 › 로그"). 로그 확인은 그 단계를 마친 직후에 한다.
 
@@ -39,7 +39,7 @@ Vercel 런타임 로그는 Hobby에서 **1시간**만 남는다(README "운영 �
 
   ```sh
   W=$(mktemp -d)                          # 700
-  B=https://remath.vercel.app
+  B=https://remath-eight.vercel.app     # 이 프로젝트의 production 도메인 (vercel project inspect remath)
   rv() { grep "^$1=" "$REMATH_ENV_FILE" | cut -d= -f2-; }                  # 런타임 env 파일의 값 (source 하지 않는다)
   dv() { grep "^$1=" ~/.config/remath/deploy.env | cut -d= -f2-; }         # 1단계가 쓰는 새 프로젝트의 SUPABASE_*
   q() { PGSERVICEFILE="$W/pg.conf" PGSERVICE=g4 psql -XAt -c "$1"; }       # 실서버 DB 에 SQL (접속 정보는 1단계에서 만드는 서비스 파일, 인자에 없다)
@@ -59,11 +59,11 @@ scripts/deploy.sh --new --with-samples; echo "exit $?"
 ```
 
 기대값:
-- 사전 점검 통과(출력 없음). 실패하면 그 이유(`vercel whoami failed`, `.vercel/project.json is missing`, `git tree is not clean`, `CRON_SECRET is not set`, `KEY_VAULT_SECRET … not set`/`not 32 bytes` 등) 한 줄, 프로젝트를 만들지 않는다.
+- 사전 점검 통과: `deploy.sh: current production (remath-eight.vercel.app): https://remath-<id>-domines-projects.vercel.app (dpl_…)` 한 줄(되돌리기 대상, 적어 둔다). 못 찾으면 `note: no current production deployment found …`이고 계속한다. 실패하면 그 이유(`vercel whoami failed`, `.vercel/project.json is missing`, `git tree is not clean`, `CRON_SECRET is not set`, `KEY_VAULT_SECRET … not set`/`not 32 bytes` 등) 한 줄, 프로젝트를 만들지 않는다.
 - `== 1/6 new Supabase project` … 새 ref 출력, 이어서 `deploy.sh: new project's SUPABASE_* saved to …/.config/remath/deploy.env (600)`(값은 출력되지 않는다).
 - `== 2/6 migrations`(0001–0006), `== 3/6 seed`, `== 4/6 smoke`: 스모크 줄이 모두 `ok`(관리자 1, `ai_settings` 3, 샘플 5, 번역 10, anon 거부 `42501`).
 - `== 5/6 switch to https://<ref>.supabase.co` → `deploy.sh: Production env set (SUPABASE_URL SUPABASE_SERVICE_KEY MOCK_LLM KEY_VAULT_SECRET CRON_SECRET)` → `deploying commit <sha>` → Vercel 빌드 진행 표시 → `deployed https://remath-<id>-domines-projects.vercel.app` → `the new deployment serves (…/healthz 200, new DB answers)`.
-- `== 6/6 backup` → `deploy.sh: backup ok remath-<YYYYMMDD>.sqlite (Blob)` → `deploy.sh: production domain https://remath.vercel.app/healthz 200` → `note: if production was rolled back before, …` → `deploy.sh: ok (commit <sha>, new deployment <url>)`, **`exit 0`**. 도메인 줄이 `WARNING … answered <코드>`면 아래 확인의 `$B/healthz`로 다시 보고, 그래도 아니면 `vercel promote <url>`.
+- `== 6/6 backup` → `deploy.sh: backup ok remath-<YYYYMMDD>.sqlite (Blob)` → `deploy.sh: production domain https://remath-eight.vercel.app/healthz 200` → `note: if production was rolled back before, …` → `deploy.sh: ok (commit <sha>, new deployment <url>)`, **`exit 0`**. 도메인 줄이 `WARNING … answered <코드>`면 아래 확인의 `$B/healthz`로 다시 보고, 그래도 아니면 `vercel promote <url>`.
 - 출력 어디에도 키·비밀 값이 없다.
 
 확인:
@@ -200,7 +200,7 @@ logs -q 'backup' | grep -c 'backup ok'                                          
 
 ## 되돌리기
 
-1단계 5/6 이후 실패(배포·`/healthz`·DB 응답)면 출력의 안내대로 `vercel rollback`(직전 production 배포 = 자리표시 페이지)으로 되돌리고 `vercel rollback status`로 확인한다. 되돌린 배포는 자기 env를 쓴다. Production env는 새 값으로 남는다. 원인을 고친 뒤 `set -a; . ~/.config/remath/deploy.env; set +a`로 새 프로젝트를 셸에 넣고 `--new` 없이 `scripts/deploy.sh`를 다시 실행한다. 롤백 뒤에는 production 도메인 자동 할당이 꺼지므로, 그 실행이 출력한 URL을 확인한 뒤 `vercel promote <url>`로 올린다. 4단계 전 실패면 Vercel은 그대로이고, 출력된 새 Supabase 프로젝트는 대시보드에서 지운다.
+1단계 5/6 이후 실패(배포·`/healthz`·DB 응답)면 출력의 안내대로 `vercel rollback <URL> --yes`로 되돌리고(대상 = 사전 점검이 출력한 `current production (remath-eight.vercel.app): <URL> (<id>)`, 지금은 자리표시 페이지 배포. 대상 없는 `vercel rollback`은 상태만 보여 준다) `vercel rollback status`로 확인한다. 되돌린 배포는 자기 env를 쓴다. Production env는 새 값으로 남는다. 원인을 고친 뒤 `set -a; . ~/.config/remath/deploy.env; set +a`로 새 프로젝트를 셸에 넣고 `--new` 없이 `scripts/deploy.sh`를 다시 실행한다. 롤백 뒤에는 production 도메인 자동 할당이 꺼지므로, 그 실행이 출력한 URL을 확인한 뒤 `vercel promote <url>`로 올린다. 4단계 전 실패면 Vercel은 그대로이고, 출력된 새 Supabase 프로젝트는 대시보드에서 지운다.
 
 ## 정리
 

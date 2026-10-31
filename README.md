@@ -66,7 +66,7 @@ ENV_FILE=$HOME/.config/remath/dev.env SERVER_URL=http://127.0.0.1:3946 npm run t
 ### 전제
 
 - **운영자 머신**: Node 24·npm(저장소에서 `npm ci`), `psql`(postgresql-client), `curl`, `git`, Vercel CLI(`npm i -g vercel`), 확인용 `sqlite3`.
-- **Vercel**: `vercel login`(계정이 프로젝트 `remath`에 접근할 수 있어야 한다) → 저장소 루트에서 `vercel link`(scope `domines-projects`, 프로젝트 `remath`). `.vercel/project.json`이 생긴다(git 제외). Production env에 `CRON_SECRET`(Sensitive)과 Blob 비공개 저장소 연결(`BLOB_READ_WRITE_TOKEN`)이 이미 있다.
+- **Vercel**: `vercel login`(계정이 프로젝트 `remath`에 접근할 수 있어야 한다) → 저장소 루트에서 `vercel link`(scope `domines-projects`, 프로젝트 `remath`). `.vercel/project.json`이 생긴다(git 제외). Production 도메인은 **`https://remath-eight.vercel.app`**이다(`remath.vercel.app`은 다른 사람의 사이트). 확인(읽기만): `vercel project inspect remath`의 Domains, 또는 대시보드 프로젝트 → Settings → Domains. 바뀌면 `REMATH_PROD_URL`로 준다. Production env에 `CRON_SECRET`(Sensitive)과 Blob 비공개 저장소 연결(`BLOB_READ_WRITE_TOKEN`)이 이미 있다.
 - **배포는 HEAD 커밋에서**: `deploy.sh`는 깨끗한 git 트리만 받고, `git archive HEAD` 사본(`.git` 없음)에서 `vercel deploy --prod`를 실행한다. Hobby는 HEAD 커밋 작성자가 Vercel 계정에 없으면 CLI 배포를 막기 때문이다. 빌드는 Vercel(iad1)에서 `npm ci` + `npm run build:vercel`로 돈다. 빌드는 DB에 닿지 않는다.
 - **Supabase**: 조직의 Personal access token(`SUPABASE_ACCESS_TOKEN`), 조직 **slug**(`SUPABASE_ORG_ID`), 리전, 새 프로젝트의 DB 비밀번호. 무료 플랜은 조직당 활성 프로젝트 2개까지다: 한도에서 `deploy.sh --new`·`restore.sh`는 HTTP 400으로 실패하고 아무것도 만들지 않는다. 안 쓰는 프로젝트를 대시보드에서 일시 중지하거나 지운다.
 - **HTTPS**: `*.vercel.app`은 HTTPS다. `COOKIE_SECURE`는 기본값(true)이고 production에는 넣지 않는다(`deploy.sh`가 `COOKIE_SECURE=false`를 거절한다).
@@ -117,7 +117,7 @@ ENV_FILE=$HOME/.config/remath/dev.env SERVER_URL=http://127.0.0.1:3946 npm run t
 | `BACKUP_DIR` | PRD 7절 경로 | `backup` | 로컬만 | `backup` | 로컬 CLI(`npm run backup`)의 출력 디렉터리(`server/` 기준). Vercel에서는 쓰지 않는다 |
 | `SUPABASE_ACCESS_TOKEN`, `SUPABASE_ORG_ID`, `SUPABASE_REGION`, `SUPABASE_DB_PASSWORD` | PRD 7절 1단계 "Management API" (O-4) | 없음(`--new`·`restore.sh`에 필수) | 운영자 셸만 | `deploy.sh --new`, `restore.sh` | `SUPABASE_ORG_ID` = 조직 slug. 토큰은 `db:new-project`에만 넘어간다 |
 | `REMATH_ENV_FILE` | V10 | 없음(필수) | 운영자 셸만 | `deploy.sh`, `restore.sh` | production 런타임 env 파일 경로(위 1) |
-| `REMATH_PROD_URL` | #78 | `https://remath.vercel.app` | 운영자 셸만 | `deploy.sh`(끝) | production 도메인. 끝에 `/healthz`를 읽기만 한다(200 아니면 경고) |
+| `REMATH_PROD_URL` | #78 | `https://remath-eight.vercel.app` | 운영자 셸만 | `deploy.sh`(사전 점검·끝) | 이 프로젝트의 production 도메인(`remath.vercel.app`은 남의 사이트다). 사전 점검이 `vercel alias ls`로 그 뒤의 배포를 찾아 되돌리기 안내에 넣고, 끝에 `/healthz`를 읽기만 한다(200 아니면 경고) |
 | `DEPLOY_ENV_FILE` | #78 | `REMATH_ENV_FILE` 옆 `deploy.env` | 운영자 셸만 | `deploy.sh --new`, `restore.sh` | 새 프로젝트의 `SUPABASE_*` 4개를 남기는 파일(600, 이전 판 `.prev`). 재배포에서 `set -a; . <파일>; set +a`로 읽는다 |
 | `NEW_PROJECT_TIMEOUT_S` | O-4 | `600` | 운영자 셸만 | `db:new-project` | 새 프로젝트 `ACTIVE_HEALTHY` 대기 한도 |
 | `DEPLOY_NEW_FAULT` | G3 | 없음 | 운영자 셸만 | `db:new-project` | G3 8단계 전용: `anon_as_service`면 anon 키 자리에 service key를 적어 스모크가 FAIL 해야 한다 |
@@ -133,12 +133,12 @@ ENV_FILE=$HOME/.config/remath/dev.env SERVER_URL=http://127.0.0.1:3946 npm run t
 5. 전환: Vercel Production env에 `SUPABASE_URL`·`SUPABASE_SERVICE_KEY` + 런타임 env 파일의 변수를 `vercel env add <NAME> --environment production --sensitive --force`로 쓴다(값은 stdin으로만: 명령줄 인자·출력·파일에 남지 않는다) → HEAD의 `git archive` 사본에서 `vercel deploy --prod`(커밋 SHA와 배포 URL을 출력, 사본은 지운다) → 그 URL의 `/healthz` 200(최대 60초) + 모르는 쿠키로 `/api/auth/me` 401(새 DB 응답) 확인(`the new deployment serves …`). 이 확인은 새 배포 URL만 본다.
 6. 첫 백업: 그 URL의 `GET /api/cron/backup`(Bearer는 0600 임시 헤더 파일로 `curl -H @file`) → 200이고 본문이 `{ ok: true, pathname }`이어야 한다. Blob pathname 출력(`remath-<YYYYMMDD>.sqlite`).
 
-끝으로 production 도메인(`REMATH_PROD_URL`, 기본 `https://remath.vercel.app`)의 `/healthz`를 읽기만 한다: 200이 아니면 경고만 한다. 이어서 "롤백한 적이 있으면 도메인은 `vercel promote <url>` 전까지 이전 배포에 남는다"는 안내를 출력한다(아래 "되돌리기"). 마지막 줄은 `deploy.sh: ok (commit <sha>, new deployment <url>)`, 종료코드 0.
+끝으로 production 도메인(`REMATH_PROD_URL`, 기본 `https://remath-eight.vercel.app`)의 `/healthz`를 읽기만 한다: 200이 아니면 경고만 한다. 이어서 "롤백한 적이 있으면 도메인은 `vercel promote <url>` 전까지 이전 배포에 남는다"는 안내를 출력한다(아래 "되돌리기"). 마지막 줄은 `deploy.sh: ok (commit <sha>, new deployment <url>)`, 종료코드 0.
 
 - 사전 점검 실패: 아무것도 만들지 않고 Vercel도 건드리지 않는다.
 - 프로젝트 생성 뒤 4단계까지 실패: 종료코드 ≠ 0, Vercel은 그대로(이전 배포가 계속 서비스), 새 프로젝트는 남겨 두고 ref를 출력한다 — 사람이 대시보드에서 지운다.
 - 5단계 `vercel env add` 실패: 떠 있는 production은 그대로다(env는 배포마다 고정). Production env가 일부만 새 값일 수 있다: 원인을 고치고 출력대로 `set -a; . <DEPLOY_ENV_FILE>; set +a` 뒤 `--new` 없이 다시 실행한다.
-- 배포·`/healthz`·DB 응답 실패: 새 배포가 production이 됐을 수 있다. 되돌리기 = `vercel rollback`(직전 production 배포가 자기 env로 다시 서비스한다, 아래 "되돌리기"). Production env는 새 값으로 남으므로 다음 배포 전에 고친다.
+- 배포·`/healthz`·DB 응답 실패: 새 배포가 production이 됐을 수 있다. 출력의 되돌리기 명령 `vercel rollback <이전 배포 URL> --yes`를 실행한다(대상은 사전 점검이 `deploy.sh: current production (…): <URL> (<id>)`로 적어 둔 배포, 아래 "되돌리기"). Production env는 새 값으로 남으므로 다음 배포 전에 고친다.
 - 6단계 백업만 실패: 전환은 끝났고 서버는 돈다. Vercel 런타임 로그의 `backup failed: …`를 보고, 출력된 `curl -H @<헤더 파일> <url>/api/cron/backup`으로 다시 하거나 다음 크론을 기다린다.
 - 이전 Supabase 프로젝트는 어떤 경로도 읽거나 옮기거나 지우지 않는다.
 
@@ -151,7 +151,7 @@ scripts/deploy.sh
 ```
 - 마이그레이션은 파일마다 한 트랜잭션: 실패한 파일은 흔적이 없고 앞서 성공한 파일은 남는다. 거기서 멈추고 Vercel은 그대로다. 마이그레이션이 이전 코드와 호환되지 않으면 배포 전까지 떠 있는 서버가 영향을 받는다. 그 밖의 실패 상태는 `--new`와 같다.
 
-**되돌리기** — `vercel rollback`(직전 production 배포로; Hobby는 직전 것까지만), `vercel rollback status`로 확인. 되돌린 배포는 만들 때의 env(그때의 DB)를 쓴다. DB 스키마는 되돌리지 않는다. 롤백 뒤에는 production 도메인 자동 할당이 꺼진다: 다음 `deploy.sh`의 배포는 출력된 URL에서는 확인되지만 `https://remath.vercel.app`에는 붙지 않으므로, 확인 뒤 `vercel promote <그 URL>`로 올린다(자동 할당도 다시 켜진다).
+**되돌리기** — `vercel rollback <배포 URL 또는 id> --yes`(Hobby는 직전 production 배포까지만), `vercel rollback status`로 확인. 대상 없이 `vercel rollback`만 치면 상태만 보여 주고 되돌리지 않는다(CLI 65.9.0). `deploy.sh`는 사전 점검에서 production 도메인 뒤의 배포를 `vercel alias ls --json`으로 찾아 실패 안내에 그 URL을 넣는다. 찾지 못했으면(첫 배포 전) `vercel ls remath --prod`에서 직전 READY production URL을 고른다. 되돌린 배포는 만들 때의 env(그때의 DB)를 쓴다. DB 스키마는 되돌리지 않는다. 롤백 뒤에는 production 도메인 자동 할당이 꺼진다: 다음 `deploy.sh`의 배포는 출력된 URL에서는 확인되지만 production 도메인(`https://remath-eight.vercel.app`)에는 붙지 않으므로, 확인 뒤 `vercel promote <그 URL>`로 올린다(자동 할당도 다시 켜진다).
 
 **매일 백업(Vercel Cron, V9)** — Vercel Cron이 매일 18:00 UTC(= 03:00 KST, Hobby는 그 한 시간 안 임의 시각, production 배포에서만) `GET /api/cron/backup`을 `Authorization: Bearer $CRON_SECRET`으로 부른다. 일정은 `scripts/build-vercel.mjs`가 Build Output `config.json`의 `crons`에 둔다(`vercel.json`이 아니다). 함수가 `/tmp`에 SQLite 파일을 만들어 Blob 비공개 저장소 `remath-backups`에 올리고, 같은 접두어 안에서 새것부터 `BACKUP_KEEP`개만 남긴다.
 - 이름: production은 `remath-<YYYYMMDD>.sqlite`(저장소 뿌리), 그 밖의 환경은 `<VERCEL_ENV>/remath-<YYYYMMDD>.sqlite`(예: `preview/…`, 로컬 `local/…`). 그래서 Preview를 수동 호출해도 production 백업은 지워지지 않는다. 날짜는 함수 시각(UTC) 기준이고 같은 날 다시 돌면 덮어쓴다.

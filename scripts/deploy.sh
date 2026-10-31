@@ -4,10 +4,11 @@
 #   → 5) 전환: Vercel Production env 설정(SUPABASE_URL·SERVICE_KEY + 런타임 env 파일의 변수, 값은 stdin 으로만)
 #      → HEAD 의 git archive 사본에서 vercel deploy --prod → 그 배포 URL 의 /healthz 200 + 새 DB 응답(401) 확인
 #   → 6) 첫 백업: 그 URL 의 GET /api/cron/backup(CRON_SECRET Bearer, 0600 헤더 파일로) → 200 + { ok: true, pathname }.
-#      끝으로 production 도메인(REMATH_PROD_URL, 기본 https://remath.vercel.app)의 /healthz 를 읽기만 한다(200 아니면 경고).
+#      끝으로 production 도메인(REMATH_PROD_URL, 기본 https://remath-eight.vercel.app)의 /healthz 를 읽기만 한다(200 아니면 경고).
 #      위 확인은 새 배포 URL 이 도는 것까지다: 롤백 뒤에는 도메인이 vercel promote <url> 전까지 이전 배포에 남는다.
 # 어느 단계든 실패하면 거기서 멈추고 종료코드 ≠ 0. 4단계까지 실패하면 Vercel 은 건드리지 않는다.
-# env 값은 배포를 만들 때 고정된다: 실행 중인 production 은 새 배포가 올라갈 때까지 이전 DB 를 쓴다. 되돌리기 = vercel rollback.
+# env 값은 배포를 만들 때 고정된다: 실행 중인 production 은 새 배포가 올라갈 때까지 이전 DB 를 쓴다.
+# 되돌리기 = vercel rollback <대상> --yes: 사전 점검이 vercel alias ls 로 지금 production 도메인 뒤의 배포를 찾아 안내에 넣는다.
 # 두 번째 실행은 DB 를 바꾸지 않는다(같은 env 로 새 production 배포가 하나 더 생긴다).
 #
 #   set -a; . ~/.config/remath/deploy.env; set +a      # SUPABASE_URL SUPABASE_SERVICE_KEY SUPABASE_DB_URL SUPABASE_ANON_KEY (--new 가 썼다)
@@ -64,6 +65,12 @@ REMATH_ENV_FILE="$(realpath "$REMATH_ENV_FILE")"
 DEPLOY_ENV_FILE="${DEPLOY_ENV_FILE:-$(dirname "$REMATH_ENV_FILE")/deploy.env}"
 case $DEPLOY_ENV_FILE in /*) ;; *) DEPLOY_ENV_FILE="$PWD/$DEPLOY_ENV_FILE" ;; esac   # 스크립트는 곧 저장소 루트로 cd 한다
 [ -z "$new" ] || [ -d "$(dirname "$DEPLOY_ENV_FILE")" ] || fail "DEPLOY_ENV_FILE $DEPLOY_ENV_FILE: its directory does not exist"
+# 런타임 env 파일은 읽기만 한다: DEPLOY_ENV_FILE(또는 그 .prev)이 같은 파일이거나 symlink 로 그리 이어지면 덮어쓰게 된다 → 1단계 전에 멈춘다.
+# 비교는 symlink 를 푼 절대 경로끼리(REMATH_ENV_FILE 은 위에서 realpath 했다). 없는 파일은 디렉터리만 풀고 이름을 붙인다.
+resolve() { if [ -e "$1" ] || [ -L "$1" ]; then realpath "$1" 2>/dev/null || printf %s "$1"; else printf '%s/%s' "$(realpath "$(dirname "$1")" 2>/dev/null || dirname "$1")" "$(basename "$1")"; fi; }
+for f in "$DEPLOY_ENV_FILE" "$DEPLOY_ENV_FILE.prev"; do
+  [ "$(resolve "$f")" != "$REMATH_ENV_FILE" ] || fail "DEPLOY_ENV_FILE $DEPLOY_ENV_FILE (or its .prev $f) is the same file as REMATH_ENV_FILE $REMATH_ENV_FILE; keep them apart (set DEPLOY_ENV_FILE to another path)"
+done
 # 런타임 env 파일의 값: 그 키의 마지막 줄, 첫 = 뒤 글자 그대로, 줄 끝 CR 하나만 뗀다. 없으면 빈 문자열. 값은 출력하지 않는다.
 env_get() { local l v=; while IFS= read -r l || [ -n "$l" ]; do case $l in "$1="*) v="${l#*=}" ;; esac; done < "$REMATH_ENV_FILE"; printf %s "${v%$'\r'}"; }
 env_has() { grep -q "^$1=" "$REMATH_ENV_FILE"; }
@@ -89,8 +96,11 @@ for v in "${RUNTIME[@]}"; do
   ! env_has "$v" || [ -n "$(env_get "$v")" ] || fail "$v is empty in $REMATH_ENV_FILE; remove the line or give it a value"
 done
 # 서버(config.ts·backup.ts)는 이 셋을 양의 정수로만 받는다(아니면 함수가 설정 검증에서 500). 값은 출력하지 않는다.
+# z.coerce.number().int().positive(): 숫자로 바꿔 안전한 정수(Number.isSafeInteger)여야 한다. 값은 env 로 node 에 넘긴다(인자 아님).
 for v in MAX_TURNS TURN_TIMEOUT_MS BACKUP_KEEP; do
-  ! env_has "$v" || [[ $(env_get "$v") =~ ^0*[1-9][0-9]*$ ]] || fail "$v in $REMATH_ENV_FILE must be a positive integer (digits only)"
+  ! env_has "$v" || { [[ $(env_get "$v") =~ ^0*[1-9][0-9]*$ ]] \
+    && N="$(env_get "$v")" node -e 'const n = Number(process.env.N); process.exit(Number.isSafeInteger(n) && n > 0 ? 0 : 1)'; } \
+    || fail "$v in $REMATH_ENV_FILE must be a positive safe integer (digits only, at most 9007199254740991)"
 done
 if [ -n "$restore" ]; then
   [ -f "$restore" ] || fail "backup file $restore is not a file"
@@ -103,6 +113,23 @@ vercel whoami >/dev/null 2>&1 || fail "vercel whoami failed: run vercel login fi
 link="$(cat .vercel/project.json)"
 [[ $link =~ \"orgId\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]] || fail ".vercel/project.json has no orgId: run vercel link again"; org="${BASH_REMATCH[1]}"
 [[ $link =~ \"projectId\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]] || fail ".vercel/project.json has no projectId: run vercel link again"; project="${BASH_REMATCH[1]}"
+# 지금 production 도메인 뒤의 배포(읽기만): 실패 시 되돌릴 대상. 없으면(첫 배포 전·별칭 없음) 안내만 바꾸고 계속한다.
+PROD_URL="${REMATH_PROD_URL:-https://remath-eight.vercel.app}"; PROD_URL="${PROD_URL%/}"
+prod_host="${PROD_URL#*://}"; prod_host="${prod_host%%/*}"
+prev_dep="$(vercel alias ls --json --limit 100 2>/dev/null | H="$prod_host" node -e '
+  let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+    let j; try { j = JSON.parse(s); } catch { process.exit(1); }
+    const a = (j && Array.isArray(j.aliases) ? j.aliases : []).find(x => x && x.alias === process.env.H);
+    if (!a || !a.deploymentId) process.exit(1);
+    console.log(a.url ? `https://${String(a.url).replace(/^https?:\/\//, "")} (${a.deploymentId})` : a.deploymentId);
+  });')" || prev_dep=
+if [ -n "$prev_dep" ]; then
+  echo "deploy.sh: current production ($prod_host): $prev_dep"
+  rollback_cmd="vercel rollback ${prev_dep%% *} --yes"
+else
+  echo "deploy.sh: note: no current production deployment found for $prod_host (vercel alias ls)"
+  rollback_cmd="vercel ls remath --prod, then vercel rollback <previous READY production url> --yes"
+fi
 status="$(git status --porcelain)" || fail "cannot read git status (git status --porcelain failed); production is built from HEAD of a clean tree"
 [ -z "$status" ] || fail "the git tree is not clean (git status --porcelain): commit or remove the changes; production is built from HEAD"
 # 백업이 아니거나 테이블·열이 빠졌으면 여기서 멈춘다: 프로젝트를 만들기 전.
@@ -175,7 +202,7 @@ for v in "${RUNTIME[@]}"; do
 done
 echo "deploy.sh: Production env set (SUPABASE_URL SUPABASE_SERVICE_KEY$(for v in "${RUNTIME[@]}"; do env_has "$v" && printf ' %s' "$v"; done))"
 
-rollback="roll back: vercel rollback (the previous production deployment serves again with its own env)$where"
+rollback="roll back: $rollback_cmd (that deployment serves again with its own env)$where"
 sha="$(git rev-parse HEAD)"
 copy="$(mktemp -d)"
 git archive --format=tar HEAD | tar -xf - -C "$copy" || fail "git archive HEAD failed; nothing was deployed"
@@ -219,7 +246,7 @@ for _ in $(seq 30); do
     [ "$got" = 200 ] && [ -n "$pathname" ] || fail "first backup failed ($why); the switch is done and the new deployment $url serves$where. See Vercel runtime logs (backup failed: …), then retry: curl -H @<file with Authorization: Bearer \$CRON_SECRET> $url/api/cron/backup"
     echo "deploy.sh: backup ok $pathname (Blob)"
     # 위 확인은 새 배포 URL 만 본다. production 도메인이 그 배포를 가리키는지는 따로: 읽기만, 실패해도 경고.
-    prod="${REMATH_PROD_URL:-https://remath.vercel.app}"
+    prod="$PROD_URL"
     got="$(code "$prod/healthz")"
     if [ "$got" = 200 ]; then echo "deploy.sh: production domain $prod/healthz 200"
     else echo "deploy.sh: WARNING production domain $prod/healthz answered $got, want 200" >&2; fi
