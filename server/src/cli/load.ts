@@ -1,5 +1,6 @@
 // 부하 점검 (#60, Q14): 예비교사 N명이 동시에 로그인→세션 시작→턴 N회→종료→기록 조회. CI 밖에서 수동 실행.
 // 실행: `LOAD_BASE=http://… LOAD_ADMIN_PASSWORD=… npm run load -w server` (LOAD_USERS=30, LOAD_TURNS=10, LOAD_SCENARIO=게시된 시나리오 id, 없으면 첫 게시본).
+// 보호된 Vercel Preview: `LOAD_BYPASS_SECRET=<보호 우회 시크릿>`을 더하면 모든 요청에 `x-vercel-protection-bypass` 헤더를 붙인다.
 // 만든 것(사용자 load-<run>-<i>, 임시 그룹 load-<run>)은 실패해도 finally 에서 관리자 API로 지운다(사용자 삭제 = 기록 cascade).
 import { z } from 'zod';
 import type * as S from '@remath/shared';
@@ -54,10 +55,20 @@ async function teacher(api: Api, nickname: string, password: string, scenario: s
 const Env = z.object({
   LOAD_BASE: z.url(), LOAD_ADMIN_PASSWORD: z.string().min(1),
   LOAD_USERS: z.coerce.number().int().positive().default(30), LOAD_TURNS: z.coerce.number().int().positive().default(10),
-  LOAD_SCENARIO: z.uuid().optional(),
+  LOAD_SCENARIO: z.uuid().optional(), LOAD_BYPASS_SECRET: z.string().min(1).optional(),
 });
 
 export type LoadEnv = z.infer<typeof Env>;
+
+/** 클라이언트 하나(쿠키 jar 하나)의 fetch. bypass 가 있으면 모든 요청에 Vercel 보호 우회 헤더를 붙인다. */
+export function loadFetch(bypass: string | undefined, f: typeof fetch = fetch): typeof fetch {
+  const inner = bypass === undefined ? f : (input: RequestInfo | URL, init: RequestInit = {}) => {
+    const headers = new Headers(init.headers);
+    headers.set('x-vercel-protection-bypass', bypass);
+    return f(input, { ...init, headers });
+  };
+  return jarFetch(inner as typeof fetch);
+}
 
 /** 한 번 실행. browser(realm) = 쿠키 따로 쓰는 새 클라이언트. 부하·검사 실패가 하나라도 있으면 false, 준비 실패는 throw. */
 export async function runLoad(env: LoadEnv, browser: (realm: 'teacher' | 'admin') => Api): Promise<boolean> {
@@ -105,5 +116,5 @@ export async function runLoad(env: LoadEnv, browser: (realm: 'teacher' | 'admin'
 
 if (import.meta.main) main('load', async () => {
   const env = readEnv(Env, process.env), base = env.LOAD_BASE.replace(/\/$/, '');
-  if (!await runLoad(env, realm => createHttpApi({ realm, fetch: jarFetch(), base }))) process.exitCode = 1;
+  if (!await runLoad(env, realm => createHttpApi({ realm, fetch: loadFetch(env.LOAD_BYPASS_SECRET), base }))) process.exitCode = 1;
 });

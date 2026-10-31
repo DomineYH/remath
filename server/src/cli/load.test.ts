@@ -1,7 +1,7 @@
 // 부하 검사 함수(#60, Q14): 세션 기록이 seq 1부터 빈틈 없이, 예비교사 발화가 보낸 순서대로인지.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Api } from '../../../client/src/api/types.ts';
-import { checkSession, runLoad, type LoadEnv } from './load.ts';
+import { checkSession, loadFetch, runLoad, type LoadEnv } from './load.ts';
 
 const t = (seq: number, speaker: 'teacher' | 'student' | 'mentor', text: string) =>
   ({ seq, speaker, text, leverage: null, object: null, trigger: null, created_at: '2026-10-29T00:00:00.000Z' });
@@ -69,5 +69,28 @@ describe('runLoad setup and cleanup', () => {
   });
   it('load-* users left after cleanup fail the run', async () => {
     expect(await runLoad(ENV, fakeApis({ keepDeleted: true }).browser)).toBe(false);
+  });
+});
+
+// 보호된 Preview(#79): LOAD_BYPASS_SECRET 이 있으면 모든 요청에 우회 헤더, 없으면 헤더 없음. 쿠키 jar 는 그대로.
+describe('loadFetch', () => {
+  const seen: Headers[] = [];
+  const f = (async (_: RequestInfo | URL, init: RequestInit = {}) => {
+    seen.push(new Headers(init.headers));
+    return new Response('{}', { headers: { 'set-cookie': 'remath_teacher=c1; Path=/' } });
+  }) as typeof fetch;
+  beforeEach(() => { seen.length = 0; });
+
+  it('adds x-vercel-protection-bypass to every request when set, keeping cookies', async () => {
+    const lf = loadFetch('s3cret', f);
+    await lf('http://load.test/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' } });
+    await lf('http://load.test/api/practice');
+    expect(seen.map(h => h.get('x-vercel-protection-bypass'))).toEqual(['s3cret', 's3cret']);
+    expect(seen[0]!.get('content-type')).toBe('application/json');
+    expect(seen[1]!.get('cookie')).toBe('remath_teacher=c1');
+  });
+  it('sends no bypass header when unset', async () => {
+    await loadFetch(undefined, f)('http://load.test/api/practice');
+    expect(seen[0]!.has('x-vercel-protection-bypass')).toBe(false);
   });
 });
