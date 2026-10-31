@@ -125,7 +125,7 @@ ReMath는 가상 학생(챗봇)의 오개념을 예비교사가 **설명 대신 
 | 운영 DB | Supabase (PostgreSQL) · 서버는 service role, RLS는 2차 방어 | 관리 콘솔·백업·확장이 쉽고, 배포마다 새 프로젝트/스키마를 스크립트로 생성 가능 |
 | 백업 DB | SQLite3 (better-sqlite3) · 서버 로컬 파일 | 외부 서비스 없이 복구·오프라인 조회 가능 |
 | LLM | 공급자 어댑터 인터페이스 1개 + OpenAI/Anthropic/Gemini 구현 3개 | 역할별로 다른 공급자·모델·effort를 같은 호출 형태로 처리 |
-| 배포 | Docker 이미지 1개(서버 + 정적 클라이언트), `deploy.sh`가 DB 생성 절차를 강제 | 7절 |
+| 배포 | Vercel(서버 = Node 함수 1개, 클라이언트 = 정적 CDN), `deploy.sh`가 DB 생성 절차를 강제 | 7절 |
 
 ## 6. 데이터 모델 (Supabase / PostgreSQL)
 

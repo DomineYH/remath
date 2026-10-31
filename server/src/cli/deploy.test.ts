@@ -5,7 +5,10 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// 테스트마다 가짜 도구로 bash 를 여러 번 돌린다: 전체 스위트와 함께 돌 때 기본 5초는 빠듯하다.
+vi.setConfig({ testTimeout: 30_000 });
 
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const ORG = 'team_fakeorg', PROJECT = 'prj_fakeproject', SHA = '0123456789abcdef0123456789abcdef01234567';
@@ -23,19 +26,21 @@ const STUBS: Record<string, string> = {
   npm: 'echo "npm $*" >> "$LOG"; case "$*" in *db:restore*) [ -n "${ADMIN_INITIAL_PASSWORD:-}" ] && echo "ADMIN_INITIAL_PASSWORD reached $*" >> "$LOG" ;; esac; case "$*" in *db:new-project*) for a; do out="$a"; done; echo "$out" > "$LOG.tmp"; env >> "$LOG.newenv";'
     + ` [ "$FAIL" = db:new-project ] && exit 1; printf "$NEW_ENV" > "$out"; exit 0 ;; esac; env >> "$LOG.env"; ${failOn}; exit 0`,
   // archive = $SRC 를 tar 로(실제 git archive 처럼 .git 없음). status --porcelain = $GIT_STATUS.
-  git: `echo "git $*" >> "$LOG"; ${failOn}; case "$1" in status) printf "$GIT_STATUS" ;; rev-parse) echo ${SHA} ;; archive) tar -cf - -C "$SRC" . ;; esac; exit 0`,
+  git: `echo "git $*" >> "$LOG"; ${failOn}; case "$1" in status) [ -n "$GIT_STATUS_EXIT" ] && exit "$GIT_STATUS_EXIT"; printf "$GIT_STATUS" ;; rev-parse) echo ${SHA} ;; archive) tar -cf - -C "$SRC" . ;; esac; exit 0`,
   // env add 의 값은 stdin 으로만 온다: $LOG.stdin 에 NAME=값. deploy 는 작업 디렉터리·ID 를 $LOG.copy 에 남기고 URL 을 stdout 에.
   vercel: 'echo "vercel $*" >> "$LOG"; env >> "$LOG.env"; [ "$1" = deploy ] && { echo "dir=$PWD"; echo "org=$VERCEL_ORG_ID project=$VERCEL_PROJECT_ID"; ls -A; } > "$LOG.copy";'
     + ` ${failOn}; case "$1 $2" in "env add") v=$(cat); echo "$3=$v" >> "$LOG.stdin" ;;`
     + ` deploy*) printf '${VERCEL_ERR.replace('\n', '\\n')}' >&2; if [ -n "$DEPLOY_PLAIN" ]; then echo "${URL_}"; else cat "$DEPLOY_JSON"; fi ;;`
     + ' whoami) echo someone ;; esac; exit 0',
+  mv: 'case "$*" in *deploy.env*) [ "$FAIL" = mv ] && exit 1 ;; esac; exec /bin/mv "$@"',
   curl: 'echo "curl $*" >> "$LOG"; out=; hdr=; prev=; for a; do case "$prev" in -o) out="$a" ;; -H) case "$a" in @*) hdr="${a#@}" ;; esac ;; esac; prev="$a"; url="$a"; done;'
-    + ' case "$url" in */healthz) printf "${HEALTH_CODE:-200}" ;; */api/auth/me) printf "${ME_CODE:-401}" ;;'
-    + ' */api/cron/backup) [ -n "$hdr" ] && { ls -l "$hdr" | cut -c1-10; cat "$hdr"; } >> "$LOG.hdr"; [ -n "$out" ] && printf \'{"ok":true,"pathname":"remath-20261031.sqlite","rows":{}}\' > "$out"; printf "${CRON_CODE:-200}" ;; esac',
+    + ' case "$url" in https://remath.vercel.app/healthz) printf "${PROD_CODE:-200}" ;; */healthz) printf "${HEALTH_CODE:-200}" ;; */api/auth/me) printf "${ME_CODE:-401}" ;;'
+    + ' */api/cron/backup) [ -n "$hdr" ] && { ls -l "$hdr" | cut -c1-10; cat "$hdr"; } >> "$LOG.hdr"; [ -n "$out" ] && cp "$CRON_JSON" "$out"; printf "${CRON_CODE:-200}" ;; esac',
 };
 const NEW = { SUPABASE_URL: 'https://new.supabase.co', SUPABASE_SERVICE_KEY: 'service-key-must-not-leak', SUPABASE_DB_URL: 'postgres://u:dbpass-must-not-leak@new:5432/postgres', SUPABASE_ANON_KEY: 'anon-key-must-not-leak' };
 
-interface Opts { script?: 'deploy' | 'restore'; serverEnv?: string; drop?: readonly string[]; noLink?: boolean; state?: string; deployEnv?: string }
+interface Opts { script?: 'deploy' | 'restore'; serverEnv?: string; drop?: readonly string[]; noLink?: boolean; state?: string; deployEnv?: string; cronBody?: string }
+const CRON_OK = '{"ok":true,"pathname":"remath-20261031.sqlite","rows":{},"pruned":{},"deleted":[]}';
 // stdout 이 TTY 가 아닐 때 vercel deploy 가 내는 JSON(CLI 65.9.0 실측 모양, #78 rev 2).
 const deployJson = (readyState: string) => JSON.stringify({
   status: 'ok',
@@ -57,13 +62,15 @@ function deploy(args: string[] = [], extra: Record<string, string> = {}, o: Opts
   writeFileSync(join(dir, 'server.env'), o.serverEnv ?? ENV_FILE, { mode: 0o600 });
   writeFileSync(join(dir, 'remath-20261028.sqlite'), '');
   writeFileSync(join(dir, 'deploy.json'), deployJson(o.state ?? 'READY'));
+  writeFileSync(join(dir, 'cron.json'), o.cronBody ?? CRON_OK);
+  mkdirSync(join(dir, 'tmp'));   // TMPDIR: 끝나면 비어 있어야 한다(헤더·본문·사본·임시 env)
   if (o.deployEnv !== undefined) writeFileSync(join(dir, 'deploy.env'), o.deployEnv, { mode: 0o600 });   // restore.sh 의 백업 파일(가짜 npm 은 읽지 않는다)
   const log = join(dir, 'log');
   writeFileSync(log, '');
   // REMATH_ENV_FILE 는 상대 경로로 준다(작업 디렉터리 = dir).
   const r = spawnSync('bash', [join(repo, 'scripts', `${o.script ?? 'deploy'}.sh`), ...args], {
     cwd: dir, encoding: 'utf8',
-    env: { PATH: `${bin}:/usr/bin:/bin`, LOG: log, SRC: src, DEPLOY_JSON: join(dir, 'deploy.json'), GIT_STATUS: '', REMATH_ENV_FILE: 'server.env', ADMIN_INITIAL_PASSWORD: 'admin1234', ...NEW, ...extra },
+    env: { PATH: `${bin}:/usr/bin:/bin`, LOG: log, SRC: src, DEPLOY_JSON: join(dir, 'deploy.json'), CRON_JSON: join(dir, 'cron.json'), TMPDIR: join(dir, 'tmp'), GIT_STATUS: '', REMATH_ENV_FILE: 'server.env', ADMIN_INITIAL_PASSWORD: 'admin1234', ...NEW, ...extra },
   });
   const calls = readFileSync(log, 'utf8').trim().split('\n').filter(Boolean);
   const read = (f: string) => existsSync(f) ? readFileSync(f, 'utf8') : '';
@@ -74,6 +81,8 @@ function deploy(args: string[] = [], extra: Record<string, string> = {}, o: Opts
     curls: calls.filter(c => c.startsWith('curl')).map(c => c.split(' ').at(-1) ?? ''),
     childEnv: read(`${log}.env`), newEnv: read(`${log}.newenv`), tmp: read(`${log}.tmp`).trim(),
     stdin: read(`${log}.stdin`), copy: read(`${log}.copy`), hdr: read(`${log}.hdr`), deployEnv: read(join(dir, 'deploy.env')), deployEnvPrev: read(join(dir, 'deploy.env.prev')),
+    vercelAnon: calls.some(c => c.startsWith('vercel') && c.includes('SUPABASE_ANON_KEY')),
+    leftovers: [...readdirSync(join(dir, 'tmp')), ...readdirSync(dir).filter(n => n.includes('.tmp.'))],
   };
   return out;
 }
@@ -102,17 +111,19 @@ describe('scripts/deploy.sh', () => {
       'npm run --silent db:migrate -w server',
       'npm run --silent db:seed -w server -- --with-samples',
       'npm run --silent db:smoke -w server -- --with-samples',
-      ...envAdds(['SUPABASE_URL', 'SUPABASE_SERVICE_KEY', 'SUPABASE_ANON_KEY', 'MOCK_LLM', 'KEY_VAULT_SECRET', 'MAX_TURNS', 'BACKUP_KEEP', 'CRON_SECRET']),
+      ...envAdds(['SUPABASE_URL', 'SUPABASE_SERVICE_KEY', 'MOCK_LLM', 'KEY_VAULT_SECRET', 'MAX_TURNS', 'BACKUP_KEEP', 'CRON_SECRET']),
       DEPLOY,
     ]);
     // 값은 stdin 으로만, 줄바꿈 없이 그대로. SUPABASE_DB_URL·PORT 는 Vercel 에 넣지 않는다.
-    expect(r.stdin).toBe([`SUPABASE_URL=${NEW.SUPABASE_URL}`, `SUPABASE_SERVICE_KEY=${NEW.SUPABASE_SERVICE_KEY}`, `SUPABASE_ANON_KEY=${NEW.SUPABASE_ANON_KEY}`,
+    expect(r.stdin).toBe([`SUPABASE_URL=${NEW.SUPABASE_URL}`, `SUPABASE_SERVICE_KEY=${NEW.SUPABASE_SERVICE_KEY}`,
       'MOCK_LLM=0', `KEY_VAULT_SECRET=${B64}`, 'MAX_TURNS=30', 'BACKUP_KEEP=14', `CRON_SECRET=${CRON}`, ''].join('\n'));
     noSecrets(r, [NEW.SUPABASE_SERVICE_KEY, NEW.SUPABASE_ANON_KEY, 'dbpass-must-not-leak', B64, CRON]);
-    expect(r.curls).toEqual([`${URL_}/healthz`, `${URL_}/api/auth/me`, `${URL_}/api/cron/backup`]);
+    expect(r.curls).toEqual([`${URL_}/healthz`, `${URL_}/api/auth/me`, `${URL_}/api/cron/backup`, 'https://remath.vercel.app/healthz']);
     expect(r.stdout).toContain(`deploying commit ${SHA}`);
     expect(r.stdout).toContain(`deployed ${URL_}`);
-    expect(r.stdout).toMatch(/new DB answers[\s\S]*== 6\/6 backup[\s\S]*remath-20261031\.sqlite[\s\S]*deploy\.sh: ok \(commit [0-9a-f]{40}, https:\/\/remath-abc123-domines-projects\.vercel\.app\)\n$/);
+    expect(r.leftovers).toEqual([]);
+    expect(r.vercelAnon).toBe(false);
+    expect(r.stdout).toMatch(/new deployment serves .*new DB answers[\s\S]*== 6\/6 backup[\s\S]*remath-20261031\.sqlite[\s\S]*deploy\.sh: ok \(commit [0-9a-f]{40}, new deployment https:\/\/remath-abc123-domines-projects\.vercel\.app\)\n$/);
   });
 
   it('deploys from a git archive copy of HEAD (no .git) with the linked ids, and removes the copy', () => {
@@ -203,6 +214,56 @@ describe('scripts/deploy.sh', () => {
     expect(r.stdout).not.toMatch(/saved to/);
   });
 
+  for (const v of ['MAX_TURNS', 'TURN_TIMEOUT_MS', 'BACKUP_KEEP']) {
+    for (const bad of ['oops', '0', '-1', '1.5']) {
+      it(`${v}=${bad} stops before step 1 (positive integer, like config.ts)`, () => {
+        const r = deploy([], {}, { serverEnv: `MOCK_LLM=1\nCRON_SECRET=${CRON}\n${v}=${bad}\r\n` });
+        expect(r.status).toBe(1);
+        expect(r.stderr).toMatch(new RegExp(`${v} in .* must be a positive integer`));
+        expect(r.stderr).not.toContain(`=${bad}`);
+        expect(r.calls.some(c => c.startsWith('npm'))).toBe(false);
+        expect(touchedVercel(r)).toBe(false);
+      });
+    }
+  }
+
+  it('numeric vars with CRLF pass and reach Vercel without the CR', () => {
+    const r = deploy([], {}, { serverEnv: `MOCK_LLM=1\r\nCRON_SECRET=${CRON}\r\nMAX_TURNS=40\r\nTURN_TIMEOUT_MS=120000\r\nBACKUP_KEEP=07\r\n` });
+    expect(r.status).toBe(0);
+    expect(r.stdin).toContain('MAX_TURNS=40\nTURN_TIMEOUT_MS=120000\nBACKUP_KEEP=07\n');
+  });
+
+  it('a git status that fails (exit 42, empty output) stops preflight', () => {
+    const r = deploy([], { GIT_STATUS_EXIT: '42' });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/cannot read git status/);
+    expect(r.calls.some(c => c.startsWith('npm'))).toBe(false);
+    expect(touchedVercel(r)).toBe(false);
+  });
+
+  it('the cron step needs 200 and a body with ok: true and a pathname', () => {
+    for (const body of ['not json', '{"ok":false,"pathname":"remath-20261031.sqlite"}', '{"ok":true}', '{"ok":true,"pathname":""}']) {
+      const r = deploy([], {}, { cronBody: body });
+      expect(r.status, body).toBe(1);
+      expect(r.stderr).toMatch(/first backup failed \(HTTP 200 without ok\/pathname in the body\); the switch is done.*retry: curl/);
+      expect(r.stdout).not.toMatch(/deploy\.sh: ok/);
+      expect(r.leftovers).toEqual([]);
+    }
+    const ok = deploy();
+    expect(ok.stdout).toContain('deploy.sh: backup ok remath-20261031.sqlite (Blob)\n');
+    });
+
+  it('says only the new deployment was checked, reads the production domain and reminds about promote', () => {
+    const r = deploy();
+    expect(r.stdout).toContain('deploy.sh: production domain https://remath.vercel.app/healthz 200\n');
+    expect(r.stdout).toContain(`if production was rolled back before, https://remath.vercel.app stays on the old deployment until: vercel promote ${URL_}`);
+    const w = deploy([], { PROD_CODE: '404' });
+    expect(w.status).toBe(0);   // 경고일 뿐
+    expect(w.stderr).toContain('WARNING production domain https://remath.vercel.app/healthz answered 404, want 200');
+    const o = deploy([], { REMATH_PROD_URL: 'https://example.vercel.app' });
+    expect(o.curls.at(-1)).toBe('https://example.vercel.app/healthz');
+    });
+
   it('a failed vercel env add stops before the deploy and says the running deployment is unchanged', () => {
     const r = deploy([], { FAIL: 'env add MOCK_LLM' });
     expect(r.status).toBe(1);
@@ -235,7 +296,8 @@ describe('scripts/deploy.sh', () => {
   it('a failed cron backup exits non-zero after the switch, with how to retry', () => {
     const r = deploy([], { CRON_CODE: '500' });
     expect(r.status).toBe(1);
-    expect(r.stderr).toMatch(/first backup failed \(HTTP 500\); the switch is done and production is serving/);
+    expect(r.stderr).toMatch(/first backup failed \(HTTP 500\); the switch is done and the new deployment https:\S+ serves/);
+    expect(r.leftovers).toEqual([]);
     expect(r.stderr).toMatch(/retry: curl .*-H @<file with Authorization: Bearer \$CRON_SECRET> .*\/api\/cron\/backup/);
     expect(r.stderr).not.toContain(CRON);
   });
@@ -260,12 +322,13 @@ describe('scripts/deploy.sh --new (H-29 1, O-4)', () => {
       'npm run --silent db:migrate -w server',
       'npm run --silent db:seed -w server -- --with-samples',
       'npm run --silent db:smoke -w server -- --with-samples',
-      ...envAdds(['SUPABASE_URL', 'SUPABASE_SERVICE_KEY', 'SUPABASE_ANON_KEY', 'MOCK_LLM', 'CRON_SECRET']),
+      ...envAdds(['SUPABASE_URL', 'SUPABASE_SERVICE_KEY', 'MOCK_LLM', 'CRON_SECRET']),
       DEPLOY,
     ]);
     expect(r.stdout).toContain('== 1/6 new Supabase project');
     expect(r.stdout).toContain(`== 5/6 switch to https://${REF}.supabase.co`);
-    expect(r.stdin).toContain(`SUPABASE_URL=https://${REF}.supabase.co\nSUPABASE_SERVICE_KEY=svc-new-secret\nSUPABASE_ANON_KEY=anon-new-secret\n`);
+    expect(r.stdin).toContain(`SUPABASE_URL=https://${REF}.supabase.co\nSUPABASE_SERVICE_KEY=svc-new-secret\nMOCK_LLM=1\n`);
+    expect(r.stdin).not.toContain('anon-new-secret');
     expect(r.childEnv).toContain(`SUPABASE_URL=https://${REF}.supabase.co\n`);
     expect(r.childEnv).not.toContain(TOKEN);   // vercel·다른 npm 단계 어디에도
     expect(r.newEnv.split('\n').filter(l => l.includes(TOKEN))).toEqual([`SUPABASE_ACCESS_TOKEN=${TOKEN}`]);   // db:new-project 에만, 한 번
@@ -301,7 +364,8 @@ describe('scripts/deploy.sh --new (H-29 1, O-4)', () => {
     // set -a; . <file>; set +a 로 같은 값이 돌아온다
     const back = execFileSync('bash', ['-c', `set -a; . '${f}'; set +a; printf '%s|%s' "$SUPABASE_DB_URL" "$SUPABASE_SERVICE_KEY"`], { encoding: 'utf8', env: {} });
     expect(back).toBe(`postgresql://postgres.${REF}:x@pooler:5432/postgres?sslmode=require|svc-new-secret`);
-    expect(readdirSync(r.dir).filter(n => n.startsWith('deploy.env.tmp'))).toEqual([]);
+    expect(r.leftovers).toEqual([]);
+    expect(r.vercelAnon).toBe(false);
   });
 
   it('an existing deploy.env is kept as deploy.env.prev (600); DEPLOY_ENV_FILE overrides the path', () => {
@@ -316,6 +380,16 @@ describe('scripts/deploy.sh --new (H-29 1, O-4)', () => {
     expect(readFileSync(join(o.dir, 'other.env'), 'utf8')).toContain('SUPABASE_ANON_KEY=anon-new-secret\n');
   });
 
+  it('a failed deploy.env write leaves no temp file and stops before step 2', () => {
+    const r = deployNew([], { FAIL: 'mv' });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/cannot write .*deploy\.env/);
+    expect(r.leftovers).toEqual([]);
+    expect(existsSync(join(r.dir, 'deploy.env'))).toBe(false);
+    expect(r.calls.some(c => c.includes('db:migrate'))).toBe(false);
+    expect(touchedVercel(r)).toBe(false);
+  });
+
   it('a value with shell characters is quoted so sourcing gives it back', () => {
     const odd = `SUPABASE_URL=https://${REF}.supabase.co\\nSUPABASE_SERVICE_KEY=a b$c'd\\nSUPABASE_DB_URL=postgresql://p:x@h:5432/postgres?a=1&b=2\\nSUPABASE_ANON_KEY=a\\n`;
     const r = deployNew([], { NEW_ENV: odd });
@@ -325,7 +399,7 @@ describe('scripts/deploy.sh --new (H-29 1, O-4)', () => {
   });
 
   it('a failed vercel env add after --new points to loading deploy.env', () => {
-    const r = deployNew([], { FAIL: 'env add SUPABASE_ANON_KEY' });
+    const r = deployNew([], { FAIL: 'env add MOCK_LLM' });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain(`set -a; . ${join(r.dir, 'deploy.env')}; set +a and run scripts/deploy.sh again without --new`);
   });
@@ -347,7 +421,7 @@ describe('scripts/deploy.sh --new (H-29 1, O-4)', () => {
   });
 
   it('once the Production env is touched a failure does not tell the operator to delete the project', () => {
-    for (const extra of [{ FAIL: 'env add SUPABASE_ANON_KEY' }, { FAIL: 'deploy --prod' }, { CRON_CODE: '500' }] as Record<string, string>[]) {
+    for (const extra of [{ FAIL: 'env add MOCK_LLM' }, { FAIL: 'deploy --prod' }, { CRON_CODE: '500' }] as Record<string, string>[]) {
       const r = deployNew([], extra);
       expect(r.status).toBe(1);
       expect(r.stderr).not.toMatch(/delete it by hand/);
@@ -439,10 +513,10 @@ describe('scripts/restore.sh <file> (H-31, #49)', () => {
       'npm run --silent db:migrate -w server',
       `npm run --silent db:restore -w server -- --load ${r.file}`,
       `npm run --silent db:smoke -w server -- --restore ${r.file}`,
-      ...envAdds(['SUPABASE_URL', 'SUPABASE_SERVICE_KEY', 'SUPABASE_ANON_KEY', 'MOCK_LLM', 'CRON_SECRET']),
+      ...envAdds(['SUPABASE_URL', 'SUPABASE_SERVICE_KEY', 'MOCK_LLM', 'CRON_SECRET']),
       DEPLOY,
     ]);
-    expect(r.curls).toEqual([`${URL_}/healthz`, `${URL_}/api/auth/me`, `${URL_}/api/cron/backup`]);
+    expect(r.curls).toEqual([`${URL_}/healthz`, `${URL_}/api/auth/me`, `${URL_}/api/cron/backup`, 'https://remath.vercel.app/healthz']);
     expect(r.stdout).toContain(`== 3/6 restore ${r.file}`);
     expect(r.deployEnv).toContain(`SUPABASE_URL=https://${REF}.supabase.co\n`);   // 복구도 새 프로젝트를 남긴다
     expect(r.childEnv).not.toContain(TOKEN);

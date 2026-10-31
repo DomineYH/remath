@@ -42,11 +42,12 @@ Vercel 런타임 로그는 Hobby에서 **1시간**만 남는다(README "운영 �
   B=https://remath.vercel.app
   rv() { grep "^$1=" "$REMATH_ENV_FILE" | cut -d= -f2-; }                  # 런타임 env 파일의 값 (source 하지 않는다)
   dv() { grep "^$1=" ~/.config/remath/deploy.env | cut -d= -f2-; }         # 1단계가 쓰는 새 프로젝트의 SUPABASE_*
-  q() { psql "$(dv SUPABASE_DB_URL)" -XAt -c "$1"; }                      # 실서버 DB 에 SQL
+  q() { PGSERVICEFILE="$W/pg.conf" PGSERVICE=g4 psql -XAt -c "$1"; }       # 실서버 DB 에 SQL (접속 정보는 1단계에서 만드는 서비스 파일, 인자에 없다)
   logs() { vercel logs -e production --since 1h -n 1000 "$@"; }           # 최근 1시간 production 런타임 로그
   code() { curl -s -o /dev/null -w '%{http_code}\n' "$@"; }
   json() { node -p "const d=JSON.parse(fs.readFileSync(0)); $1"; }       # 표준입력 JSON 에서 값 하나
-  login() { curl -s -c "$W/$1.jar" -H 'content-type: application/json' -d "{\"nickname\":\"$3\",\"password\":\"$4\"}" "$B$2" -o /dev/null -w '%{http_code}\n'; }
+  # 로그인 본문은 env → node → stdin → curl(--data-binary @-): 비밀번호가 어떤 프로그램의 인자에도 없다(셸 함수 인자는 프로세스 인자가 아니다)
+  login() { LN="$3" LP="$4" node -e 'process.stdout.write(JSON.stringify({nickname: process.env.LN, password: process.env.LP}))' | curl -s -c "$W/$1.jar" -H 'content-type: application/json' --data-binary @- "$B$2" -o /dev/null -w '%{http_code}\n'; }
   ```
 
 - 시작 상태: `curl -s "$B/" | grep -c 'Coming soon'` → 1(자리표시 페이지), `code "$B/healthz"` → 404.
@@ -61,8 +62,8 @@ scripts/deploy.sh --new --with-samples; echo "exit $?"
 - 사전 점검 통과(출력 없음). 실패하면 그 이유(`vercel whoami failed`, `.vercel/project.json is missing`, `git tree is not clean`, `CRON_SECRET is not set`, `KEY_VAULT_SECRET … not set`/`not 32 bytes` 등) 한 줄, 프로젝트를 만들지 않는다.
 - `== 1/6 new Supabase project` … 새 ref 출력, 이어서 `deploy.sh: new project's SUPABASE_* saved to …/.config/remath/deploy.env (600)`(값은 출력되지 않는다).
 - `== 2/6 migrations`(0001–0006), `== 3/6 seed`, `== 4/6 smoke`: 스모크 줄이 모두 `ok`(관리자 1, `ai_settings` 3, 샘플 5, 번역 10, anon 거부 `42501`).
-- `== 5/6 switch to https://<ref>.supabase.co` → `deploy.sh: Production env set (SUPABASE_URL SUPABASE_SERVICE_KEY SUPABASE_ANON_KEY MOCK_LLM KEY_VAULT_SECRET CRON_SECRET)` → `deploying commit <sha>` → Vercel 빌드 진행 표시 → `deployed https://remath-<id>-domines-projects.vercel.app` → `switched (…/healthz 200, new DB answers)`.
-- `== 6/6 backup` → `deploy.sh: backup ok remath-<YYYYMMDD>.sqlite (Blob)` → `deploy.sh: ok (commit <sha>, <url>)`, **`exit 0`**.
+- `== 5/6 switch to https://<ref>.supabase.co` → `deploy.sh: Production env set (SUPABASE_URL SUPABASE_SERVICE_KEY MOCK_LLM KEY_VAULT_SECRET CRON_SECRET)` → `deploying commit <sha>` → Vercel 빌드 진행 표시 → `deployed https://remath-<id>-domines-projects.vercel.app` → `the new deployment serves (…/healthz 200, new DB answers)`.
+- `== 6/6 backup` → `deploy.sh: backup ok remath-<YYYYMMDD>.sqlite (Blob)` → `deploy.sh: production domain https://remath.vercel.app/healthz 200` → `note: if production was rolled back before, …` → `deploy.sh: ok (commit <sha>, new deployment <url>)`, **`exit 0`**. 도메인 줄이 `WARNING … answered <코드>`면 아래 확인의 `$B/healthz`로 다시 보고, 그래도 아니면 `vercel promote <url>`.
 - 출력 어디에도 키·비밀 값이 없다.
 
 확인:
@@ -74,7 +75,7 @@ curl -s -w ' %{http_code}\n' "$B/healthz"            # {"ok":true} 200 (producti
 code -H 'Cookie: remath_teacher=g4-check' "$B/api/auth/me"   # 401
 logs -q 'llm' | grep -c 'llm: live'                  # 1 이상
 logs -q 'llm' | grep -c 'llm: mock'                  # 0
-vercel env ls production                             # SUPABASE_URL·SERVICE_KEY·ANON_KEY·MOCK_LLM·KEY_VAULT_SECRET·CRON_SECRET 이 Sensitive
+vercel env ls production                             # SUPABASE_URL·SERVICE_KEY·MOCK_LLM·KEY_VAULT_SECRET·CRON_SECRET 이 Sensitive (SUPABASE_ANON_KEY·DB_URL 은 없다)
 ```
 
 새 프로젝트의 `SUPABASE_*` 4개는 1단계가 `~/.config/remath/deploy.env`(600)에 남겼다(재배포·비밀번호 초기화에 쓴다).
@@ -82,6 +83,12 @@ vercel env ls production                             # SUPABASE_URL·SERVICE_KEY
 ```sh
 ls -l ~/.config/remath/deploy.env | cut -c1-10                                  # -rw-------
 cut -d= -f1 ~/.config/remath/deploy.env | tr '\n' ' '; echo                     # SUPABASE_URL SUPABASE_SERVICE_KEY SUPABASE_DB_URL SUPABASE_ANON_KEY
+# psql 서비스 파일(600, $W 안): DB URL 을 node 가 파일에서 읽어 나눈다. 비밀번호는 파일에만, 인자·출력에 없다
+( umask 077; node -e '
+  const m = require("fs").readFileSync(process.argv[1], "utf8").match(/^SUPABASE_DB_URL=(.*)$/m), u = new URL(m[1]), d = decodeURIComponent;
+  console.log(`[g4]\nhost=${u.hostname}\nport=${u.port || 5432}\ndbname=${d(u.pathname.slice(1))}\nuser=${d(u.username)}\npassword=${d(u.password)}\nsslmode=require`);
+' ~/.config/remath/deploy.env > "$W/pg.conf" )
+q "select 1"                                                                      # 1
 dv SUPABASE_URL                                     # https://<ref>.supabase.co — 1단계 출력의 ref
 q "select count(*) from ai_settings where key_ciphertext is not null"   # 0 (아직 키 없음)
 ```
@@ -183,7 +190,7 @@ vercel blob get "remath-$D.sqlite" --access private -o "$W/b.sqlite"; chmod 600 
 sqlite3 "$W/b.sqlite" "select count(*) from pragma_table_info('ai_settings') where name='key_ciphertext'"   # 0 (열 없음)
 sqlite3 "$W/b.sqlite" "select role, provider, key_masked is not null from ai_settings order by 1"           # 3행, 공급자·마스킹만
 q "select count(*) from ai_settings where key_ciphertext is not null"                                      # 3 (DB 에는 있다)
-grep -cF "$(rv KEY_VAULT_SECRET)" "$W/b.sqlite"                                                            # 0 (비밀도 없다)
+node -e 'const fs = require("fs"), s = fs.readFileSync(process.argv[1], "utf8").match(/^KEY_VAULT_SECRET=(.*)$/m)[1].trim(); console.log(fs.readFileSync(process.argv[2]).includes(Buffer.from(s)) ? "match" : "no-match")' "$REMATH_ENV_FILE" "$W/b.sqlite"   # no-match (비밀도 없다; 비교는 한 프로세스 안, 값은 인자에 없다)
 logs -q 'backup' | grep -c 'backup ok'                                                                     # 1 이상
 ```
 
@@ -201,7 +208,7 @@ logs -q 'backup' | grep -c 'backup ok'                                          
 rm -rf "$W"; unset TP ADMIN_INITIAL_PASSWORD SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD M N D
 ```
 
-`$W`에는 쿠키(로그인 토큰)·CSV(발화 원문)·백업 파일(비밀번호 해시)·Bearer 헤더 파일이 있었다. 브라우저가 내려받은 CSV도 지운다. 실서버 프로젝트, Blob 백업, `prod.env`·`deploy.env`(600)는 남긴다.
+`$W`에는 쿠키(로그인 토큰)·CSV(발화 원문)·백업 파일(비밀번호 해시)·Bearer 헤더 파일·psql 서비스 파일(DB 비밀번호)이 있었다. 브라우저가 내려받은 CSV도 지운다. 실서버 프로젝트, Blob 백업, `prod.env`·`deploy.env`(600)는 남긴다.
 
 ## 서명
 

@@ -102,7 +102,7 @@ ENV_FILE=$HOME/.config/remath/dev.env SERVER_URL=http://127.0.0.1:3946 npm run t
 |---|---|---|---|---|---|
 | `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` | PRD 7절 5단계, ADR-0003 3항 | 없음(필수) | Vercel(Sensitive) + 로컬 | 서버, `backup`, `admin:reset-password`, `db:seed`, `db:smoke` | 서버의 Data API 접속. `deploy.sh`·`restore.sh`가 스모크 통과 뒤 Vercel에 쓴다 |
 | `SUPABASE_DB_URL` | 티켓 11 SPEC §3 | 없음(마이그레이션·복구에 필수) | 로컬만 | `db:migrate`, `db:restore` | `psql` 연결. **Session pooler(5432)**; Transaction pooler 금지. 직접 연결 호스트 `db.<ref>`는 IPv6 전용이라 IPv4에서 안 된다. DB 비밀번호가 들어 있어 Vercel에 넣지 않는다 |
-| `SUPABASE_ANON_KEY` | PRD 7절 4단계 "anon 키" | 없음(스모크에 필수) | Vercel(Sensitive) + 로컬 | `db:smoke` | 스모크 전용. 서버 런타임은 읽지 않는다(V13 목록이라 Vercel에도 둔다) |
+| `SUPABASE_ANON_KEY` | PRD 7절 4단계 "anon 키" | 없음(스모크에 필수) | 로컬만(운영자 셸·`deploy.env`) | `db:smoke` | 스모크 전용. 서버 런타임은 읽지 않으므로 Vercel에 넣지 않는다(#78 결정, V13 목록에서 뺌). 예전에 넣었다면 `vercel env rm SUPABASE_ANON_KEY --environment production`으로 지워도 된다 |
 | `ADMIN_INITIAL_PASSWORD` | PRD 7절 3단계 | 없음(`deploy.sh`에 필수) | 운영자 셸만 | `db:seed` | 관리자가 없을 때 1회 argon2id 해시로 저장. 비밀번호 규칙(`Password` zod) 미달이면 시드 실패. 재배포에서도 요구하지만 관리자가 있으면 쓰이지 않는다. `restore.sh`는 쓰지 않는다 |
 | `MOCK_LLM` | PRD 8절, Q4 | 없음(필수) | Vercel + 로컬 | 서버, `deploy.sh`(사전 점검) | `0` = 실 공급자(OpenAI·Anthropic·Gemini, 관리자 AI 설정의 키), `1` = 세 역할 모두 목. 그 밖의 값이면 기동 실패. 기동 로그 `llm: live`/`llm: mock`. Production `0`, Preview `1` |
 | `KEY_VAULT_SECRET` | PRD 9절, Q6·Q25 | 없음(`MOCK_LLM=0`이면 필수) | Vercel(Sensitive) + 로컬 | 서버, `deploy.sh`(사전 점검) | **3단계** 키 금고(AES-256-GCM)의 비밀. 32바이트(base64 또는 hex 64자): `openssl rand -base64 32`(자동 생성 없음). 없거나 32바이트가 아니면 서버가 요청마다 500, `deploy.sh`·`restore.sh`는 1단계 전에 실패. 비밀을 바꾸면 저장된 키를 복호할 수 없으므로 **모든 키를 다시 등록한다**. 백업에 없다(키 암호문도 없다): 복구 후 키를 다시 등록한다. `MOCK_LLM=1`이면 읽지 않는다 |
@@ -117,6 +117,7 @@ ENV_FILE=$HOME/.config/remath/dev.env SERVER_URL=http://127.0.0.1:3946 npm run t
 | `BACKUP_DIR` | PRD 7절 경로 | `backup` | 로컬만 | `backup` | 로컬 CLI(`npm run backup`)의 출력 디렉터리(`server/` 기준). Vercel에서는 쓰지 않는다 |
 | `SUPABASE_ACCESS_TOKEN`, `SUPABASE_ORG_ID`, `SUPABASE_REGION`, `SUPABASE_DB_PASSWORD` | PRD 7절 1단계 "Management API" (O-4) | 없음(`--new`·`restore.sh`에 필수) | 운영자 셸만 | `deploy.sh --new`, `restore.sh` | `SUPABASE_ORG_ID` = 조직 slug. 토큰은 `db:new-project`에만 넘어간다 |
 | `REMATH_ENV_FILE` | V10 | 없음(필수) | 운영자 셸만 | `deploy.sh`, `restore.sh` | production 런타임 env 파일 경로(위 1) |
+| `REMATH_PROD_URL` | #78 | `https://remath.vercel.app` | 운영자 셸만 | `deploy.sh`(끝) | production 도메인. 끝에 `/healthz`를 읽기만 한다(200 아니면 경고) |
 | `DEPLOY_ENV_FILE` | #78 | `REMATH_ENV_FILE` 옆 `deploy.env` | 운영자 셸만 | `deploy.sh --new`, `restore.sh` | 새 프로젝트의 `SUPABASE_*` 4개를 남기는 파일(600, 이전 판 `.prev`). 재배포에서 `set -a; . <파일>; set +a`로 읽는다 |
 | `NEW_PROJECT_TIMEOUT_S` | O-4 | `600` | 운영자 셸만 | `db:new-project` | 새 프로젝트 `ACTIVE_HEALTHY` 대기 한도 |
 | `DEPLOY_NEW_FAULT` | G3 | 없음 | 운영자 셸만 | `db:new-project` | G3 8단계 전용: `anon_as_service`면 anon 키 자리에 service key를 적어 스모크가 FAIL 해야 한다 |
@@ -124,15 +125,15 @@ ENV_FILE=$HOME/.config/remath/dev.env SERVER_URL=http://127.0.0.1:3946 npm run t
 ### 명령과 실패 시 상태
 
 **`scripts/deploy.sh --new [--with-samples]`** — 새 서버(H-29, 사용자 스토리 19·21·22·25, V10).
-0. 사전 점검(아무것도 만들기 전): 도구(`node npm psql curl git vercel`), `vercel whoami`, `.vercel/project.json`, 깨끗한 git 트리, 셸 변수, 런타임 env 파일(`MOCK_LLM` 0/1, `MOCK_LLM=0`이면 `KEY_VAULT_SECRET` 32바이트, `CRON_SECRET` 있음, `COOKIE_SECURE=false` 아님, 빈 값 줄 없음).
+0. 사전 점검(아무것도 만들기 전): 도구(`node npm psql curl git vercel`), `vercel whoami`, `.vercel/project.json`, 깨끗한 git 트리(`git status`가 실패해도 멈춘다), 셸 변수, 런타임 env 파일(`MOCK_LLM` 0/1, `MOCK_LLM=0`이면 `KEY_VAULT_SECRET` 32바이트, `CRON_SECRET` 있음, `MAX_TURNS`·`TURN_TIMEOUT_MS`·`BACKUP_KEEP`은 있으면 양의 정수, `COOKIE_SECURE=false` 아님, 빈 값 줄 없음).
 1. Management API로 새 Supabase 프로젝트 생성 → `ACTIVE_HEALTHY` 대기 → 키·pooler 연결 문자열을 임시 env 파일(600, 종료 시 삭제)로 받고, 같은 4개를 `DEPLOY_ENV_FILE`(600)에 남긴다(`deploy.sh: new project's SUPABASE_* saved to <파일> (600)`).
 2. 미적용 마이그레이션 적용(새 프로젝트면 0001–0006 전부).
 3. 시드: 관리자 `admin` 1(해시만), `ai_settings` 3, `--with-samples`면 샘플 시나리오 5(게시·컴파일본, 번역 10). 데모 계정·그룹·기록은 어떤 옵션에도 없다.
 4. 스모크: service key로 관리자 1·`ai_settings` 3(샘플 5·번역 10), anon 키로 `scenarios?select=internal` 거부(42501).
-5. 전환: Vercel Production env에 `SUPABASE_URL`·`SUPABASE_SERVICE_KEY`·`SUPABASE_ANON_KEY` + 런타임 env 파일의 변수를 `vercel env add <NAME> --environment production --sensitive --force`로 쓴다(값은 stdin으로만: 명령줄 인자·출력·파일에 남지 않는다) → HEAD의 `git archive` 사본에서 `vercel deploy --prod`(커밋 SHA와 배포 URL을 출력, 사본은 지운다) → 그 URL의 `/healthz` 200(최대 60초) + 모르는 쿠키로 `/api/auth/me` 401(새 DB 응답) 확인.
-6. 첫 백업: 그 URL의 `GET /api/cron/backup`(Bearer는 0600 임시 헤더 파일로 `curl -H @file`) → 200, Blob pathname 출력(`remath-<YYYYMMDD>.sqlite`).
+5. 전환: Vercel Production env에 `SUPABASE_URL`·`SUPABASE_SERVICE_KEY` + 런타임 env 파일의 변수를 `vercel env add <NAME> --environment production --sensitive --force`로 쓴다(값은 stdin으로만: 명령줄 인자·출력·파일에 남지 않는다) → HEAD의 `git archive` 사본에서 `vercel deploy --prod`(커밋 SHA와 배포 URL을 출력, 사본은 지운다) → 그 URL의 `/healthz` 200(최대 60초) + 모르는 쿠키로 `/api/auth/me` 401(새 DB 응답) 확인(`the new deployment serves …`). 이 확인은 새 배포 URL만 본다.
+6. 첫 백업: 그 URL의 `GET /api/cron/backup`(Bearer는 0600 임시 헤더 파일로 `curl -H @file`) → 200이고 본문이 `{ ok: true, pathname }`이어야 한다. Blob pathname 출력(`remath-<YYYYMMDD>.sqlite`).
 
-끝에 `deploy.sh: ok (commit <sha>, <url>)`, 종료코드 0. Production 주소(`https://remath.vercel.app`)는 새 배포를 가리킨다.
+끝으로 production 도메인(`REMATH_PROD_URL`, 기본 `https://remath.vercel.app`)의 `/healthz`를 읽기만 한다: 200이 아니면 경고만 한다. 이어서 "롤백한 적이 있으면 도메인은 `vercel promote <url>` 전까지 이전 배포에 남는다"는 안내를 출력한다(아래 "되돌리기"). 마지막 줄은 `deploy.sh: ok (commit <sha>, new deployment <url>)`, 종료코드 0.
 
 - 사전 점검 실패: 아무것도 만들지 않고 Vercel도 건드리지 않는다.
 - 프로젝트 생성 뒤 4단계까지 실패: 종료코드 ≠ 0, Vercel은 그대로(이전 배포가 계속 서비스), 새 프로젝트는 남겨 두고 ref를 출력한다 — 사람이 대시보드에서 지운다.

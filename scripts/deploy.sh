@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # 배포 (#35 H-29, D-15~17, V10 #78). 운영자 머신에서 돈다. --new 면 1) Management API 로 새 Supabase 프로젝트(O-4, npm run db:new-project),
 #   없으면 셸의 SUPABASE_* 4개 프로젝트에 2) 미적용 마이그레이션 → 3) 시드 → 4) 스모크
-#   → 5) 전환: Vercel Production env 설정(SUPABASE_URL·SERVICE_KEY·ANON_KEY + 런타임 env 파일의 변수, 값은 stdin 으로만)
+#   → 5) 전환: Vercel Production env 설정(SUPABASE_URL·SERVICE_KEY + 런타임 env 파일의 변수, 값은 stdin 으로만)
 #      → HEAD 의 git archive 사본에서 vercel deploy --prod → 그 배포 URL 의 /healthz 200 + 새 DB 응답(401) 확인
-#   → 6) 첫 백업: 그 URL 의 GET /api/cron/backup(CRON_SECRET Bearer, 0600 헤더 파일로) → 200 + Blob pathname.
+#   → 6) 첫 백업: 그 URL 의 GET /api/cron/backup(CRON_SECRET Bearer, 0600 헤더 파일로) → 200 + { ok: true, pathname }.
+#      끝으로 production 도메인(REMATH_PROD_URL, 기본 https://remath.vercel.app)의 /healthz 를 읽기만 한다(200 아니면 경고).
+#      위 확인은 새 배포 URL 이 도는 것까지다: 롤백 뒤에는 도메인이 vercel promote <url> 전까지 이전 배포에 남는다.
 # 어느 단계든 실패하면 거기서 멈추고 종료코드 ≠ 0. 4단계까지 실패하면 Vercel 은 건드리지 않는다.
 # env 값은 배포를 만들 때 고정된다: 실행 중인 production 은 새 배포가 올라갈 때까지 이전 DB 를 쓴다. 되돌리기 = vercel rollback.
 # 두 번째 실행은 DB 를 바꾸지 않는다(같은 env 로 새 production 배포가 하나 더 생긴다).
@@ -13,7 +15,7 @@
 #   REMATH_ENV_FILE=~/.config/remath/prod.env scripts/deploy.sh [--with-samples]
 #
 # 새 프로젝트(--new): 셸에 SUPABASE_ACCESS_TOKEN SUPABASE_ORG_ID(조직 slug) SUPABASE_REGION SUPABASE_DB_PASSWORD ADMIN_INITIAL_PASSWORD.
-#   SUPABASE_* 4개는 새 프로젝트에서 받아 임시 env 파일(mktemp, 600, 종료 시 삭제)로 2~5단계에 넘긴다(SUPABASE_DB_URL 은 Vercel 에 넣지 않는다).
+#   SUPABASE_* 4개는 새 프로젝트에서 받아 임시 env 파일(mktemp, 600, 종료 시 삭제)로 2~5단계에 넘긴다(SUPABASE_DB_URL·SUPABASE_ANON_KEY 는 Vercel 에 넣지 않는다: 서버 런타임이 읽지 않는다).
 #   1단계 직후 그 4개를 DEPLOY_ENV_FILE(기본 = REMATH_ENV_FILE 옆 deploy.env, 600, 이전 판 .prev)에 남긴다: 재배포는 set -a; . <그 파일>; set +a.
 #   REMATH_ENV_FILE=~/.config/remath/prod.env scripts/deploy.sh --new [--with-samples]
 #   사전 점검이 모두 통과해야 프로젝트를 만든다(과금). 토큰은 db:new-project 에만 넘어가고 vercel·다른 단계·파일에는 없다.
@@ -25,8 +27,8 @@
 #
 # REMATH_ENV_FILE(필수): production 런타임 env 파일(저장소 밖, 600). 스크립트는 읽기만 한다. 한 줄 KEY=value(첫 = 뒤 글자 그대로).
 #   MOCK_LLM(0|1)·CRON_SECRET(필수, Vercel Production 의 값과 같게), MOCK_LLM=0 이면 KEY_VAULT_SECRET(32바이트, openssl rand -base64 32),
-#   선택 MAX_TURNS·TURN_TIMEOUT_MS·BACKUP_KEEP. 있는 것만 Vercel 에 넣는다(없는 이름은 Vercel 에 있던 값 그대로). COOKIE_SECURE=false 는 거절한다.
-# 사전 점검(1단계 전): 도구 node npm psql curl git vercel, vercel whoami, .vercel/project.json(vercel link), 깨끗한 git 트리, 위 env 파일 규칙.
+#   선택 MAX_TURNS·TURN_TIMEOUT_MS·BACKUP_KEEP(양의 정수). 있는 것만 Vercel 에 넣는다(없는 이름은 Vercel 에 있던 값 그대로). COOKIE_SECURE=false 는 거절한다.
+# 사전 점검(1단계 전): 도구 node npm psql curl git vercel, vercel whoami, .vercel/project.json(vercel link), 깨끗한 git 트리(git status 실패도 멈춤), 위 env 파일 규칙.
 # Hobby 는 HEAD 커밋 작성자가 Vercel 계정에 없으면 CLI 배포를 막는다: 그래서 git 메타데이터 없는 git archive 사본에서 배포한다.
 set -euo pipefail
 
@@ -86,6 +88,10 @@ RUNTIME=(MOCK_LLM KEY_VAULT_SECRET MAX_TURNS TURN_TIMEOUT_MS BACKUP_KEEP CRON_SE
 for v in "${RUNTIME[@]}"; do
   ! env_has "$v" || [ -n "$(env_get "$v")" ] || fail "$v is empty in $REMATH_ENV_FILE; remove the line or give it a value"
 done
+# 서버(config.ts·backup.ts)는 이 셋을 양의 정수로만 받는다(아니면 함수가 설정 검증에서 500). 값은 출력하지 않는다.
+for v in MAX_TURNS TURN_TIMEOUT_MS BACKUP_KEEP; do
+  ! env_has "$v" || [[ $(env_get "$v") =~ ^0*[1-9][0-9]*$ ]] || fail "$v in $REMATH_ENV_FILE must be a positive integer (digits only)"
+done
 if [ -n "$restore" ]; then
   [ -f "$restore" ] || fail "backup file $restore is not a file"
   restore="$(realpath "$restore")"   # npm -w server 는 server/ 에서 돈다
@@ -97,30 +103,32 @@ vercel whoami >/dev/null 2>&1 || fail "vercel whoami failed: run vercel login fi
 link="$(cat .vercel/project.json)"
 [[ $link =~ \"orgId\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]] || fail ".vercel/project.json has no orgId: run vercel link again"; org="${BASH_REMATCH[1]}"
 [[ $link =~ \"projectId\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]] || fail ".vercel/project.json has no projectId: run vercel link again"; project="${BASH_REMATCH[1]}"
-[ -z "$(git status --porcelain)" ] || fail "the git tree is not clean (git status --porcelain): commit or remove the changes; production is built from HEAD"
+status="$(git status --porcelain)" || fail "cannot read git status (git status --porcelain failed); production is built from HEAD of a clean tree"
+[ -z "$status" ] || fail "the git tree is not clean (git status --porcelain): commit or remove the changes; production is built from HEAD"
 # 백업이 아니거나 테이블·열이 빠졌으면 여기서 멈춘다: 프로젝트를 만들기 전.
 [ -z "$restore" ] || npm run --silent db:restore -w server -- --check "$restore" || fail "$restore is not a usable backup file"
 
-tmp_env= copy= hdr= ref= switched=
+tmp_env= copy= hdr= body= envtmp= ref= switched=
 # 새 프로젝트의 SUPABASE_* 4개를 DEPLOY_ENV_FILE 에 원자적으로(umask 077 임시 파일 → mv) 쓴다. 이전 파일은 <파일>.prev(600).
 # 값은 printf(셸 내장)로 파일에만: 인자·출력에 없다. set -a; . <파일>; set +a 로 읽힌다(셸에 안전한 글자가 아니면 %q 로 따옴).
 save_deploy_env() {
-  local k v t
-  t="$(umask 077; mktemp "$DEPLOY_ENV_FILE.tmp.XXXXXX")" || fail "cannot write $DEPLOY_ENV_FILE"
+  local k v
+  envtmp="$(umask 077; mktemp "$DEPLOY_ENV_FILE.tmp.XXXXXX")" || fail "cannot write $DEPLOY_ENV_FILE"   # 실패하면 EXIT trap 이 지운다
   for k in SUPABASE_URL SUPABASE_SERVICE_KEY SUPABASE_DB_URL SUPABASE_ANON_KEY; do
     v="${!k}"
     if [[ $v =~ ^[A-Za-z0-9._~:/?=%@+,-]*$ ]]; then printf '%s=%s\n' "$k" "$v"; else printf '%s=%q\n' "$k" "$v"; fi
-  done > "$t"
+  done > "$envtmp"
   if [ -f "$DEPLOY_ENV_FILE" ]; then
-    (umask 077; cp "$DEPLOY_ENV_FILE" "$DEPLOY_ENV_FILE.prev") && chmod 600 "$DEPLOY_ENV_FILE.prev" || { rm -f "$t"; fail "cannot keep $DEPLOY_ENV_FILE.prev"; }
+    (umask 077; cp "$DEPLOY_ENV_FILE" "$DEPLOY_ENV_FILE.prev") && chmod 600 "$DEPLOY_ENV_FILE.prev" || fail "cannot keep $DEPLOY_ENV_FILE.prev"
   fi
-  mv -f "$t" "$DEPLOY_ENV_FILE" || { rm -f "$t"; fail "cannot write $DEPLOY_ENV_FILE"; }
+  mv -f "$envtmp" "$DEPLOY_ENV_FILE" || fail "cannot write $DEPLOY_ENV_FILE"
+  envtmp=
   echo "deploy.sh: new project's SUPABASE_* saved to $DEPLOY_ENV_FILE (600)"
 }
 # 끝날 때 임시 파일·사본을 지운다. Vercel 을 건드리기 전 실패 = 새 프로젝트는 쓰이지 않는다: ref 를 알리고 남겨 둔다.
 cleanup() {
   local st=$?
-  rm -rf ${tmp_env:+"$tmp_env"} ${copy:+"$copy"} ${hdr:+"$hdr"}
+  rm -rf ${tmp_env:+"$tmp_env"} ${copy:+"$copy"} ${hdr:+"$hdr"} ${body:+"$body"} ${envtmp:+"$envtmp"}
   [ $st -ne 0 ] && [ -n "$ref" ] && [ -z "$switched" ] && echo "deploy.sh: new Supabase project $ref is left in place (not switched to); delete it by hand in the dashboard" >&2
   exit $st
 }
@@ -162,11 +170,10 @@ set_env() {
 }
 set_env SUPABASE_URL "$SUPABASE_URL"
 set_env SUPABASE_SERVICE_KEY "$SUPABASE_SERVICE_KEY"
-set_env SUPABASE_ANON_KEY "$SUPABASE_ANON_KEY"
 for v in "${RUNTIME[@]}"; do
   ! env_has "$v" || set_env "$v" "$(env_get "$v")"
 done
-echo "deploy.sh: Production env set (SUPABASE_URL SUPABASE_SERVICE_KEY SUPABASE_ANON_KEY$(for v in "${RUNTIME[@]}"; do env_has "$v" && printf ' %s' "$v"; done))"
+echo "deploy.sh: Production env set (SUPABASE_URL SUPABASE_SERVICE_KEY$(for v in "${RUNTIME[@]}"; do env_has "$v" && printf ' %s' "$v"; done))"
 
 rollback="roll back: vercel rollback (the previous production deployment serves again with its own env)$where"
 sha="$(git rev-parse HEAD)"
@@ -197,16 +204,27 @@ for _ in $(seq 30); do
     # URL·키가 틀려 DB 를 못 읽으면 500 이다.
     got="$(code -H "Cookie: remath_teacher=deploy-check-$RANDOM" "$url/api/auth/me")"
     [ "$got" = 401 ] || fail "GET /api/auth/me with an unknown cookie answered $got, want 401 (the deployment cannot query the new DB); $rollback"
-    echo "deploy.sh: switched ($url/healthz 200, new DB answers)"
+    echo "deploy.sh: the new deployment serves ($url/healthz 200, new DB answers)"
     echo "== 6/6 backup"
     # 크론과 같은 경로를 한 번 부른다. Bearer 는 0600 임시 파일의 헤더로만(curl -H @file): 인자·출력에 없다.
-    hdr="$(mktemp)"; body="$hdr.body"
+    hdr="$(mktemp)"; body="$(mktemp)"   # 둘 다 EXIT trap 이 지운다
     printf 'Authorization: Bearer %s\n' "$(env_get CRON_SECRET)" > "$hdr"
     got="$(curl -s --max-time 300 -H @"$hdr" -o "$body" -w '%{http_code}' "$url/api/cron/backup" || true)"
-    resp="$(cat "$body" 2>/dev/null || true)"; rm -f "$body"
-    [ "$got" = 200 ] || fail "first backup failed (HTTP $got); the switch is done and production is serving$where. See Vercel runtime logs (backup failed: …), then retry: curl -H @<file with Authorization: Bearer \$CRON_SECRET> $url/api/cron/backup"
-    [[ $resp =~ \"pathname\":\"([^\"]+)\" ]] && echo "deploy.sh: backup ok ${BASH_REMATCH[1]} (Blob)"
-    echo "deploy.sh: ok (commit $sha, $url)"
+    # 성공 = 200 이고 본문이 { ok: true, pathname: "<비지 않은 문자열>" }.
+    pathname="$(node -e '
+      let j; try { j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); } catch { process.exit(1); }
+      if (!j || j.ok !== true || typeof j.pathname !== "string" || !j.pathname) process.exit(1);
+      console.log(j.pathname);' "$body" 2>/dev/null)" || pathname=
+    why="HTTP $got"; [ "$got" != 200 ] || why="HTTP 200 without ok/pathname in the body"
+    [ "$got" = 200 ] && [ -n "$pathname" ] || fail "first backup failed ($why); the switch is done and the new deployment $url serves$where. See Vercel runtime logs (backup failed: …), then retry: curl -H @<file with Authorization: Bearer \$CRON_SECRET> $url/api/cron/backup"
+    echo "deploy.sh: backup ok $pathname (Blob)"
+    # 위 확인은 새 배포 URL 만 본다. production 도메인이 그 배포를 가리키는지는 따로: 읽기만, 실패해도 경고.
+    prod="${REMATH_PROD_URL:-https://remath.vercel.app}"
+    got="$(code "$prod/healthz")"
+    if [ "$got" = 200 ]; then echo "deploy.sh: production domain $prod/healthz 200"
+    else echo "deploy.sh: WARNING production domain $prod/healthz answered $got, want 200" >&2; fi
+    echo "deploy.sh: note: if production was rolled back before, $prod stays on the old deployment until: vercel promote $url"
+    echo "deploy.sh: ok (commit $sha, new deployment $url)"
     exit 0
   fi
   sleep 2
