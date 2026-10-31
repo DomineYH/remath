@@ -28,7 +28,6 @@ export function migrate(psql: Psql, files = readdirSync(DIR), dir = DIR) {
 
 export const runPsql = (dbUrl: string): Psql => args => {
   const r = spawnPsql(dbUrl, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
-  if (r.error) throw new Error(`psql not runnable: ${r.error.message}`);
   if (r.status !== 0) throw new Error(`psql exited ${r.status}${args.includes('-f') ? ` on ${args.at(-1)}` : ''}`);
   return r.stdout;
 };
