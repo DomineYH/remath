@@ -129,6 +129,23 @@ describe('providers.json (ticket 18)', () => {
   });
 });
 
+describe('key prefix → provider and mask (D-20, #64)', () => {
+  const AQ = 'AQ.Ab' + 'cdefghijklmnopqrstuvwxyz0123456789ABCDEF' + 'wxyz', AIZA = 'AIzaSyabcdefghijklmnopqrstuvwxyz012345GGGG';
+  it('AQ. auth keys and AIza keys are gemini; sk-ant- is anthropic before sk-; unknown is null', () => {
+    expect(S.detectProvider(AQ)).toBe('gemini');
+    expect(S.detectProvider(`  ${AQ}\n`)).toBe('gemini');
+    expect(S.detectProvider(AIZA)).toBe('gemini');
+    expect(S.detectProvider('sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123WXYZ')).toBe('anthropic');
+    expect(S.detectProvider('sk-proj-abcdefghijklmnopqrstuv9876')).toBe('openai');
+    for (const k of ['AQAbcdefghijklmnopqrstuvwxyz0123', 'aq.Abcdefghijklmnopqrstuvwxyz', '', '   ', 'pk-unknown-0000000000']) expect(S.detectProvider(k), k).toBeNull();
+  });
+  it('maskKey keeps the AQ. prefix and the last 4 characters, never the middle', () => {
+    expect(S.maskKey(AQ)).toBe('AQ.…wxyz');
+    expect(S.maskKey(AQ)).not.toContain('Ab');
+    expect(S.maskKey(AIZA)).toBe('AIza…GGGG');
+  });
+});
+
 describe('error codes', () => {
   it('every ErrorCode has an HTTP status', () => {
     expect(Object.keys(ERROR_STATUS).sort()).toEqual([...ErrorCode.options].sort());

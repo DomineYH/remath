@@ -185,13 +185,13 @@ export const AiRoleInput = z.object({
   model: z.string().min(1), effort: Effort.nullable(),
 });
 
-/** 키 접두어 → 공급자(D-20·G-37): sk-ant- 를 sk- 보다 먼저 본다. 인식 불가 = null(저장은 400). 화면의 KeyDetect 와 목이 같은 규칙을 쓴다. */
+/** 키 접두어 → 공급자(D-20·G-37): sk-ant- 를 sk- 보다 먼저 본다. Gemini 는 AQ.(인증 키, 2026-05-28~, #64)·AIza. 인식 불가 = null(저장은 400). 화면의 KeyDetect 와 목이 같은 규칙을 쓴다. */
 export const detectProvider = (key: string): z.infer<typeof Provider> | null => {
   const k = key.trim();
-  return k.startsWith('sk-ant-') ? 'anthropic' : k.startsWith('AIza') ? 'gemini' : k.startsWith('sk-') ? 'openai' : null;
+  return k.startsWith('sk-ant-') ? 'anthropic' : k.startsWith('AQ.') || k.startsWith('AIza') ? 'gemini' : k.startsWith('sk-') ? 'openai' : null;
 };
 /** 접두어 + … + 끝 4자. 키 원문 대신 저장·표시하는 유일한 값(AI-3). */
-export const maskKey = (key: string) => { const k = key.trim(); return `${k.match(/^(sk-ant-|sk-proj-|sk-svcacct-|sk-|AIza)/)?.[0] ?? ''}…${k.slice(-4)}`; };
+export const maskKey = (key: string) => { const k = key.trim(); return `${k.match(/^(sk-ant-|sk-proj-|sk-svcacct-|sk-|AQ\.|AIza)/)?.[0] ?? ''}…${k.slice(-4)}`; };
 
 export const Csv = z.string(); // text/csv; charset=utf-8, BOM, 열 = C13
 

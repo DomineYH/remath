@@ -8,7 +8,7 @@
 2. effort 파라미터: OpenAI `reasoning.effort`(모델별로 허용값이 다름, `minimal`은 PRD 대상 모델 어디에도 없음), Anthropic `output_config.effort`(low/medium/high/xhigh/max, 4개 모델 모두 5단계 지원, 기본값은 모델별), Gemini `generation_config.thinking_level`(minimal/low/medium/high, `minimal`은 3.6-flash·3.5-flash-lite만).
 3. 스트리밍은 3사 모두 SSE이며 텍스트 델타 위치가 다름: OpenAI `response.output_text.delta`의 `delta`(문자열), Anthropic `content_block_delta`의 `delta.text`, Gemini `step.delta`의 `delta.text`. 종료 신호는 각각 `response.completed`, `message_stop`, `interaction.completed` 후 `data: [DONE]`.
 4. PRD 모델 ID 16개 중 15개 존재. `gemini-3.8-pro`만 **없음**(모델 목록 미등재, 모델 페이지 404).
-5. 키 접두어는 Anthropic만 문서에 명시(`sk-ant-api...`). OpenAI(`sk-`)·Gemini(`AIza`)는 공식 문서에 규칙 없음. 키 유효성은 3사 모두 모델 목록 `GET`(토큰 과금 없음)으로 확인 가능.
+5. 키 접두어는 Anthropic만 문서에 명시(`sk-ant-api...`). OpenAI(`sk-`)·Gemini(`AQ.` 인증 키 / `AIza`)는 공식 문서에 규칙 없음(Gemini `AQ.`는 2026-10-31 실제 키로 확인, #64). 키 유효성은 3사 모두 모델 목록 `GET`(토큰 과금 없음)으로 확인 가능.
 
 ## 공급자별 표
 
@@ -57,7 +57,7 @@
 | 텍스트 델타 위치 | `event: step.delta` / `data: {"index":0,"delta":{"type":"text","text":"Hello"},"event_type":"step.delta"}` → `delta.type == "text"`일 때 `delta.text`. 레거시: `candidates[].content.parts[].text`. | [interactions/streaming][gg-stream], [generate-content ref][gg-gc] |
 | 종료 신호 | `interaction.completed` 후 `event: done` / `data: [DONE]`. 레거시: 마지막 청크의 `finishReason`(`STOP`, `MAX_TOKENS`, `SAFETY` 등). | [interactions/streaming][gg-stream], [generate-content ref][gg-gc] |
 | 오류 이벤트 | `event: error` / `data: {"error":{"message":"...","code":"gateway_timeout"},"event_type":"error"}`. 비스트리밍: `{"error":{"code":"invalid_request","message":"..."}}` (snake_case 코드: 400 `invalid_request`, 401 `authentication`, 403 `permission_denied`, 404 `not_found`, 429 `rate_limit_exceeded`, 500 `api_error`, 503 `service_unavailable`). 레거시 generateContent는 `429 RESOURCE_EXHAUSTED`·`503 UNAVAILABLE`·`403 PERMISSION_DENIED` 등 gRPC 상태 문자열. | [interactions/streaming][gg-stream], [api-errors][gg-errors], [troubleshooting][gg-trouble] |
-| 키 접두어 문서화 | **없음**. Gemini API 키 페이지는 형식을 기술하지 않음. Google Cloud 인증 문서는 예시 문자열 `AIzaSyDaGmWKa4JsXZ-HjGw7ISLn_3namBGewQe`를 보여주지만 접두어 규칙은 명시하지 않음. 커뮤니티 포럼에 `AQ.` 접두어 신규 키 보고가 있으나 1차 출처 아님 → **미확인**. | [api-key][gg-apikey], [GCP api-keys][gg-gcpkeys] |
+| 키 접두어 문서화 | **없음**. Gemini API 키 페이지는 형식을 기술하지 않음. Google Cloud 인증 문서는 예시 문자열 `AIzaSyDaGmWKa4JsXZ-HjGw7ISLn_3namBGewQe`를 보여주지만 접두어 규칙은 명시하지 않음. AI Studio는 2026-05-28부터 새 키를 인증 키(auth key)로 발급([api-key][gg-apikey]: "Starting May 28, 2026, all new API keys created in Google AI Studio are automatically created as auth keys."). 인증 키 접두어 `AQ.`는 2026-10-31 실제 키에서 확인(#64). | [api-key][gg-apikey], [GCP api-keys][gg-gcpkeys] |
 | 최소 유효성 호출 | `GET https://generativelanguage.googleapis.com/v1beta/models` (`pageSize` 기본 50) 또는 `GET /v1beta/models/{model}`. 헤더 `x-goog-api-key` 또는 `?key=`. 과금 언급 없음. | [models ref][gg-models-ref], [api-key][gg-apikey] |
 
 ## 모델 ID 확인표
