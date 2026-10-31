@@ -1,4 +1,4 @@
-// SQLite 백업 (H-30, T-1 (e)): 테이블·열 집합, Data API 페이지 읽기, 임시 파일 → rename, 보관 개수, 매일 타이머, env 검증.
+// SQLite 백업 (H-30, T-1 (e)): 테이블·열 집합, Data API 페이지 읽기, 임시 파일 → rename, 보관 개수, env 검증.
 // Data API 는 가짜 PostgREST(fetch) 로, 열 집합은 PGlite 에 마이그레이션을 실제로 올려 맞춰 본다. 실 DB 는 수동(LIVE CHECK).
 import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -7,7 +7,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { createClient } from '@supabase/supabase-js';
 import Database from 'better-sqlite3';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { backup, BackupEnv, FKS, scheduleBackups, TABLES } from './backup.ts';
+import { backup, BackupEnv, FKS, TABLES } from './backup.ts';
 import type { Db } from './db.ts';
 
 type Row = Record<string, unknown>;
@@ -200,51 +200,12 @@ describe('backup file (H-30, T-1 e)', () => {
   });
 });
 
-describe('daily timer (H-30, user story 23)', () => {
-  function clock(start: Date) {
-    let t = start.getTime(), pending: (() => void) | null = null;
-    const delays: number[] = [];
-    return {
-      delays, now: () => new Date(t),
-      setTimer: (fn: () => void, ms: number) => { delays.push(ms); pending = fn; },
-      /** 잡힌 시각으로 시계를 옮기고 타이머를 부른다. */
-      fire: () => { t += delays.at(-1)!; const fn = pending!; pending = null; fn(); },
-    };
-  }
-  const settle = () => new Promise(r => setTimeout(r, 0));
-
-  it('runs at BACKUP_AT server-local time every day, one run at a time; a failure is logged and the next day still runs', async () => {
-    const c = clock(new Date(2026, 9, 28, 2, 59)), logged: unknown[] = [];
-    let runs = 0, finish!: () => void;
-    const run = () => { runs++; return runs === 1 ? Promise.reject(new Error('boom')) : new Promise<void>(r => { finish = r; }); };
-    scheduleBackups({ at: '03:00', run, log: e => logged.push(e), now: c.now, setTimer: c.setTimer });
-    expect(c.delays).toEqual([60_000]);
-
-    c.fire(); await settle();
-    expect(runs).toBe(1);
-    expect(logged).toEqual([new Error('boom')]);
-    expect(c.delays.at(-1)).toBe(24 * 3600_000);
-
-    c.fire(); await settle();
-    expect(runs).toBe(2);
-    expect(c.delays).toHaveLength(2);   // 끝나기 전에는 다음 실행을 잡지 않는다
-    finish(); await settle();
-    expect(c.delays).toHaveLength(3);
-  });
-
-  it('waits for tomorrow when BACKUP_AT has passed today', () => {
-    const c = clock(new Date(2026, 9, 28, 3, 1));
-    scheduleBackups({ at: '03:00', run: async () => {}, log: () => {}, now: c.now, setTimer: c.setTimer });
-    expect(c.delays).toEqual([(24 * 60 - 1) * 60_000]);
-  });
-});
-
 describe('BackupEnv (#40: validated where it is read)', () => {
   it('defaults and parses', () => {
-    expect(BackupEnv.parse({})).toEqual({ BACKUP_DIR: 'backup', BACKUP_KEEP: 7, BACKUP_AT: '03:00' });
-    expect(BackupEnv.parse({ BACKUP_DIR: '/b', BACKUP_KEEP: '2', BACKUP_AT: '23:59' })).toEqual({ BACKUP_DIR: '/b', BACKUP_KEEP: 2, BACKUP_AT: '23:59' });
+    expect(BackupEnv.parse({})).toEqual({ BACKUP_DIR: 'backup', BACKUP_KEEP: 7 });
+    expect(BackupEnv.parse({ BACKUP_DIR: '/b', BACKUP_KEEP: '2' })).toEqual({ BACKUP_DIR: '/b', BACKUP_KEEP: 2 });
   });
-  it.each([{ BACKUP_KEEP: '0' }, { BACKUP_KEEP: 'x' }, { BACKUP_AT: '24:00' }, { BACKUP_AT: '3:00' }, { BACKUP_DIR: '' }])('rejects %o', env => {
+  it.each([{ BACKUP_KEEP: '0' }, { BACKUP_KEEP: 'x' }, { BACKUP_DIR: '' }])('rejects %o', env => {
     expect(BackupEnv.safeParse(env).success).toBe(false);
   });
 });

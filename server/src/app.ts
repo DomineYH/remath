@@ -1,4 +1,4 @@
-// Fastify 앱: 라우트 표에서만 등록(A-2), 오류 모양(M-2), 실 확인(C-9·C-10), /healthz(O-8), 정적 서빙(A-4).
+// Fastify 앱: 라우트 표에서만 등록(A-2), 오류 모양(M-2), 실 확인(C-9·C-10), /healthz(O-8), 백업 크론(V9), 정적 서빙(A-4).
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import cookie from '@fastify/cookie';
@@ -8,6 +8,7 @@ import Fastify, { type FastifyReply, type FastifyRequest, type FastifyServerOpti
 import { hasZodFastifySchemaValidationErrors, serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import { authenticate, COOKIE, createLimiter, resolveRealm, type Auth, type Limiter } from './auth.ts';
 import type { Config } from './config.ts';
+import { registerCron, type BlobStore } from './cron.ts';
 import type { Db } from './db.ts';
 import { ApiFail } from './errors.ts';
 import type { ProvidersFor } from './providers/types.ts';
@@ -20,7 +21,8 @@ import { sessionHandlers } from './routes/sessions.ts';
 
 declare module 'fastify' { interface FastifyRequest { auth?: Auth } }
 
-export interface Deps { db: Db; config: Config; limiter: Limiter; now: () => Date; providersFor: ProvidersFor }
+// blob: 백업 크론의 Blob 저장소(vercel.ts·index.ts 가 실물을 넘긴다). 없으면 크론 실행이 500 이다.
+export interface Deps { db: Db; config: Config; limiter: Limiter; now: () => Date; providersFor: ProvidersFor; blob?: BlobStore }
 /** 키 = 라우트 표의 `METHOD path`. 핸들러가 없는 표의 라우트는 등록하지 않는다(Fastify 기본 404). */
 export type Handlers = Record<string, (req: FastifyRequest, reply: FastifyReply) => Promise<unknown>>;
 
@@ -72,6 +74,7 @@ export async function buildApp(d: Pick<Deps, 'db' | 'config'> & Partial<Deps>, o
   }
 
   app.get('/healthz', async () => ({ ok: true }));
+  registerCron(app, deps);   // 라우트 표 밖의 운영 경로(V9)
 
   // 프로덕션 빌드가 있으면 `/`에서 SPA를 서빙하고, 알 수 없는 비-/api GET은 index.html로 폴백한다. 개발은 Vite 프록시(A-5).
   const spa = existsSync(DIST + 'index.html');

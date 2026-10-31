@@ -2,7 +2,7 @@
 //   static/                  = client/dist (CDN, SPA 폴백)
 //   functions/api/index.func = server/src/vercel.ts 를 rolldown 으로 묶은 index.mjs + 네이티브 패키지 사본 + .vc-config.json
 // `?raw` = 파일 텍스트(Vite·raw-hooks.ts 와 같은 뜻, V5). argon2·better-sqlite3 는 묶지 않고 패키지째 복사한다(linux-x64 prebuilds 포함).
-// 빌드는 iad1 에서 돈다: 마이그레이션 같은 네트워크 작업은 넣지 않는다. 크론은 #77·#78 이 config.json 에 더한다.
+// 빌드는 iad1 에서 돈다: 마이그레이션 같은 네트워크 작업은 넣지 않는다. 크론은 config.json 의 crons 다(V9, #77).
 import { execSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -55,5 +55,7 @@ writeFileSync(`${OUT}/config.json`, JSON.stringify({
     { src: '^/(api(?:/.*)?|healthz)$', dest: '/api/index' },
     { src: '^/(.*)$', dest: '/index.html' },   // SPA 폴백(정적 파일이 먼저 맞는다)
   ],
+  // 매일 백업(V9): 18:00 UTC = 03:00 KST. Hobby 는 그 한 시간 안 임의 시각에, production 배포에서만 부른다.
+  crons: [{ path: '/api/cron/backup', schedule: '0 18 * * *' }],
 }, null, 2));
 console.log(`build output ready: ${OUT}`);

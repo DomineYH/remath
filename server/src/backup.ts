@@ -1,16 +1,15 @@
 // SQLite 백업 (H-30, O-5, PRD 7절): Data API 로 읽기만 하고 better-sqlite3 파일 하나에 쓴다.
-// 실행: `npm run backup -w server`(cli/backup.ts, deploy.sh 6단계)와 서버 안 매일 타이머(index.ts).
+// 실행: `npm run backup -w server`(cli/backup.ts, deploy.sh 6단계)와 매일 크론 경로(cron.ts, V9).
 import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { z } from 'zod';
 import { must, type Db } from './db.ts';
 
-// 서버 index.ts 와 CLI 가 각자 진입점에서 검증한다(#40 결정). 기본값은 env 가 없는 기존 배포가 그대로 뜨게.
+// CLI 가 진입점에서 검증한다(#40 결정). BACKUP_KEEP 은 서버 config.ts 도 같은 규칙으로 읽는다(크론). 기본값은 env 가 없어도 돌게.
 export const BackupEnv = z.object({
   BACKUP_DIR: z.string().min(1).default('backup'),   // 상대 경로 = 작업 디렉터리(server/, 컨테이너 /app/server) 기준
   BACKUP_KEEP: z.coerce.number().int().positive().default(7),
-  BACKUP_AT: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'BACKUP_AT must be HH:MM (00:00-23:59)').default('03:00'),
 });
 
 type Type = 'text' | 'json' | 'int' | 'bool';
@@ -71,7 +70,7 @@ export async function backup(db: Db, o: { dir: string; keep: number; now?: Date;
   const pageSize = o.pageSize ?? 1000;
   mkdirSync(o.dir, { recursive: true });
   const file = join(o.dir, `remath-${ymd(o.now ?? new Date())}.sqlite`);
-  const tmp = `${file}.${process.pid}.tmp`;   // CLI 와 서버 타이머가 겹쳐도 서로의 임시 파일을 건드리지 않는다
+  const tmp = `${file}.${process.pid}.tmp`;   // 같은 디렉터리에서 두 실행이 겹쳐도 서로의 임시 파일을 건드리지 않는다
   for (let attempt = 1; ; attempt++) {
     const r = await readInto(db, tmp, pageSize);
     if (!r) {
@@ -128,25 +127,4 @@ async function readInto(db: Db, tmp: string, pageSize: number) {
     rmSync(tmp, { force: true });
     throw err;
   }
-}
-
-/**
- * 매일 at(HH:MM, 서버 로컬 시각)에 run. 다음 실행은 이번 실행이 끝난 뒤에 잡으므로 한 번에 하나만 돈다.
- * run 의 실패는 log 로만 보내고 서버를 멈추지 않는다. now·setTimer 는 테스트가 바꾼다.
- */
-export function scheduleBackups(o: {
-  at: string; run: () => Promise<unknown>; log: (err: unknown) => void;
-  now?: () => Date; setTimer?: (fn: () => void, ms: number) => void;
-}) {
-  const now = o.now ?? (() => new Date());
-  const setTimer = o.setTimer ?? ((fn, ms) => { setTimeout(fn, ms).unref(); });
-  const [h, m] = o.at.split(':').map(Number);
-  const next = () => {
-    const t = now(), at = new Date(t);
-    at.setHours(h, m, 0, 0);
-    if (at <= t) at.setDate(at.getDate() + 1);
-    setTimer(fire, at.getTime() - t.getTime());
-  };
-  const fire = () => { void Promise.resolve().then(o.run).catch(o.log).finally(next); };
-  next();
 }
