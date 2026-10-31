@@ -36,7 +36,7 @@ ReMath는 가상 학생(챗봇)의 오개념을 예비교사가 **설명 대신 
 | v3 | 성별·인종 이모지 금지, 챗봇 대화 언어 한/영, PReMTA 디자인 적용 | 학생은 동물, 멘토는 사물 이모지만. 시나리오마다 대화 언어 설정과 언어별 대사 세트(내부 설정은 공유). 프롬프트에 G) 대화 언어 섹션. 디자인: Fraunces/Geist 글꼴, 따뜻한 종이색 바탕, 인디고 강조색, 16px 둥근 카드 |
 | v4 | 화면 언어 토글 | 헤더의 한│EN 토글이 앱 자체 문구를 바꾼다. 화면 언어와 챗봇 언어는 독립 설정 |
 | v5 | 사용자 관리, 그룹별 접근 제어, 대화 CSV | 관리자 탭 4개(시나리오·사용자·그룹·대화 기록). 그룹에 할당된 시나리오만 구성원에게 노출, 미할당 그룹은 이용 불가. 사용자별·시나리오별·필터별 CSV(1행 = 1발화). 모든 대화 자동 기록 |
-| v6 | AI API 키·모델·effort 설정 | 탭 5 “AI 설정”. 키 접두어로 공급자 자동 인식(sk-ant- / AIza / sk-). 학생·멘토·분석 3개 챗봇이 각자 또는 공유 키를 쓰고, 공급자별 모델 목록과 모델별 effort 값만 표시 |
+| v6 | AI API 키·모델·effort 설정 | 탭 5 “AI 설정”. 키 접두어로 공급자 자동 인식(sk-ant- / AQ.·AIza / sk-). 학생·멘토·분석 3개 챗봇이 각자 또는 공유 키를 쓰고, 공급자별 모델 목록과 모델별 effort 값만 표시 |
 | v7 | 로그인 화면 | 닉네임 + 비밀번호만. 개인정보 수집 없음. 비밀번호 영문·숫자 혼합, 특수문자 허용(길이는 PRD에서 8자 이상으로 확정). 관리자는 `/admin` 주소로 별도 로그인 |
 | v8 | 데모 환경에서 주소창 입력 불가 | 로그인 화면 하단에 “관리자 로그인 →” 링크 추가. 실서버에서는 `/admin` 경로가 정식 진입점 |
 
@@ -195,7 +195,7 @@ ReMath는 가상 학생(챗봇)의 오개념을 예비교사가 **설명 대신 
 | --- | --- | --- | --- |
 | OpenAI | `sk-` (단, `sk-ant-` 제외) | `reasoning.effort` (none\~max) | gpt-6-astra, gpt-6.1-sol, gpt-6-sol, gpt-6-luna, gpt-5.6-terra, gpt-5.6-luna, gpt-5.5 |
 | Anthropic | `sk-ant-` | `output_config.effort` (low\~max) | claude-fable-5-1, claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5 |
-| Google Gemini | `AIza` | `thinking_level` (minimal\~high) | gemini-4-argon, gemini-3.8-pro, gemini-3.8-flash, gemini-3.6-flash, gemini-3.5-flash-lite |
+| Google Gemini | `AQ.`(인증 키) / `AIza` | `thinking_level` (minimal\~high) | gemini-4-argon, gemini-3.8-pro, gemini-3.8-flash, gemini-3.6-flash, gemini-3.5-flash-lite |
 
 - 모델 목록과 모델별 effort 허용값은 서버의 `providers.json`에 두고 배포 없이 갱신한다. 목록에 없는 모델 ID는 직접 입력을 허용한다.
 - 키 등록 시 공급자에 최소 호출로 유효성을 확인하고(P1), 실패 사유를 관리자에게 보여 준다.

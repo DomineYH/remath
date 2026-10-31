@@ -225,7 +225,7 @@ export const dict = {
   keyLabel: { ko: 'API 키 입력', en: 'Enter API key' },
   changeKey: { ko: '키 변경', en: 'Change key' },
   detected: { ko: p => `${p} 키로 인식됨`, en: p => `Recognized as ${p} key` },
-  undetected: { ko: '인식할 수 없는 키 형식입니다. OpenAI(sk-), Anthropic(sk-ant-), Gemini(AIza) 키를 넣어 주세요.', en: 'Unrecognized key format. Paste an OpenAI (sk-), Anthropic (sk-ant-) or Gemini (AIza) key.' },
+  undetected: { ko: '인식할 수 없는 키 형식입니다. OpenAI(sk-), Anthropic(sk-ant-), Gemini(AQ. 또는 AIza) 키를 넣어 주세요.', en: 'Unrecognized key format. Paste an OpenAI (sk-), Anthropic (sk-ant-) or Gemini (AQ. or AIza) key.' },
   waitingKey: { ko: '키를 붙여 넣으면 회사를 자동으로 인식합니다.', en: 'Paste a key and the company is recognized automatically.' },
   keyAdded: { ko: d => `등록 ${d}`, en: d => `Added ${d}` },
   model: { ko: '모델', en: 'Model' },

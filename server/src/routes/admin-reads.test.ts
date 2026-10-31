@@ -327,6 +327,16 @@ describe('AI settings, MOCK_LLM=0: listModels check and key vault (Q5, Q6, Q23, 
     for (const out of [r.body, JSON.stringify(got), JSON.stringify(s.t.audit_log)]) { expect(out).not.toContain(ANT); expect(out).not.toContain(c); }
   });
 
+  it('an AQ. Gemini auth key (#64) passes validation, reaches listModels as gemini and is stored as provider gemini', async () => {
+    const AQ = 'AQ.Ab' + 'FAKEfakeFAKEfakeFAKEfakeFAKEfakeFAKEfake', f = fake(), s = await setup({ config: real, providersFor: f.providersFor });
+    const r = await s.req('PUT', '/api/admin/ai/student', { key_source: 'own', api_key: AQ, model: 'gemini-4-argon', effort: 'low' });
+    expect(r.statusCode).toBe(200);
+    expect(f.calls).toEqual([['gemini', AQ, 'student']]);
+    expect(r.json()).toMatchObject({ provider: 'gemini', key_masked: 'AQ.…fake' });
+    expect(s.t.ai_settings.find(x => x.role === 'student')).toMatchObject({ provider: 'gemini' });
+    expect(r.body).not.toContain(AQ);
+  });
+
   it('saves without api_key never call providersFor and keep the ciphertext; switching to a shared key drops it', async () => {
     const f = fake(), s = await setup({ config: real, providersFor: f.providersFor });
     await s.req('PUT', '/api/admin/ai/student', ANT_BODY);
