@@ -34,7 +34,7 @@ export function authHandlers({ db, config, limiter, now }: Deps): Handlers {
     const { nickname, password } = req.body as Credentials;
     const failed = (reason: string) => audit(db, req.log, { actor_id: null, action: 'auth.login_failed', target: nickname, meta: { realm, reason } });
     const tooMany = (wait: number) => new ApiFail('too_many_attempts', 'too many failed attempts', { retry_after: wait });
-    const wait = limiter.check(realm, nickname, now().getTime());
+    const wait = await limiter.check(realm, nickname);
     if (wait !== null) {
       await failed('too_many_attempts');
       throw tooMany(wait);
@@ -44,12 +44,11 @@ export function authHandlers({ db, config, limiter, now }: Deps): Handlers {
       .eq('role', realm).ilike('nickname', nickname.replaceAll('_', '\\_')).maybeSingle()) as AuthUser | null;
     const ok = await argon2.verify(u?.password_hash ?? await dummyHash, password);
     if (!u || !ok) {   // 없는 닉네임과 틀린 비밀번호는 같은 401, 5번째 실패부터는 429
-      limiter.fail(realm, nickname, now().getTime());
+      const locked = await limiter.fail(realm, nickname);
       await failed('invalid_credentials');
-      const locked = limiter.check(realm, nickname, now().getTime());
       throw locked !== null ? tooMany(locked) : new ApiFail('invalid_credentials', 'invalid nickname or password');
     }
-    limiter.reset(realm, nickname);
+    await limiter.reset(realm, nickname);
     const token = await issue(realm, u.id, u.password_hash);
     if (!token) {   // 검사와 발급 사이에 비밀번호가 바뀌었다: 옛 비밀번호로는 로그인을 만들지 않는다(C-12)
       await failed('password_changed');

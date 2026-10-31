@@ -53,7 +53,7 @@ describe('backup file (H-30, T-1 e)', () => {
   }, 60_000);
   afterAll(() => pg.close());
 
-  it('has exactly the 10 tables, same column names as the migrations, no key_ciphertext, no auth_sessions/schema_migrations', async () => {
+  it('has exactly the 10 tables, same column names as the migrations, no key_ciphertext, no auth_sessions/schema_migrations/login_limits', async () => {
     const cols = (await pg.query<{ t: string; c: string }>(`select table_name t, column_name c from information_schema.columns
       where table_schema = 'public' and table_name in (select table_name from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE')
       order by table_name, ordinal_position`)).rows;
@@ -61,7 +61,8 @@ describe('backup file (H-30, T-1 e)', () => {
     for (const { t, c } of cols) (live[t] ??= []).push(c);
 
     expect(Object.keys(TABLES)).toEqual(TEN);
-    expect(Object.keys(live).sort()).toEqual([...TEN, 'auth_sessions', 'schema_migrations'].sort());
+    // login_limits (0006) = 60초짜리 로그인 실패 카운터. 복구할 상태가 아니다.
+    expect(Object.keys(live).sort()).toEqual([...TEN, 'auth_sessions', 'login_limits', 'schema_migrations'].sort());
     for (const t of TEN) expect(TABLES[t].map(c => c.name), t).toEqual(live[t].filter(c => !(t === 'ai_settings' && c === 'key_ciphertext')));
     expect(live.ai_settings).toContain('key_ciphertext');
   });
