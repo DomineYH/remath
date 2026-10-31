@@ -6,9 +6,9 @@
 import { chmodSync, writeFileSync } from 'node:fs';
 import { setTimeout } from 'node:timers/promises';
 import { z } from 'zod';
-import { KEYS } from './env-swap.ts';
 import { main, readEnv } from './main.ts';
 
+const KEYS = ['SUPABASE_URL', 'SUPABASE_SERVICE_KEY', 'SUPABASE_DB_URL', 'SUPABASE_ANON_KEY'] as const;
 type Values = Record<(typeof KEYS)[number], string>;
 interface Opts {
   token: string; org: string; region: string; dbPass: string; name: string; fault?: 'anon_as_service';
