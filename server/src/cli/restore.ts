@@ -82,7 +82,7 @@ export function restore(file: string, psql: PsqlIn) {
 }
 
 export const runPsqlIn = (dbUrl: string): PsqlIn => (args, input) => {
-  const r = spawnPsql(dbUrl, args, { input, encoding: 'utf8', stdio: ['pipe', 'inherit', 'inherit'], maxBuffer: 1 << 30 });
+  const r = spawnPsql(dbUrl, args, { stdout: 'inherit', input });
   if (r.status !== 0) throw new Error(`psql exited ${r.status}; nothing was loaded (one transaction)`);
 };
 

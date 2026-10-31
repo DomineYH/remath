@@ -8,7 +8,7 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TABLES } from '../backup.ts';
 import { migrate, runPsql } from './migrate.ts';
-import { pgEnv, psqlEnv, spawnPsql } from './pg.ts';
+import { pgEnv, psqlEnv, redactor, spawnPsql } from './pg.ts';
 import { restore, runPsqlIn } from './restore.ts';
 
 const PASS = 'p@ss:w/rd?#%&!\'()* 비번';
@@ -52,6 +52,14 @@ describe('pgEnv', () => {
     ['NUL in the user', `postgres://${MARK}%00:p@h/db`],
     ['NUL in the database', `postgres://u:p@h/${MARK}%00`],
     ['NUL in a query value', `postgres://u:p@h/db?options=${MARK}%00`],
+    ['NUL in the host', `postgres://u:p@${MARK}%00/db`],
+    ['control character in the host', `postgres://u:p@${MARK}%0a/db`],
+    ['invalid sslmode', `postgres://u:p@h/db?sslmode=${MARK}`],
+    ['non-integer connect_timeout', `postgres://u:p@h/db?connect_timeout=${MARK}`],
+    ['negative connect_timeout', `postgres://u:${MARK}@h/db?connect_timeout=-1`],
+    ['control character in application_name', `postgres://u:p@h/db?application_name=${MARK}%0A`],
+    ['control character in options', `postgres://u:p@h/db?options=${MARK}%1b`],
+    ['control character in sslrootcert', `postgres://u:p@h/db?sslrootcert=${MARK}%7f`],
   ])('%s: throws a constant message (no URL-derived text)', (_, url) => {
     const msg = errorOf(url);
     expect(msg).toMatch(/^SUPABASE_DB_URL /);
@@ -61,6 +69,17 @@ describe('pgEnv', () => {
   it('NUL errors name the field only; unsupported keys list what is allowed', () => {
     expect(errorOf(`postgres://u:${MARK}%00@h/db`)).toBe('SUPABASE_DB_URL password contains a NUL byte');
     expect(errorOf(`postgres://u:p@h/db?x=1`)).toBe('SUPABASE_DB_URL has an unsupported query parameter; allowed: sslmode, sslrootcert, connect_timeout, application_name, options');
+  });
+  it('invalid parameter values name only the parameter', () => {
+    expect(errorOf(`postgres://u:p@h/db?sslmode=${MARK}`)).toBe('SUPABASE_DB_URL query parameter sslmode has an invalid value');
+    expect(errorOf(`postgres://u:p@h/db?connect_timeout=1.5`)).toBe('SUPABASE_DB_URL query parameter connect_timeout has an invalid value');
+    expect(errorOf(`postgres://u:p@${MARK}%00/db`)).toBe('SUPABASE_DB_URL host contains a control character');
+  });
+  it.each(['disable', 'allow', 'prefer', 'require', 'verify-ca', 'verify-full'])('sslmode=%s is accepted', m => {
+    expect(pgEnv(`postgres://u:p@h/db?sslmode=${m}&connect_timeout=10`)).toMatchObject({ PGSSLMODE: m, PGCONNECT_TIMEOUT: '10' });
+  });
+  it('the host is percent-decoded like libpq', () => {
+    expect(pgEnv('postgres://u:p@%64b.abc.supabase.co/db').PGHOST).toBe('db.abc.supabase.co');
   });
   it.each(['constructor', '__proto__', 'toString', 'hasOwnProperty'])('inherited name %s is not an allowed parameter', k => {
     expect(errorOf(`postgres://u:p@h/db?${k}=1`)).toMatch(/unsupported query parameter/);
@@ -143,10 +162,60 @@ describe('error paths leak no secret', () => {
   });
 
   it('a spawn that Node refuses (NUL in an argument) reports only the error code', () => {
-    expect(() => spawnPsql('postgres://u:p@h/db', [`${MARK}\0`], { encoding: 'utf8' })).toThrow(/^psql could not be started: ERR_INVALID_ARG_VALUE$/);
+    expect(() => spawnPsql('postgres://u:p@h/db', [`${MARK}\0`], { stdout: 'pipe' })).toThrow(/^psql could not be started: ERR_INVALID_ARG_VALUE$/);
   });
   it('psql missing from PATH reports only the error code', () => {
     vi.stubEnv('PATH', fakeBin + '-does-not-exist');
-    try { expect(() => spawnPsql(`postgres://u:${MARK}@h/db`, [], { encoding: 'utf8' })).toThrow(/^psql could not be started: ENOENT$/); } finally { vi.unstubAllEnvs(); }
+    try { expect(() => spawnPsql(`postgres://u:${MARK}@h/db`, [], { stdout: 'pipe' })).toThrow(/^psql could not be started: ENOENT$/); } finally { vi.unstubAllEnvs(); }
+  });
+});
+
+// #87 rev 3: psql 자신의 stderr(예: libpq 의 "invalid … value: \"…\"")도 연결 값을 되찍을 수 있다: 받아서 가린 뒤 낸다.
+describe('psql stderr is redacted', () => {
+  const PW = `${MARK}-pw/?`, APP = `${MARK}-app`, OPT = `-c ${MARK}-opt`;
+  const URL3 = `postgres://u:${encodeURIComponent(PW)}@h:5432/postgres?application_name=${encodeURIComponent(APP)}&options=${encodeURIComponent(OPT)}`;
+  const SQL_ERR = 'psql:/m/0002_x.sql:3: ERROR:  relation "nope" does not exist';
+
+  it('redactor: full URL, encoded and decoded password, decoded query values → ***; short values and SQL text untouched', () => {
+    const r = redactor(URL3);
+    expect(r(`url ${URL3} enc ${encodeURIComponent(PW)} dec ${PW} app ${APP} opt ${OPT}\n${SQL_ERR}\n`)).toBe(`url *** enc *** dec *** app *** opt ***\n${SQL_ERR}\n`);
+    expect(redactor('postgres://u:abc@h/db?sslmode=require')('abc require h')).toBe('abc *** h');   // < 4 자는 그대로
+  });
+
+  const bin = mkdtempSync(join(tmpdir(), 'pg-stderr-'));
+  // 진짜 psql 이 연결 값을 되찍는 상황을 흉내: env 값(표지가 든 비밀번호·쿼리 값)을 stderr 로, 그리고 보통의 SQL 오류 한 줄. exit 2.
+  writeFileSync(join(bin, 'psql'), `#!/bin/sh
+cat > /dev/null
+echo "psql: error: password \\"$PGPASSWORD\\" app \\"$PGAPPNAME\\" options \\"$PGOPTIONS\\"" >&2
+echo '${SQL_ERR}' >&2
+exit 2
+`);
+  chmodSync(join(bin, 'psql'), 0o755);
+  const SERVER = fileURLToPath(new URL('../../', import.meta.url));
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+
+  it('real db:migrate entry: marker absent from stdout/stderr, the SQL error line passes through unchanged', () => {
+    const r = spawnSync(process.execPath, ['--import', './src/raw-hooks.ts', 'src/cli/migrate.ts'],
+      { cwd: SERVER, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, SUPABASE_DB_URL: URL3 } });
+    expect(r.status).toBe(1);
+    expect(r.stderr.split('\n')).toContain(SQL_ERR);
+    expect(r.stderr).toContain('psql: error: password "***" app "***" options "***"');
+    expect(r.stdout + r.stderr).not.toContain(MARK);
+    expect(r.stderr).toMatch(/db:migrate failed: psql exited 2\n?$/);
+  });
+
+  it.each([
+    ['runPsql', () => runPsql(URL3)(['-c', 'select 1'])],
+    ['runPsqlIn', () => runPsqlIn(URL3)(['-f', '-'], 'x')],
+  ])('%s: stderr redacted, thrown message has no marker', (_, run) => {
+    vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
+    let out = '';
+    vi.spyOn(process.stderr, 'write').mockImplementation(chunk => { out += String(chunk); return true; });
+    let msg = '';
+    try { run(); } catch (err) { msg = (err as Error).message; }
+    expect(msg).toMatch(/^psql exited 2/);
+    expect(msg).not.toContain(MARK);
+    expect(out.split('\n')).toContain(SQL_ERR);
+    expect(out).not.toContain(MARK);
   });
 });
