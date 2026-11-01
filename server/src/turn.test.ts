@@ -537,6 +537,20 @@ describe('withTurn live mode (MOCK_LLM=0): Bots from ai_settings, read once per 
     expect(f.row.turn_claim).toBeNull();
     expect(JSON.stringify(lines)).not.toMatch(/Incorrect|sk-/);
   });
+  it('adapter billing/quota exhaustion (429 insufficient_quota) → provider_rejected, not retryable; turn failed logs kind, not the message (#89)', async () => {
+    lines.length = 0;
+    const p = fakeProviders(async provider => {
+      throw new AdapterError(provider as never, 'provider_rejected', '429 You exceeded your current quota, sk-stu****ent1', { status: 429, retryable: false, kind: 'insufficient_quota' });
+    });
+    const f = fakeDb({ ai: AI });
+    expect(await withTurn(live(f.db, p), session, '그림을 설명해 줄래?', collect))
+      .toEqual([{ type: 'error', code: 'provider_rejected', message: 'provider rejected the request', retryable: false }]);
+    expect(labels(f.calls)).not.toContain('record_turn');
+    const failed = lines.filter(a => a[1] === 'turn failed');
+    expect(failed).toHaveLength(1);
+    expect(failed[0]![0]).toEqual({ provider: expect.any(String), code: 'provider_rejected', status: 429, kind: 'insufficient_quota' });
+    expect(JSON.stringify(lines)).not.toMatch(/exceeded|sk-/);
+  });
   it('adapter 500 → provider_unavailable, retryable; nothing recorded', async () => {
     const f = fakeDb({ ai: AI });
     expect(await withTurn(live(f.db, failWith(500)), session, '그림을 설명해 줄래?', collect))

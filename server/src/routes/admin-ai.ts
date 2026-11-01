@@ -2,6 +2,7 @@
 // MOCK_LLM=0(Q5·Q6): 새 키는 listModels 1회로 확인하고(2xx = 유효, 실패 = provider_rejected, 저장 안 함) key_ciphertext 에 봉인한다.
 // MOCK_LLM=1: 2단계 그대로 키 원문을 버린다(O-7). 어느 쪽이든 원문·암호문은 응답·감사·로그에 넣지 않는다(key_ciphertext 는 AI_COLS 밖).
 import * as S from '@remath/shared';
+import { AdapterError } from '@remath/shared/engine';
 import type { z } from 'zod';
 import type { Deps, Handlers } from '../app.ts';
 import { audit } from '../audit.ts';
@@ -50,7 +51,8 @@ export function adminAiHandlers({ db, config, now, providersFor }: Deps): Handle
         try { await providersFor(provider, key, { log: req.log, role: row.role }).listModels(); }
         catch (err) {
           const status = (err as { status?: number }).status ?? null, message = String((err as Error)?.message ?? err).replaceAll(key, S.maskKey(key)).slice(0, 200);
-          req.log.warn({ role, provider, status }, 'ai key rejected by provider');   // Q32: 검증 실패는 로그만
+          // Q32: 검증 실패는 로그만. kind = 공급자 오류 종류(#89, 어댑터가 문서의 종류 LOGGED_KINDS 만 남기고 그 밖의 값은 지운다). 메시지·키는 로그에 넣지 않는다.
+          req.log.warn({ role, provider, status, kind: err instanceof AdapterError ? err.kind : undefined }, 'ai key rejected by provider');
           no('provider_rejected', 'the provider rejected this key', { status, message });
         }
       }

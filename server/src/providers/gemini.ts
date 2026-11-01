@@ -27,7 +27,7 @@ export function geminiProvider(key: string, o: AdapterOpts): Provider {
       },
     }, ev => {
       const d = JSON.parse(ev.data) as Chunk;
-      if (d.error) throw typeof d.error.code === 'number' ? httpError('gemini', d.error.code, `stream error: ${d.error.message}`) : streamError('gemini', d.error.message, d.error.status);
+      if (d.error) throw typeof d.error.code === 'number' ? httpError('gemini', d.error.code, `stream error: ${d.error.message}`, d.error.status) : streamError('gemini', d.error.message, d.error.status);
       const c = d.candidates?.[0], text = c?.content?.parts?.filter(p => !p.thought).map(p => p.text ?? '').join('') ?? '';
       if (!c?.finishReason) return text;
       // 마지막 청크는 텍스트와 finishReason·usageMetadata 를 함께 싣는다.

@@ -90,6 +90,27 @@
 - **키 검증**: 접두어 검사는 Anthropic(`sk-ant-`)만 문서 근거가 있고 OpenAI·Gemini는 근거 없음 → 접두어는 UX 힌트로만 쓰고, 실제 검증은 모델 목록 `GET`(3사 모두 토큰 비과금) 결과의 2xx/401로 판정.
 - Anthropic은 `anthropic-version` 헤더가 필수이고, 워크스페이스 미지정 키면 `anthropic-workspace-id`도 필요 — 어댑터 설정에 선택 필드로 둔다.
 
+## 오류 종류와 재시도 판정 (#89, 2026-11-01 확인)
+
+비-2xx 본문에서 어댑터가 읽는 오류 종류(`AdapterError.kind`): OpenAI `error.code ?? error.type`, Anthropic `error.type`, Gemini(`generateContent`) `error.status`. 분류는 상태 코드로 하되, **429 본문의 종류가 결제·한도 소진 집합에 들면 `provider_rejected`(재시도 불가)**로 뒤집는다. 집합은 `server/src/providers/call.ts`의 `QUOTA_KINDS` 한 곳에 있다. 지금 문서로 확정되는 것은 OpenAI뿐이다.
+
+| 공급자 | 상태·종류 | 뜻 | 어댑터 판정 | 출처 |
+|---|---|---|---|---|
+| OpenAI | 429 `type=rate_limit_error`, `code=slow_down` 또는 code 없음 | rate limit(요청량 급증 포함). 공급자 안내: `Retry-After`가 있으면 따르라고 함(어댑터는 읽지 않음) | `provider_unavailable`, 재시도 가능 | [error codes][oa-errors] |
+| OpenAI | 429 `type=insufficient_quota`, `code` ∈ `credit_balance_exhausted`, `organization_spend_limit_exceeded`, `project_spend_limit_exceeded`, `organization_usage_limit_exceeded` | 선불 크레딧 소진·조직/프로젝트 월 지출 상한·OpenAI 부여 사용 한도. "Retrying billing, spend, or quota errors won't restore API access." | `provider_rejected`, 재시도 불가 | [error codes][oa-errors] |
+| OpenAI | 503 `service_unavailable_error` / `server_is_overloaded` | 일시 과부하 | `provider_unavailable`, 재시도 가능 | [error codes][oa-errors] |
+| Anthropic | 402 `billing_error` | 결제 문제 | `provider_rejected`(비-429 4xx) | [errors][an-errors] |
+| Anthropic | 400 `invalid_request_error` | 요청 오류. 조직·워크스페이스 지출 한도 도달에도 쓰인다 | `provider_rejected` | [errors][an-errors] |
+| Anthropic | 429 `rate_limit_error` | rate limit과 사용 티어 월 지출 상한이 같은 type이다(상한 429는 `retry-after` 헤더가 없다는 것만 다름) → type으로 구별 불가 | `provider_unavailable`, 재시도 가능(종류는 로그에 남김) | [errors][an-errors] |
+| Anthropic | 529 `overloaded_error` | 일시 과부하 | `provider_unavailable`, 재시도 가능 | [errors][an-errors] |
+| Gemini | 429 `RESOURCE_EXHAUSTED` | 일시 rate limit과 일일 쿼터 소진이 같은 status다 → 구별 불가 | `provider_unavailable`, 재시도 가능(종류는 로그에 남김) | [api-errors][gg-errors], [troubleshooting][gg-trouble] |
+| Gemini | 403 `PERMISSION_DENIED`, 402 | 미납·무료 티어 불가 등 결제·권한 문제 | `provider_rejected` | [api-errors][gg-errors], [troubleshooting][gg-trouble] |
+
+- 본문 모양: OpenAI `{"error":{"message","type","code","param"}}`, Anthropic `{"type":"error","error":{"type","message"},"request_id"}`, Gemini `{"error":{"code":<number>,"message","status"}}`.
+- 스트림 중 오류(OpenAI `response.failed`의 `error.code`, `event: error`의 `code`)에도 같은 집합을 적용한다.
+- Gemini Interactions API에는 `quota_exceeded`·`payment_required`·`failed_precondition` 코드가 따로 있지만 지금 어댑터 경로(`generateContent`)가 아니다.
+- 종류는 `llm call failed`·`turn failed`·`ai key rejected by provider` 로그에 싣되, **공급자가 문서로 밝힌 값만** 싣는다: `server/src/providers/call.ts`의 `LOGGED_KINDS`(OpenAI = [error codes][oa-errors] 가이드의 type·code와 openai-python [`ResponseError.code`][oa-sdk-resp-error], Anthropic = [errors][an-errors] 페이지의 `error.type` 전부, Gemini = Google API 오류 모델 [AIP-193][gg-aip193]이 가리키는 [`google.rpc.Code`][gg-rpc-code] 상태 이름(`OK` 제외)). 목록에 없는 값은 어댑터를 나갈 때 버리므로, 공급자 문구·메시지·키 조각은 kind로 로그에 닿지 않는다. 분류(`QUOTA_KINDS`·거절 판정)는 목록과 무관하게 원래 값을 본다. OpenAI 401 본문의 `code: invalid_api_key`는 실제 401 응답에서 관찰된 값이라 목록에 넣었다([openai-python issue #1968](https://github.com/openai/openai-python/issues/1968)); error codes 가이드에는 없다. `AdapterError` 생성자의 모양 규칙(한 가지 대소문자의 64자 이하 식별자)은 목·파이프라인 오류까지 덮는 일반 규칙으로 남는다. 메시지 본문·키는 로그에 넣지 않는다(Q9).
+
 ## 출처
 
 [oa-create]: https://developers.openai.com/api/reference/resources/responses/methods/create
@@ -97,6 +118,7 @@
 [oa-reasoning]: https://developers.openai.com/api/docs/guides/reasoning
 [oa-stream-guide]: https://developers.openai.com/api/docs/guides/streaming-responses
 [oa-auth]: https://developers.openai.com/api/docs/api-reference/authentication
+[oa-errors]: https://developers.openai.com/api/docs/guides/error-codes
 [oa-models]: https://developers.openai.com/api/reference/resources/models/methods/list
 [oa-models-get]: https://developers.openai.com/api/reference/resources/models/methods/retrieve
 [oa-models-page]: https://developers.openai.com/api/docs/models
@@ -112,6 +134,7 @@
 [oa-sdk-completed]: https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_completed_event.py
 [oa-sdk-failed]: https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_failed_event.py
 [oa-sdk-error]: https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_error_event.py
+[oa-sdk-resp-error]: https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_error.py
 [oa-sdk-union]: https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_stream_event.py
 [an-overview]: https://platform.claude.com/docs/en/api/overview
 [an-auth]: https://platform.claude.com/docs/en/manage-claude/authentication
@@ -129,6 +152,8 @@
 [gg-stream]: https://ai.google.dev/gemini-api/docs/interactions/streaming
 [gg-errors]: https://ai.google.dev/gemini-api/docs/api-errors
 [gg-trouble]: https://ai.google.dev/gemini-api/docs/troubleshooting
+[gg-aip193]: https://google.aip.dev/193
+[gg-rpc-code]: https://github.com/googleapis/googleapis/blob/master/google/rpc/code.proto
 [gg-gc]: https://ai.google.dev/api/generate-content
 [gg-models]: https://ai.google.dev/gemini-api/docs/models
 [gg-models-ref]: https://ai.google.dev/api/models
