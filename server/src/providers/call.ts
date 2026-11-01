@@ -51,9 +51,12 @@ export const LOGGED_KINDS: Readonly<Record<RealProviderId, ReadonlySet<string>>>
 const isQuota = (kind: unknown) => typeof kind === 'string' && QUOTA_KINDS.has(kind);
 const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
 
-/** HTTP 상태 → Q7 오류 코드. 429·5xx 만 재시도 가능, 나머지 비-2xx 는 거절. 단 429 라도 kind 가 결제·한도 소진이면 거절(#89). */
-export function httpError(id: RealProviderId, status: number, message: string, kind?: unknown): AdapterError {
-  const retryable = (status === 429 && !isQuota(kind)) || status >= 500;
+/**
+ * HTTP 상태 → Q7 오류 코드. 429·5xx 만 재시도 가능, 나머지 비-2xx 는 거절. 단 429 라도 결제·한도 소진이면 거절(#89).
+ * quota = 결제·한도 소진 판정. 기본은 kind 로 본다; OpenAI 본문은 code·type 둘 다로 판정하므로(#93) send() 가 따로 넘긴다.
+ */
+export function httpError(id: RealProviderId, status: number, message: string, kind?: unknown, quota = isQuota(kind)): AdapterError {
+  const retryable = (status === 429 && !quota) || status >= 500;
   return new AdapterError(id, retryable ? 'provider_unavailable' : 'provider_rejected', `${status} ${message}`, { status, retryable, kind: str(kind) });
 }
 
@@ -66,9 +69,19 @@ export function streamError(id: RealProviderId, message: unknown, kind?: unknown
   return new AdapterError(id, rejected ? 'provider_rejected' : 'provider_unavailable', `stream error: ${String(message ?? 'unknown')}`, { retryable: !rejected, kind: str(kind) });
 }
 
-/** 비-2xx 본문의 error 객체 → 공급자 오류 종류(#89). OpenAI {error:{type,code}}, Anthropic {type:'error',error:{type}}, Gemini {error:{code:<숫자>,status}}. */
-const KIND_OF: Record<RealProviderId, (e: { type?: unknown; code?: unknown; status?: unknown }) => unknown> = {
-  openai: e => e.code ?? e.type, anthropic: e => e.type, gemini: e => e.status,
+/**
+ * 비-2xx 본문의 error 객체 → { kind: AdapterError·로그로 넘길 종류, quota: 결제·한도 소진 여부 }(#89).
+ * OpenAI {error:{type,code}}, Anthropic {type:'error',error:{type}}, Gemini {error:{code:<숫자>,status}}.
+ * OpenAI(#93): quota = code 나 type 중 하나라도 QUOTA_KINDS. kind = code 가 LOGGED_KINDS.openai 에 있으면 code, 아니면 type 이 있으면 type,
+ * 둘 다 목록 밖이면 원래 값(code ?? type) — outbound() 가 지운다. 그래서 새 code 가 붙은 insufficient_quota 429 도 거절이고 kind 는 type 이다.
+ */
+const KIND_OF: Record<RealProviderId, (e: { type?: unknown; code?: unknown; status?: unknown }) => { kind: unknown; quota: boolean }> = {
+  openai: e => ({
+    kind: [e.code, e.type].find(v => typeof v === 'string' && LOGGED_KINDS.openai.has(v)) ?? e.code ?? e.type,
+    quota: isQuota(e.code) || isQuota(e.type),
+  }),
+  anthropic: e => ({ kind: e.type, quota: isQuota(e.type) }),
+  gemini: e => ({ kind: e.status, quota: isQuota(e.status) }),
 };
 
 /** fetch·본문 읽기에서 던져진 것 → AdapterError. 기한 초과(TimeoutError)·네트워크는 재시도 가능, 호출자 abort 는 아니다. */
@@ -99,13 +112,13 @@ async function send(id: RealProviderId, o: AdapterOpts, http: Http, signal?: Abo
   });
   if (res.ok) return res;
   const text = await res.text().catch(() => '');
-  let message = res.statusText, kind: unknown;
+  let message = res.statusText, kind: unknown, quota = false;
   try {
     const e = JSON.parse(text)?.error;
     message = e?.message ?? message;
-    if (e && typeof e === 'object') kind = KIND_OF[id](e);
+    if (e && typeof e === 'object') ({ kind, quota } = KIND_OF[id](e));
   } catch { /* 본문이 JSON 이 아니면 상태 문구, 종류 없음 */ }
-  throw httpError(id, res.status, message, kind);
+  throw httpError(id, res.status, message, kind, quota);
 }
 
 /** 스트리밍 호출 한 번. 끝나면(성공·실패·중단) 로그 1줄 — 모델·시간·사용량·코드·HTTP 상태·오류 종류(LOGGED_KINDS 의 문서 값만)뿐, 키·본문·공급자 메시지는 절대 넣지 않는다. */

@@ -493,6 +493,12 @@ describe('provider error kinds: billing/quota exhaustion is rejected, rate limit
     collect(make(KEY, { log: memLog().log, fetch: fakeFetch(() => jsonResponse(json, status)).fetch }).complete(REQ)).catch((e: unknown) => e);
   const mid = (make: Case['make'], text: string) =>
     collect(make(KEY, { log: memLog().log, fetch: fakeFetch(() => sseResponse(text)).fetch }).complete(REQ)).catch((e: unknown) => e);
+  /** http 와 같되 로그 줄도 본다(#93). */
+  const logged = (make: Case['make'], key: string, json: unknown, status: number) => {
+    const m = memLog();
+    const run = () => collect(make(key, { log: m.log, fetch: fakeFetch(() => jsonResponse(json, status)).fetch }).complete(REQ)).catch((e: unknown) => e);
+    return { m, run };
+  };
   const QUOTA_CODES = ['credit_balance_exhausted', 'organization_spend_limit_exceeded', 'project_spend_limit_exceeded', 'organization_usage_limit_exceeded'];
 
   it('the billing/quota kind set is the documented OpenAI set', () => {
@@ -539,21 +545,53 @@ describe('provider error kinds: billing/quota exhaustion is rejected, rate limit
   });
 
   it('classification still reads the raw kind: an unlisted kind is dropped from the error but classified as before', async () => {
-    // F2 계약 그대로: code 가 있으면 code 로 분류 — 모르는 code 의 429 는 재시도 가능, 종류는 기록하지 않는다
-    const e = await http(openaiProvider, { error: { message: 'quota', type: 'insufficient_quota', param: null, code: 'some_new_code' } }, 429) as AdapterError;
-    expect(e).toMatchObject({ code: 'provider_unavailable', retryable: true, status: 429 });
-    expect(e.kind).toBeUndefined();
+    // #93: OpenAI 는 code·type 둘 다로 분류 — 모르는 code 라도 type 이 insufficient_quota 면 거절, 종류는 목록에 있는 type 으로 기록
+    const s = logged(openaiProvider, KEY, { error: { message: 'quota', type: 'insufficient_quota', param: null, code: 'some_new_code' } }, 429);
+    expect(await s.run()).toMatchObject({ code: 'provider_rejected', retryable: false, status: 429, kind: 'insufficient_quota' });
+    expect(s.m.lines[0]!.obj).toMatchObject({ code: 'provider_rejected', status: 429, kind: 'insufficient_quota' });
+    expect(JSON.stringify(s.m.lines)).not.toContain('some_new_code');
     // 스트림 중 REJECTED 판정은 목록에 없는 원래 값으로 한다
     const m = await mid(openaiProvider, sseText(`event: error\ndata: {"type":"error","sequence_number":1,"code":"invalid_new_thing","message":"x","param":null}`)) as AdapterError;
     expect(m).toMatchObject({ code: 'provider_rejected', retryable: false });
     expect(m.kind).toBeUndefined();
-    // 목록에 없는 401 code: 그대로 거절, 종류만 빠진다
-    const k = await http(openaiProvider, { error: { message: 'Incorrect API key provided', type: 'invalid_request_error', param: null, code: 'some_new_auth_code' } }, 401) as AdapterError;
-    expect(k).toMatchObject({ code: 'provider_rejected', retryable: false, status: 401 });
-    expect(k.kind).toBeUndefined();
+    // 목록에 없는 401 code: 그대로 거절, 종류는 목록에 있는 type 으로 남고 새 code 는 로그에 닿지 않는다(#93)
+    const k = logged(openaiProvider, KEY, { error: { message: 'Incorrect API key provided', type: 'invalid_request_error', param: null, code: 'some_new_auth_code' } }, 401);
+    expect(await k.run()).toMatchObject({ code: 'provider_rejected', retryable: false, status: 401, kind: 'invalid_request_error' });
+    expect(k.m.lines[0]!.obj).toMatchObject({ status: 401, kind: 'invalid_request_error' });
+    expect(JSON.stringify(k.m.lines)).not.toContain('some_new_auth_code');
     // 목록에 있는 결제 소진 code 는 거절 + 종류 기록
     expect(await http(openaiProvider, { error: { message: 'q', type: 'insufficient_quota', param: null, code: 'credit_balance_exhausted' } }, 429))
       .toMatchObject({ code: 'provider_rejected', retryable: false, status: 429, kind: 'credit_balance_exhausted' });
+  });
+
+  it('openai 429 with type rate_limit_error and an unlisted code → provider_unavailable, retryable, kind rate_limit_error (#93)', async () => {
+    const s = logged(openaiProvider, KEY, { error: { message: 'slow', type: 'rate_limit_error', param: null, code: 'some_new_code' } }, 429);
+    expect(await s.run()).toMatchObject({ code: 'provider_unavailable', retryable: true, status: 429, kind: 'rate_limit_error' });
+    expect(s.m.lines[0]!.obj).toMatchObject({ status: 429, kind: 'rate_limit_error' });
+    expect(JSON.stringify(s.m.lines)).not.toContain('some_new_code');
+  });
+
+  it('openai 429 with an unlisted type and an unlisted code → provider_unavailable, retryable, no kind; neither value in the log (#93)', async () => {
+    const s = logged(openaiProvider, KEY, { error: { message: 'x', type: 'some_new_type', param: null, code: 'some_new_code' } }, 429);
+    const e = await s.run() as AdapterError;
+    expect(e).toMatchObject({ code: 'provider_unavailable', retryable: true, status: 429 });
+    expect(e.kind).toBeUndefined();
+    expect((s.m.lines[0]!.obj as { kind?: string }).kind).toBeUndefined();
+    const dump = JSON.stringify(s.m.lines);
+    expect(dump).not.toContain('some_new_type');
+    expect(dump).not.toContain('some_new_code');
+  });
+
+  it('openai 429 insufficient_quota with the request key or a key fragment as code → provider_rejected, kind insufficient_quota; no key in the log (#93)', async () => {
+    const key = LOWER_KEY, frag = key.slice(8, 24);
+    for (const code of [key, `quota_${frag}`]) {
+      const s = logged(openaiProvider, key, { error: { message: 'quota', type: 'insufficient_quota', param: null, code } }, 429);
+      expect(await s.run()).toMatchObject({ code: 'provider_rejected', retryable: false, status: 429, kind: 'insufficient_quota' });
+      expect(s.m.lines[0]!.obj).toMatchObject({ kind: 'insufficient_quota' });
+      const dump = JSON.stringify(s.m.lines);
+      expect(dump).not.toContain(code);
+      expect(leaksKey(dump, key)).toBe(false);
+    }
   });
 
   it.each(['insufficient_quota', ...QUOTA_CODES])('openai mid-stream %s (response.failed and error event) → rejected, not retryable', async code => {
