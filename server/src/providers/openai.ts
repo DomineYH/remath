@@ -18,7 +18,7 @@ export function openaiProvider(key: string, o: AdapterOpts): Provider {
     id: 'openai',
     complete: req => stream('openai', o, req, {
       url: `${API}/responses`, headers, key,
-      body: { model: req.model, instructions: req.system, input: req.messages, stream: true, ...req.effort && { reasoning: { effort: req.effort } } },
+      body: { model: req.model, instructions: req.system, input: req.messages, stream: true, ...req.maxOutputTokens !== undefined && { max_output_tokens: req.maxOutputTokens }, ...req.effort && { reasoning: { effort: req.effort } } },
     }, ev => {
       const d = JSON.parse(ev.data);
       switch (d.type) {

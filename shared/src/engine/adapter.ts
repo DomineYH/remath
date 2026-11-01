@@ -17,6 +17,8 @@ export interface CompleteRequest {
   messages: Message[];
   model: string;
   effort?: Effort;
+  /** 출력 토큰 상한(#94 키 확인 프로브). 생략 = 지금처럼(OpenAI·Gemini 는 보내지 않고 Anthropic 은 역할 기본값). 목 어댑터는 읽지 않는다. */
+  maxOutputTokens?: number;
   signal?: AbortSignal;
   /** MOCK_LLM 전용. 실 어댑터는 읽지 않는다(선택지 A). 파이프라인은 항상 채워 보낸다. */
   context?: MockContext;

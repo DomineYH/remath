@@ -268,13 +268,13 @@ describe('AI settings = mock updateAi (G-28, O-7)', () => {
 describe('AI settings, MOCK_LLM=0: listModels check and key vault (Q5, Q6, Q23, Q32)', () => {
   const SECRET = Buffer.alloc(32, 9).toString('base64');
   const real = loadConfig({ SUPABASE_URL: 'https://example.supabase.co', SUPABASE_SERVICE_KEY: 'k', MOCK_LLM: '0', KEY_VAULT_SECRET: SECRET }, p => readFileSync(new URL(p, ROOT), 'utf8'));
-  /** listModels 가 throw 하면 그 오류를, 아니면 2xx(목록은 버린다). */
+  /** listModels 가 throw 하면 그 오류를, 아니면 2xx(목록은 버린다). 키 확인 프로브(complete, #94)는 done 으로 끝난다(admin-ai.test.ts 가 판정을 본다). */
   const fake = (fail?: () => Error) => {
     const calls: [string, string, unknown][] = [];
     const providersFor: ProvidersFor = (provider, key, opts) => {
       calls.push([provider, key, opts.role]);
       expect(typeof opts.log.info).toBe('function');
-      return { id: provider, complete: () => { throw new Error('not in this ticket'); }, listModels: async () => { if (fail) throw fail(); return ['m']; } };
+      return { id: provider, complete: async function* (req) { yield { type: 'done', model: req.model, stopReason: 'end' }; }, listModels: async () => { if (fail) throw fail(); return ['m']; } };
     };
     return { calls, providersFor };
   };

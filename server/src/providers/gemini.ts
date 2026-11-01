@@ -23,7 +23,11 @@ export function geminiProvider(key: string, o: AdapterOpts): Provider {
       body: {
         system_instruction: { parts: [{ text: req.system }] },
         contents: req.messages.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
-        ...req.effort && { generation_config: { thinking_config: { thinking_level: req.effort } } },
+        // generationConfig 하나에 출력 상한(maxOutputTokens, #94)과 effort 를 합친다. 둘 다 없으면 보내지 않는다.
+        ...(req.maxOutputTokens !== undefined || req.effort) && { generation_config: {
+          ...req.maxOutputTokens !== undefined && { max_output_tokens: req.maxOutputTokens },
+          ...req.effort && { thinking_config: { thinking_level: req.effort } },
+        } },
       },
     }, ev => {
       const d = JSON.parse(ev.data) as Chunk;

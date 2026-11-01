@@ -1,13 +1,17 @@
 // 관리자 AI 설정 (G-28, 티켓 18): 목 updateAi 와 같은 검증·같은 감사 meta.
-// MOCK_LLM=0(Q5·Q6): 새 키는 listModels 1회로 확인하고(2xx = 유효, 실패 = provider_rejected, 저장 안 함) key_ciphertext 에 봉인한다.
+// MOCK_LLM=0(Q5·Q6, #94): 새 키는 두 단계로 확인하고 key_ciphertext 에 봉인한다. (a) listModels 1회(비과금, 실패 = provider_rejected, 저장 안 함).
+// (b) 성공이면 고른 모델로 최소 유료 호출 1회(출력 ≤ PROBE_MAX_OUTPUT_TOKENS): provider_rejected(결제·한도 소진, 모델 접근 불가 등) = 저장 안 함,
+// provider_unavailable(rate limit·5xx·기한 초과·네트워크) = 확인 불가로 보고 저장(로그만), done(stop length 포함) = 통과.
+// 일반 API 키로 잔액·한도를 읽는 API 는 3사 모두 없다(docs/research/llm-providers-2026-10.md "잔액·한도 조회 API").
 // MOCK_LLM=1: 2단계 그대로 키 원문을 버린다(O-7). 어느 쪽이든 원문·암호문은 응답·감사·로그에 넣지 않는다(key_ciphertext 는 AI_COLS 밖).
 import * as S from '@remath/shared';
-import { AdapterError } from '@remath/shared/engine';
+import { AdapterError, collect } from '@remath/shared/engine';
 import type { z } from 'zod';
 import type { Deps, Handlers } from '../app.ts';
 import { audit } from '../audit.ts';
 import { must } from '../db.ts';
 import { ApiFail } from '../errors.ts';
+import { LIST_MODELS_TIMEOUT_MS } from '../providers/call.ts';
 import type { RealProviderId } from '../providers/types.ts';
 import { seal } from '../vault.ts';
 
@@ -15,6 +19,11 @@ type Setting = z.infer<typeof S.AiRoleSetting>;
 type Settings = z.infer<typeof S.AiSettings>;
 const AI_COLS = 'role, key_source, provider, key_masked, key_added_at, model, effort';
 const no = (code: S.ErrorCode, message: string, details?: unknown): never => { throw new ApiFail(code, message, details); };
+
+/** 키 확인 프로브(#94)의 출력 상한. OpenAI max_output_tokens 의 최소값은 저장소 문서에 없어 브리프대로 16(미확인), Anthropic max_tokens 는 최소 0. */
+export const PROBE_MAX_OUTPUT_TOKENS = 16;
+/** 프로브 프롬프트. 응답·로그·감사 어디에도 싣지 않는다. */
+const PROBE_SYSTEM = 'Reply with the single word OK.';
 
 /** 목 updateAi 의 규칙(순수). rows = 이 역할 + 이 역할의 키를 함께 쓰던 역할(공급자가 따라 바뀐다). */
 export function updateAi(ai: Settings, role: string, b: z.infer<typeof S.AiRoleInput>, providers: z.infer<typeof S.ProvidersFile>, now: string) {
@@ -48,12 +57,22 @@ export function adminAiHandlers({ db, config, now, providersFor }: Deps): Handle
       const key = body.api_key?.trim();
       if (key && secret) {
         const provider = row.provider as RealProviderId;   // 키가 있으면 updateAi 가 detectProvider 로 정했다('mock' 은 없다)
-        try { await providersFor(provider, key, { log: req.log, role: row.role }).listModels(); }
-        catch (err) {
+        const reject = (err: unknown): never => {
           const status = (err as { status?: number }).status ?? null, message = String((err as Error)?.message ?? err).replaceAll(key, S.maskKey(key)).slice(0, 200);
           // Q32: 검증 실패는 로그만. kind = 공급자 오류 종류(#89, 어댑터가 문서의 종류 LOGGED_KINDS 만 남기고 그 밖의 값은 지운다). 메시지·키는 로그에 넣지 않는다.
           req.log.warn({ role, provider, status, kind: err instanceof AdapterError ? err.kind : undefined }, 'ai key rejected by provider');
-          no('provider_rejected', 'the provider rejected this key', { status, message });
+          return no('provider_rejected', 'the provider rejected this key', { status, message });
+        };
+        const p = providersFor(provider, key, { log: req.log, role: row.role });
+        try { await p.listModels(); } catch (err) { reject(err); }
+        // (b) 최소 유료 호출(#94). effort 는 보내지 않는다(공급자 기본값). 어댑터 stream() 이 llm call 로그 1줄을 남긴다(본문 없음).
+        try {
+          await collect(p.complete({ system: PROBE_SYSTEM, messages: [{ role: 'user', content: 'OK' }], model: body.model, maxOutputTokens: PROBE_MAX_OUTPUT_TOKENS, signal: AbortSignal.timeout(LIST_MODELS_TIMEOUT_MS) }));
+        } catch (err) {
+          if (!(err instanceof AdapterError)) throw err;
+          if (err.code === 'provider_rejected') reject(err);
+          if (err.code !== 'provider_unavailable') throw err;
+          req.log.warn({ role, provider, status: err.status ?? null, kind: err.kind }, 'ai key probe inconclusive');
         }
       }
       // 새 키 = 봉인(MOCK_LLM=1 이면 null), 공유로 바꾸면 자기 키를 지운다. 둘 다 아니면 열을 건드리지 않는다.
