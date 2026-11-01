@@ -15,6 +15,15 @@ export const END_SESSION_RE = /^end session$/i;
 export const HELP_RE: Record<Lang, RegExp> = { ko: /도와|힌트|어떻게 물어|어떤 질문|뭐라고 물|질문 추천/, en: /\bhelp\b|\bhint\b|what should i ask|which question|suggest a question/i };
 /** 도움 요청 턴의 학생 고정 문구: LLM 을 부르지 않는다(실 LLM·MOCK 공통). */
 export const HELP_LINE: Record<Lang, string> = { ko: '음… 저 아직 생각 중이에요.', en: "Um… I'm still thinking." };
+/** 인사만 있는 턴(#100): 인사·이름·학년·취미 어휘가 있고 문제 어휘가 없을 때. 목업 detectStd/detectEn 의 greet 패턴(서버 상수, MOCK 도 이것을 쓴다). */
+export const GREETING_RE: Record<Lang, { yes: RegExp; no: RegExp }> = {
+  ko: { yes: /안녕|반가|이름이 뭐|몇 학년|좋아하|취미|키워|강아지|고양이|거북이|푸들/, no: /문제|풀|조각|분수/ },
+  en: { yes: /\b(hi|hello|hey|nice to meet|your name|what grade|favorite|pets?|dog|cat|turtle|poodle|soccer|tennis|baseball)\b/, no: /problem|solve|piece|fraction|cup|pizza|ribbon|candy/ },
+};
+export function isGreetingOnly(text: string, lang: Lang): boolean {
+  const t = lang === 'en' ? text.trim().toLowerCase() : text.trim(), re = GREETING_RE[lang];
+  return re.yes.test(t) && !re.no.test(t);
+}
 
 /** 목업 kwTest: 정규식으로 해석되지 않으면 부분 문자열. */
 export function kwTest(kw: string, m: string): boolean {
@@ -39,7 +48,8 @@ export function judgeTurn(text: string, lang: Lang, cls: Classification | null, 
     return { kind: 'turn', directive: { kind: 'confused', text: lines.confused[n % lines.confused.length] }, trigger: TRIGGER.takingOver, state };
   }
   const idx = lines.misconceptions.findIndex((mi, i) => state.mis[i] < 2 && mi.kw && kwTest(mi.kw, t));
-  if (idx < 0) return { kind: 'turn', directive: null, trigger: null, state };
+  // 교정 키워드가 없고 인사만 있으면 greet 지시(#100): 정적 템플릿 규칙만으로는 모델이 인사 턴에 결론을 꺼낸다.
+  if (idx < 0) return { kind: 'turn', directive: isGreetingOnly(t, lang) ? { kind: 'greet', text: '' } : null, trigger: null, state };
   const n = ++state.mis[idx], mi = lines.misconceptions[idx];
   if (n === 1) return { kind: 'turn', directive: { kind: 'hesitation', text: mi.h }, trigger: null, state };
   // 아하 턴 지시는 aha 한 줄(#68): c 를 겹쳐 넣으면 학생이 두 문장을 나눠 잇는다. aha 가 비면 마지막 c 가 대신한다.
@@ -60,16 +70,18 @@ export function reportInput(names: string[], counts: Record<string, number>, rea
 
 const RUNTIME = {
   ko: { head: 'H) 이번 턴 (서버 주입)', mis: '오개념 진행', prog: ['미교정(0/2)', '망설임(1/2)', '교정됨'], goal: (r: boolean) => `도달점: ${r ? '도달' : '미도달'}`,
-    dir: (t: string) => `이번 턴 지시: 반드시 다음 취지로, 네 말투로 답하십시오 — "${t}"`, none: '이번 턴 지시: 없음. 현재 오개념 상태를 유지하고 질문받은 것만 답하십시오.' },
+    dir: (t: string) => `이번 턴 지시: 반드시 다음 취지로, 네 말투로 답하십시오 — "${t}"`, none: '이번 턴 지시: 없음. 현재 오개념 상태를 유지하고 질문받은 것만 답하십시오.',
+    greet: '이번 턴 지시: 인사·자기소개만 하십시오. 수학 문제의 답·풀이·결론(누가 더 많이 먹었는지 같은 비교 결과 포함)은 한 마디도 꺼내지 마십시오. 풀이는 사용자가 물을 때 처음 말합니다.' },
   en: { head: 'H) This turn (server-injected)', mis: 'Misconceptions', prog: ['uncorrected (0/2)', 'hesitating (1/2)', 'corrected'], goal: (r: boolean) => `Goal: ${r ? 'reached' : 'not reached'}`,
-    dir: (t: string) => `This turn: you must answer with exactly this gist, in your own voice — "${t}"`, none: 'This turn: none. Keep your current misconceptions and answer only what was asked.' },
+    dir: (t: string) => `This turn: you must answer with exactly this gist, in your own voice — "${t}"`, none: 'This turn: none. Keep your current misconceptions and answer only what was asked.',
+    greet: "This turn: greet back and introduce yourself briefly, nothing else. Do not mention the problem's answer, solution, or conclusion (including any comparison result). You first talk about your solution only when the user asks." },
 };
 
 /** ADR-0002 런타임 블록. 학생 system 뒤에 호출마다 덧붙인다. */
 export function runtimeBlock(state: SessionState, directive: TurnDirective | null, lang: Lang): string {
   const L = RUNTIME[lang], bar = '========================================================';
   const prog = state.mis.map((n, i) => `${i + 1}) ${L.prog[n >= 2 ? 2 : n === 1 ? 1 : 0]}`).join('  ');
-  return `\n${bar}\n${L.head}\n${bar}\n${L.mis}: ${prog}\n${L.goal(state.goalReached)}\n${directive ? L.dir(directive.text) : L.none}\n`;
+  return `\n${bar}\n${L.head}\n${bar}\n${L.mis}: ${prog}\n${L.goal(state.goalReached)}\n${!directive ? L.none : directive.kind === 'greet' ? L.greet : L.dir(directive.text)}\n`;
 }
 
 /** 종료 리포트(D-17, 티켓 14): 분류 기준 순서의 rows(설명·발화 스냅샷) + total + 판정. 레버리지 기준이 없으면 null. summary 는 분석 챗봇 문장(실패 시 null). */
