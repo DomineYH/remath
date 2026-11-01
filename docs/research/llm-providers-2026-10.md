@@ -90,6 +90,27 @@
 - **키 검증**: 접두어 검사는 Anthropic(`sk-ant-`)만 문서 근거가 있고 OpenAI·Gemini는 근거 없음 → 접두어는 UX 힌트로만 쓰고, 실제 검증은 모델 목록 `GET`(3사 모두 토큰 비과금) 결과의 2xx/401로 판정.
 - Anthropic은 `anthropic-version` 헤더가 필수이고, 워크스페이스 미지정 키면 `anthropic-workspace-id`도 필요 — 어댑터 설정에 선택 필드로 둔다.
 
+## 오류 종류와 재시도 판정 (#89, 2026-11-01 확인)
+
+비-2xx 본문에서 어댑터가 읽는 오류 종류(`AdapterError.kind`): OpenAI `error.code ?? error.type`, Anthropic `error.type`, Gemini(`generateContent`) `error.status`. 분류는 상태 코드로 하되, **429 본문의 종류가 결제·한도 소진 집합에 들면 `provider_rejected`(재시도 불가)**로 뒤집는다. 집합은 `server/src/providers/call.ts`의 `QUOTA_KINDS` 한 곳에 있다. 지금 문서로 확정되는 것은 OpenAI뿐이다.
+
+| 공급자 | 상태·종류 | 뜻 | 어댑터 판정 | 출처 |
+|---|---|---|---|---|
+| OpenAI | 429 `type=rate_limit_error`, `code=slow_down` 또는 code 없음 | rate limit(요청량 급증 포함). `Retry-After`가 있으면 따른다 | `provider_unavailable`, 재시도 가능 | [error codes][oa-errors] |
+| OpenAI | 429 `type=insufficient_quota`, `code` ∈ `credit_balance_exhausted`, `organization_spend_limit_exceeded`, `project_spend_limit_exceeded`, `organization_usage_limit_exceeded` | 선불 크레딧 소진·조직/프로젝트 월 지출 상한·OpenAI 부여 사용 한도. "Retrying billing, spend, or quota errors won't restore API access." | `provider_rejected`, 재시도 불가 | [error codes][oa-errors] |
+| OpenAI | 503 `service_unavailable_error` / `server_is_overloaded` | 일시 과부하 | `provider_unavailable`, 재시도 가능 | [error codes][oa-errors] |
+| Anthropic | 402 `billing_error` | 결제 문제 | `provider_rejected`(비-429 4xx) | [errors][an-errors] |
+| Anthropic | 400 `invalid_request_error` | 요청 오류. 조직·워크스페이스 지출 한도 도달에도 쓰인다 | `provider_rejected` | [errors][an-errors] |
+| Anthropic | 429 `rate_limit_error` | rate limit과 사용 티어 월 지출 상한이 같은 type이다(상한 429는 `retry-after` 헤더가 없다는 것만 다름) → type으로 구별 불가 | `provider_unavailable`, 재시도 가능(종류는 로그에 남김) | [errors][an-errors] |
+| Anthropic | 529 `overloaded_error` | 일시 과부하 | `provider_unavailable`, 재시도 가능 | [errors][an-errors] |
+| Gemini | 429 `RESOURCE_EXHAUSTED` | 일시 rate limit과 일일 쿼터 소진이 같은 status다 → 구별 불가 | `provider_unavailable`, 재시도 가능(종류는 로그에 남김) | [api-errors][gg-errors], [troubleshooting][gg-trouble] |
+| Gemini | 403 `PERMISSION_DENIED`, 402 | 미납·무료 티어 불가 등 결제·권한 문제 | `provider_rejected` | [api-errors][gg-errors], [troubleshooting][gg-trouble] |
+
+- 본문 모양: OpenAI `{"error":{"message","type","code","param"}}`, Anthropic `{"type":"error","error":{"type","message"},"request_id"}`, Gemini `{"error":{"code":<number>,"message","status"}}`.
+- 스트림 중 오류(OpenAI `response.failed`의 `error.code`, `event: error`의 `code`)에도 같은 집합을 적용한다.
+- Gemini Interactions API에는 `quota_exceeded`·`payment_required`·`failed_precondition` 코드가 따로 있지만 지금 어댑터 경로(`generateContent`)가 아니다.
+- 종류는 짧은 식별자라 `llm call failed`·`turn failed`·`ai key rejected by provider` 로그에 싣는다. 공급자가 그 자리에 메시지를 넣는 경우에 대비해 64자를 넘거나 영숫자·`_`·`.`·`-` 밖의 문자가 있으면 버린다. 메시지 본문·키는 로그에 넣지 않는다(Q9).
+
 ## 출처
 
 [oa-create]: https://developers.openai.com/api/reference/resources/responses/methods/create
@@ -97,6 +118,7 @@
 [oa-reasoning]: https://developers.openai.com/api/docs/guides/reasoning
 [oa-stream-guide]: https://developers.openai.com/api/docs/guides/streaming-responses
 [oa-auth]: https://developers.openai.com/api/docs/api-reference/authentication
+[oa-errors]: https://developers.openai.com/api/docs/guides/error-codes
 [oa-models]: https://developers.openai.com/api/reference/resources/models/methods/list
 [oa-models-get]: https://developers.openai.com/api/reference/resources/models/methods/retrieve
 [oa-models-page]: https://developers.openai.com/api/docs/models

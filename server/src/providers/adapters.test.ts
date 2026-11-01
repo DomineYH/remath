@@ -5,7 +5,7 @@ import { anthropicProvider } from './anthropic.ts';
 import { geminiProvider } from './gemini.ts';
 import { openaiProvider } from './openai.ts';
 import { providersFor } from './index.ts';
-import type { AdapterOpts } from './call.ts';
+import { QUOTA_KINDS, type AdapterOpts } from './call.ts';
 import { fakeFetch, jsonResponse, leaksKey, memLog, sseResponse, sseText } from './testkit.ts';
 
 const KEY = 'sk-test-SECRET-KEY-123';
@@ -114,6 +114,10 @@ interface Case {
   ok: string; okEvents: StreamEvent[]; midError: string; midRejected: string; length: string;
   /** 비-2xx 오류 본문(공급자별 형태). */
   errorBody: (message: string) => unknown;
+  /** errorBody·midError 의 공급자 오류 종류(#89)와 midError 의 공급자 메시지(로그에 없어야 한다). */
+  kinds: { http: string; mid: string; midMessage: string };
+  /** 오류 종류만 바꾼 비-2xx 본문(#89 종류 위생 검사). */
+  kindBody: (kind: string) => unknown;
   request: { url: string; headers: Record<string, string>; body: unknown; effort: unknown };
   models: { url: string; json: unknown; ids: string[] };
 }
@@ -126,6 +130,8 @@ const CASES: Record<string, Case> = {
       { type: 'done', model: 'gpt-6.1-sol-2026-09-01', stopReason: 'end', usage: { input: 42, output: 7 } },
     ],
     errorBody: message => ({ error: { message, type: 'invalid_request_error', param: null, code: 'invalid_api_key' } }),
+    kinds: { http: 'invalid_api_key', mid: 'server_error', midMessage: 'The server had an error' },
+    kindBody: kind => ({ error: { message: 'm', type: kind, param: null, code: null } }),
     request: {
       url: 'https://api.openai.com/v1/responses',
       headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
@@ -141,6 +147,8 @@ const CASES: Record<string, Case> = {
       { type: 'done', model: 'claude-sonnet-5-5', stopReason: 'end', usage: { input: 42, output: 7 } },
     ],
     errorBody: message => ({ type: 'error', error: { type: 'authentication_error', message }, request_id: 'req_1' }),
+    kinds: { http: 'authentication_error', mid: 'overloaded_error', midMessage: 'Overloaded' },
+    kindBody: kind => ({ type: 'error', error: { type: kind, message: 'm' }, request_id: 'req_1' }),
     request: {
       url: 'https://api.anthropic.com/v1/messages',
       headers: { 'x-api-key': KEY, 'anthropic-version': '2026-10-21', 'content-type': 'application/json' },
@@ -156,6 +164,8 @@ const CASES: Record<string, Case> = {
       { type: 'done', model: 'gemini-3.8-flash', stopReason: 'end', usage: { input: 42, output: 37 } },   // output = 응답 + 생각 토큰(3사 모두 과금 기준)
     ],
     errorBody: message => ({ error: { code: 401, message, status: 'UNAUTHENTICATED' } }),
+    kinds: { http: 'UNAUTHENTICATED', mid: 'UNAVAILABLE', midMessage: 'The model is overloaded' },
+    kindBody: kind => ({ error: { code: 429, message: 'm', status: kind } }),
     request: {
       url: 'https://generativelanguage.googleapis.com/v1beta/models/m-1:streamGenerateContent?alt=sse',
       headers: { 'x-goog-api-key': KEY, 'Content-Type': 'application/json' },
@@ -217,6 +227,38 @@ describe.each(Object.entries(CASES))('%s adapter', (_, c) => {
     }
   });
 
+  it('429 without an error kind (rate limit) stays provider_unavailable, retryable, status 429 (#89)', async () => {
+    const { p } = setup(() => jsonResponse({ error: { message: 'slow down' } }, 429));
+    const e = await rejection(p.complete(REQ)) as AdapterError;
+    expect(e).toMatchObject({ code: 'provider_unavailable', status: 429, retryable: true });
+    expect(e.kind).toBeUndefined();
+    const t = await rejection(setup(() => new Response('<html>Too Many Requests</html>', { status: 429 })).p.complete(REQ)) as AdapterError;
+    expect(t).toMatchObject({ code: 'provider_unavailable', status: 429, retryable: true });
+    expect(t.kind).toBeUndefined();   // 본문이 JSON 이 아니면 종류 없음
+  });
+
+  it('the error kind is taken from the non-2xx body and the stream error (#89)', async () => {
+    expect(await rejection(setup(() => jsonResponse(c.errorBody('Invalid API key'), 401)).p.complete(REQ))).toMatchObject({ status: 401, kind: c.kinds.http });
+    await expect(setup(() => jsonResponse(c.errorBody('bad key'), 401)).p.listModels()).rejects.toMatchObject({ status: 401, kind: c.kinds.http });
+    expect(await rejection(setup(() => sseResponse(c.midError)).p.complete(REQ))).toMatchObject({ kind: c.kinds.mid });
+  });
+
+  it('an error kind over 64 chars or outside [A-Za-z0-9_.-] is dropped — not on the error, not in the log (#89)', async () => {
+    const ok64 = 'k'.repeat(64);
+    const kept = setup(() => jsonResponse(c.kindBody(ok64), 429));
+    expect(await rejection(kept.p.complete(REQ))).toMatchObject({ kind: ok64 });
+    expect(kept.lines[0]!.obj).toMatchObject({ kind: ok64 });
+    for (const bad of ['k'.repeat(65), 'quota exceeded for sk-test-SECRET', 'rate_limit_error\n', '한도_초과', '']) {
+      const s = setup(() => jsonResponse(c.kindBody(bad), 429));
+      const e = await rejection(s.p.complete(REQ)) as AdapterError;
+      expect(e).toMatchObject({ code: 'provider_unavailable', status: 429 });
+      expect(e.kind).toBeUndefined();
+      expect(s.lines).toHaveLength(1);
+      expect((s.lines[0]!.obj as { kind?: string }).kind).toBeUndefined();
+      if (bad) expect(JSON.stringify(s.lines)).not.toContain(bad);
+    }
+  });
+
   it('a mid-stream error event throws after the deltas already sent', async () => {
     const { p } = setup(() => sseResponse(c.midError));
     const seen: StreamEvent[] = [];
@@ -267,11 +309,17 @@ describe.each(Object.entries(CASES))('%s adapter', (_, c) => {
       lines.push(...s.lines);
     }
     expect(lines).toHaveLength(5);   // 성공 2·실패 2 = 호출당 1줄 + length 경고 1줄
-    expect(lines.filter(l => !(l.obj as { ok?: boolean }).ok && 'ok' in l.obj).map(l => l.obj)).toEqual([
-      expect.objectContaining({ ok: false, code: 'provider_unavailable' }), expect.objectContaining({ ok: false, code: 'provider_rejected' }),
+    const failed = lines.filter(l => !(l.obj as { ok?: boolean }).ok && 'ok' in l.obj);
+    expect(failed.map(l => l.msg)).toEqual(['llm call failed', 'llm call failed']);
+    // #89: 실패 줄은 HTTP 상태(스트림 중 오류면 Gemini 의 숫자 code, 아니면 없음)와 공급자 오류 종류를 싣는다
+    expect(failed.map(l => l.obj)).toEqual([
+      { provider: p.id, model: 'm-1', role: 'mentor', ms: expect.any(Number), ok: false, code: 'provider_unavailable', status: p.id === 'gemini' ? 503 : undefined, kind: c.kinds.mid },
+      { provider: p.id, model: 'm-1', role: 'mentor', ms: expect.any(Number), ok: false, code: 'provider_rejected', status: 401, kind: c.kinds.http },
     ]);
     const dump = JSON.stringify(lines);
     for (const secret of [KEY, 'SYSTEM-PROMPT-TEXT', 'USER-UTTERANCE', 'BOT-REPLY', '두 번째 발화', '반은', '이분의 일']) expect(dump).not.toContain(secret);
+    // 공급자 메시지 본문·오류 본문 문자열도 넣지 않는다(Q9)
+    for (const text of ['Incorrect API key', c.kinds.midMessage, 'stream error', '"error"', JSON.stringify(c.errorBody(`Incorrect API key provided: ${KEY}`))]) expect(dump).not.toContain(text);
   });
 
   it('listModels GETs the model list and returns ids; 401 → provider_rejected', async () => {
@@ -341,6 +389,62 @@ describe('mid-stream error shapes without a numeric code (Q7)', () => {
 data: {"type":"response.failed","sequence_number":1,"response":{"id":"resp_1","status":"failed","error":{"code":"${code}","message":"x"}}}`);
     expect(await fail(openaiProvider, failed('invalid_prompt'))).toMatchObject({ code: 'provider_rejected', retryable: false });
     expect(await fail(openaiProvider, failed('server_error'))).toMatchObject({ code: 'provider_unavailable', retryable: true });
+  });
+});
+
+// #89: 결제·지출·한도 소진은 429 여도 재시도해도 소용없다 → provider_rejected. 그 밖의 429·5xx 는 그대로 재시도 가능. 공급자별 사실은 docs/research/llm-providers-2026-10.md.
+describe('provider error kinds: billing/quota exhaustion is rejected, rate limits stay retryable (#89)', () => {
+  const http = (make: Case['make'], json: unknown, status: number) =>
+    collect(make(KEY, { log: memLog().log, fetch: fakeFetch(() => jsonResponse(json, status)).fetch }).complete(REQ)).catch((e: unknown) => e);
+  const mid = (make: Case['make'], text: string) =>
+    collect(make(KEY, { log: memLog().log, fetch: fakeFetch(() => sseResponse(text)).fetch }).complete(REQ)).catch((e: unknown) => e);
+  const QUOTA_CODES = ['credit_balance_exhausted', 'organization_spend_limit_exceeded', 'project_spend_limit_exceeded', 'organization_usage_limit_exceeded'];
+
+  it('the billing/quota kind set is the documented OpenAI set', () => {
+    expect([...QUOTA_KINDS].sort()).toEqual(['insufficient_quota', ...QUOTA_CODES].sort());
+  });
+
+  it.each(QUOTA_CODES)('openai 429 insufficient_quota / %s → provider_rejected, not retryable, kind = code', async code => {
+    const e = await http(openaiProvider, { error: { message: 'You exceeded your current quota', type: 'insufficient_quota', param: null, code } }, 429);
+    expect(e).toBeInstanceOf(AdapterError);
+    expect(e).toMatchObject({ provider: 'openai', code: 'provider_rejected', retryable: false, status: 429, kind: code });
+  });
+
+  it('openai 429 with type insufficient_quota and no code → provider_rejected, kind insufficient_quota', async () => {
+    expect(await http(openaiProvider, { error: { message: 'quota', type: 'insufficient_quota', param: null, code: null } }, 429))
+      .toMatchObject({ code: 'provider_rejected', retryable: false, status: 429, kind: 'insufficient_quota' });
+    expect(await http(openaiProvider, { error: { message: 'quota', type: 'insufficient_quota' } }, 429))
+      .toMatchObject({ code: 'provider_rejected', retryable: false, status: 429, kind: 'insufficient_quota' });
+  });
+
+  it('openai 429 rate_limit_error / slow_down → provider_unavailable, retryable, kind slow_down; 503 server_is_overloaded stays retryable', async () => {
+    expect(await http(openaiProvider, { error: { message: 'slow down', type: 'rate_limit_error', param: null, code: 'slow_down' } }, 429))
+      .toMatchObject({ code: 'provider_unavailable', retryable: true, status: 429, kind: 'slow_down' });
+    expect(await http(openaiProvider, { error: { message: 'busy', type: 'service_unavailable_error', param: null, code: 'server_is_overloaded' } }, 503))
+      .toMatchObject({ code: 'provider_unavailable', retryable: true, status: 503, kind: 'server_is_overloaded' });
+  });
+
+  it('anthropic 402 billing_error → rejected; 429 rate_limit_error → unavailable, retryable; 529 overloaded_error → unavailable, retryable', async () => {
+    const body = (type: string) => ({ type: 'error', error: { type, message: 'x' }, request_id: 'req_1' });
+    expect(await http(anthropicProvider, body('billing_error'), 402)).toMatchObject({ code: 'provider_rejected', retryable: false, status: 402, kind: 'billing_error' });
+    expect(await http(anthropicProvider, body('rate_limit_error'), 429)).toMatchObject({ code: 'provider_unavailable', retryable: true, status: 429, kind: 'rate_limit_error' });
+    expect(await http(anthropicProvider, body('overloaded_error'), 529)).toMatchObject({ code: 'provider_unavailable', retryable: true, status: 529, kind: 'overloaded_error' });
+  });
+
+  it('gemini 429 RESOURCE_EXHAUSTED → unavailable, retryable; 403 PERMISSION_DENIED → rejected; a mid-stream numeric 429 carries the kind', async () => {
+    const body = (code: number, status: string) => ({ error: { code, message: 'x', status } });
+    expect(await http(geminiProvider, body(429, 'RESOURCE_EXHAUSTED'), 429)).toMatchObject({ code: 'provider_unavailable', retryable: true, status: 429, kind: 'RESOURCE_EXHAUSTED' });
+    expect(await http(geminiProvider, body(403, 'PERMISSION_DENIED'), 403)).toMatchObject({ code: 'provider_rejected', retryable: false, status: 403, kind: 'PERMISSION_DENIED' });
+    expect(await mid(geminiProvider, sseText(`data: {"error":{"code":429,"message":"quota","status":"RESOURCE_EXHAUSTED"}}`)))
+      .toMatchObject({ code: 'provider_unavailable', retryable: true, status: 429, kind: 'RESOURCE_EXHAUSTED' });
+  });
+
+  it.each(['insufficient_quota', ...QUOTA_CODES])('openai mid-stream %s (response.failed and error event) → rejected, not retryable', async code => {
+    const failed = sseText(`event: response.failed
+data: {"type":"response.failed","sequence_number":1,"response":{"id":"resp_1","status":"failed","error":{"code":"${code}","message":"quota"}}}`);
+    const error = sseText(`event: error
+data: {"type":"error","sequence_number":1,"code":"${code}","message":"quota","param":null}`);
+    for (const text of [failed, error]) expect(await mid(openaiProvider, text)).toMatchObject({ code: 'provider_rejected', retryable: false, kind: code });
   });
 });
 

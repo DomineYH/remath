@@ -186,8 +186,8 @@ async function* stream(o: TurnOpts & { signal: AbortSignal }, id: string, token:
       }
     }
   } catch (err) {
-    // 키·암호문·발화는 로그에 넣지 않는다: 어댑터 오류는 공급자·코드·상태만(Q9).
-    o.log.error(err instanceof AdapterError ? { provider: err.provider, code: err.code, status: err.status } : err instanceof Unconfigured ? { role: err.role, code: err.code } : { err }, 'turn failed');
+    // 키·암호문·발화는 로그에 넣지 않는다: 어댑터 오류는 공급자·코드·상태·오류 종류만(Q9, #89). 공급자 메시지는 넣지 않는다.
+    o.log.error(err instanceof AdapterError ? { provider: err.provider, code: err.code, status: err.status, kind: err.kind } : err instanceof Unconfigured ? { role: err.role, code: err.code } : { err }, 'turn failed');
     yield failure(err, signal);
   }
 }

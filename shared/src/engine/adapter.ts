@@ -26,11 +26,19 @@ export type StreamEvent =
   | { type: 'delta'; text: string }
   | { type: 'done'; model: string; stopReason: 'end' | 'length' | 'other'; usage?: { input: number; output: number } };
 
-/** 3사 `event: error` 와 HTTP 오류를 평탄화한 형태. 어댑터는 재시도하지 않고 던진다. 재시도 여부는 파이프라인이 정한다. */
+/** 공급자 오류 종류로 받는 모양: 짧은 식별자만. 공급자가 그 자리에 메시지를 넣어도 로그로 새지 않게 길이·문자를 제한한다(#89). */
+const KIND = /^[A-Za-z0-9_.-]{1,64}$/;
+
+/**
+ * 3사 `event: error` 와 HTTP 오류를 평탄화한 형태. 어댑터는 재시도하지 않고 던진다. 재시도 여부는 파이프라인이 정한다.
+ * kind = 공급자 오류 종류(OpenAI error.code ?? type, Anthropic error.type, Gemini error.status). 로그에 넣어도 되는 값만 담는다:
+ * 64자 초과·영숫자·`_`·`.`·`-` 밖의 문자가 있으면 저장하지 않는다(#89).
+ */
 export class AdapterError extends Error {
-  provider: ProviderId; code: string; status?: number; retryable: boolean;
-  constructor(provider: ProviderId, code: string, message: string, opts: { status?: number; retryable?: boolean } = {}) {
+  provider: ProviderId; code: string; status?: number; retryable: boolean; kind?: string;
+  constructor(provider: ProviderId, code: string, message: string, opts: { status?: number; retryable?: boolean; kind?: string } = {}) {
     super(message); this.name = 'AdapterError'; this.provider = provider; this.code = code; this.status = opts.status; this.retryable = opts.retryable ?? false;
+    if (typeof opts.kind === 'string' && KIND.test(opts.kind)) this.kind = opts.kind;
   }
 }
 
