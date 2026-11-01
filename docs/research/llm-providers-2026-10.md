@@ -109,7 +109,7 @@
 - 본문 모양: OpenAI `{"error":{"message","type","code","param"}}`, Anthropic `{"type":"error","error":{"type","message"},"request_id"}`, Gemini `{"error":{"code":<number>,"message","status"}}`.
 - 스트림 중 오류(OpenAI `response.failed`의 `error.code`, `event: error`의 `code`)에도 같은 집합을 적용한다.
 - Gemini Interactions API에는 `quota_exceeded`·`payment_required`·`failed_precondition` 코드가 따로 있지만 지금 어댑터 경로(`generateContent`)가 아니다.
-- 종류는 짧은 식별자라 `llm call failed`·`turn failed`·`ai key rejected by provider` 로그에 싣는다. 공급자가 그 자리에 메시지를 넣는 경우에 대비해 한 가지 대소문자로만 된 식별자(전부 소문자 또는 전부 대문자, 64자 이하, 영숫자·`_`·`.`·`-`)만 남기고 나머지는 버린다 — 위 표의 종류는 모두 그렇고(OpenAI·Anthropic 소문자, Gemini 대문자), 대소문자가 섞인 무작위 키 모양 값은 걸러진다. 한 가지 대소문자로만 된 키는 모양으로 못 거르므로, 어댑터는 오류를 내보내기 전에 이 요청의 키를 담았거나 키의 8자 이상 조각인 종류를 지운다. 메시지 본문·키는 로그에 넣지 않는다(Q9).
+- 종류는 `llm call failed`·`turn failed`·`ai key rejected by provider` 로그에 싣되, **공급자가 문서로 밝힌 값만** 싣는다: `server/src/providers/call.ts`의 `LOGGED_KINDS`(OpenAI = [error codes][oa-errors] 가이드의 type·code와 openai-python [`ResponseError.code`][oa-sdk-resp-error], Anthropic = [errors][an-errors] 페이지의 `error.type` 전부, Gemini = Google API 오류 모델 [AIP-193][gg-aip193]이 가리키는 [`google.rpc.Code`][gg-rpc-code] 상태 이름(`OK` 제외)). 목록에 없는 값은 어댑터를 나갈 때 버리므로, 공급자 문구·메시지·키 조각은 kind로 로그에 닿지 않는다. 분류(`QUOTA_KINDS`·거절 판정)는 목록과 무관하게 원래 값을 본다. OpenAI 401 본문의 `code: invalid_api_key`는 공식 페이지에서 확인되지 않아 목록에 없다(상태 401은 그대로 기록). `AdapterError` 생성자의 모양 규칙(한 가지 대소문자의 64자 이하 식별자)은 목·파이프라인 오류까지 덮는 일반 규칙으로 남는다. 메시지 본문·키는 로그에 넣지 않는다(Q9).
 
 ## 출처
 
@@ -134,6 +134,7 @@
 [oa-sdk-completed]: https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_completed_event.py
 [oa-sdk-failed]: https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_failed_event.py
 [oa-sdk-error]: https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_error_event.py
+[oa-sdk-resp-error]: https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_error.py
 [oa-sdk-union]: https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_stream_event.py
 [an-overview]: https://platform.claude.com/docs/en/api/overview
 [an-auth]: https://platform.claude.com/docs/en/manage-claude/authentication
@@ -151,6 +152,8 @@
 [gg-stream]: https://ai.google.dev/gemini-api/docs/interactions/streaming
 [gg-errors]: https://ai.google.dev/gemini-api/docs/api-errors
 [gg-trouble]: https://ai.google.dev/gemini-api/docs/troubleshooting
+[gg-aip193]: https://google.aip.dev/193
+[gg-rpc-code]: https://github.com/googleapis/googleapis/blob/master/google/rpc/code.proto
 [gg-gc]: https://ai.google.dev/api/generate-content
 [gg-models]: https://ai.google.dev/gemini-api/docs/models
 [gg-models-ref]: https://ai.google.dev/api/models

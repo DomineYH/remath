@@ -51,7 +51,7 @@ export function adminAiHandlers({ db, config, now, providersFor }: Deps): Handle
         try { await providersFor(provider, key, { log: req.log, role: row.role }).listModels(); }
         catch (err) {
           const status = (err as { status?: number }).status ?? null, message = String((err as Error)?.message ?? err).replaceAll(key, S.maskKey(key)).slice(0, 200);
-          // Q32: 검증 실패는 로그만. kind = 공급자 오류 종류(#89, AdapterError 가 한 가지 대소문자 식별자만 담고 어댑터가 키를 담은 종류를 지운다). 메시지·키는 로그에 넣지 않는다.
+          // Q32: 검증 실패는 로그만. kind = 공급자 오류 종류(#89, 어댑터가 문서의 종류 LOGGED_KINDS 만 남기고 그 밖의 값은 지운다). 메시지·키는 로그에 넣지 않는다.
           req.log.warn({ role, provider, status, kind: err instanceof AdapterError ? err.kind : undefined }, 'ai key rejected by provider');
           no('provider_rejected', 'the provider rejected this key', { status, message });
         }

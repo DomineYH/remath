@@ -8,7 +8,7 @@ import type { Deps } from '../app.ts';
 import { loadConfig } from '../config.ts';
 import { ApiFail } from '../errors.ts';
 import { anthropicProvider } from '../providers/anthropic.ts';
-import { fakeFetch, jsonResponse } from '../providers/testkit.ts';
+import { fakeFetch, jsonResponse, leaksKey } from '../providers/testkit.ts';
 import type { ProvidersFor } from '../providers/types.ts';
 import { adminAiHandlers } from './admin-ai.ts';
 
@@ -70,5 +70,20 @@ describe('PUT /api/admin/ai/:role rejection log carries the provider error kind 
       const dump = JSON.stringify(lines);
       for (const text of [cred, ANT]) expect(dump).not.toContain(text);
     }
+  });
+
+  // #89 재리뷰 F1: 실제 어댑터 경로 — 문서 목록(LOGGED_KINDS)에 없는 종류는 키 조각·문구든 무엇이든 로그에 남지 않고, 목록의 종류는 남는다.
+  it('through the real adapter: a wrapped key fragment or a message-shaped kind is not logged; a listed kind (billing_error) is', async () => {
+    const via = (type: string, status: number): ProvidersFor => (_, key, o) => anthropicProvider(key, { ...o, fetch: fakeFetch(() => jsonResponse({ type: 'error', error: { type, message: 'x' } }, status)).fetch });
+    for (const type of [`quota_${ANT.slice(8, 24)}_x`, `err_${ANT.slice(8, 24)}`, 'your_balance_is_empty']) {
+      const { err, lines } = await save(() => { throw new Error('unused'); }, via(type, 403));
+      expect(err.code).toBe('provider_rejected');
+      expect(lines).toEqual([{ obj: { role: 'student', provider: 'anthropic', status: 403, kind: undefined }, msg: 'ai key rejected by provider' }]);
+      const dump = JSON.stringify(lines);
+      expect(dump).not.toContain(type);
+      expect(leaksKey(dump, ANT)).toBe(false);
+    }
+    const { lines } = await save(() => { throw new Error('unused'); }, via('billing_error', 402));
+    expect(lines).toEqual([{ obj: { role: 'student', provider: 'anthropic', status: 402, kind: 'billing_error' }, msg: 'ai key rejected by provider' }]);
   });
 });

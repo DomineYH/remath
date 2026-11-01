@@ -20,6 +20,33 @@ export type Reader = (ev: SseEvent) => string | Done | (string | Done)[] | undef
 export const QUOTA_KINDS: ReadonlySet<string> = new Set([
   'insufficient_quota', 'credit_balance_exhausted', 'organization_spend_limit_exceeded', 'project_spend_limit_exceeded', 'organization_usage_limit_exceeded',
 ]);
+/**
+ * 로그에 남기는 공급자 오류 종류(#89 재리뷰 F1): 공급자가 문서로 밝힌 값만. 그 밖의 값(공급자 문구·키 조각·새 종류)은 어댑터를 나갈 때
+ * 버린다(outbound) — 모양 규칙으로는 문자열이 오류 식별자임을 증명할 수 없다. 분류(isQuota·REJECTED)는 이 목록과 무관하게 원래 값을 본다.
+ * 출처(2026-11-01 확인, docs/research/llm-providers-2026-10.md):
+ * - openai: error codes 가이드(type·code), openai-python ResponseError.code(response.failed 의 error.code).
+ *   실제 401 의 code 'invalid_api_key' 와 authentication_error·permission_error·not_found_error·model_not_found 는 공식 페이지에 없어 넣지 않았다.
+ * - anthropic: Claude API errors 의 error.type 전부.
+ * - gemini: Google API 오류 모델(AIP-193)이 가리키는 google.rpc.Code 상태 이름(OK 제외).
+ */
+export const LOGGED_KINDS: Readonly<Record<RealProviderId, ReadonlySet<string>>> = {
+  openai: new Set([
+    ...QUOTA_KINDS, 'invalid_request_error', 'rate_limit_error', 'slow_down', 'service_unavailable_error', 'server_is_overloaded',
+    'previous_response_not_found', 'websocket_connection_limit_reached',
+    'server_error', 'rate_limit_exceeded', 'invalid_prompt', 'data_residency_mismatch', 'bio_policy', 'misalignment_policy_violation', 'vector_store_timeout',
+    'invalid_image', 'invalid_image_format', 'invalid_base64_image', 'invalid_image_url', 'image_too_large', 'image_too_small', 'image_parse_error',
+    'image_content_policy_violation', 'invalid_image_mode', 'image_file_too_large', 'unsupported_image_media_type', 'empty_image_file',
+    'failed_to_download_image', 'image_file_not_found',
+  ]),
+  anthropic: new Set([
+    'invalid_request_error', 'authentication_error', 'billing_error', 'permission_error', 'not_found_error', 'conflict_error', 'request_too_large',
+    'rate_limit_error', 'api_error', 'timeout_error', 'overloaded_error',
+  ]),
+  gemini: new Set([
+    'CANCELLED', 'UNKNOWN', 'INVALID_ARGUMENT', 'DEADLINE_EXCEEDED', 'NOT_FOUND', 'ALREADY_EXISTS', 'PERMISSION_DENIED', 'UNAUTHENTICATED',
+    'RESOURCE_EXHAUSTED', 'FAILED_PRECONDITION', 'ABORTED', 'OUT_OF_RANGE', 'UNIMPLEMENTED', 'INTERNAL', 'UNAVAILABLE', 'DATA_LOSS',
+  ]),
+};
 const isQuota = (kind: unknown) => typeof kind === 'string' && QUOTA_KINDS.has(kind);
 const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
 
@@ -55,12 +82,12 @@ function asAdapterError(id: RealProviderId, err: unknown, signal?: AbortSignal):
 
 /**
  * 어댑터를 나가는 오류의 마지막 손질(#55): 공급자 글이 되풀이한 키를 가린 뒤 300자로 자른다. 자른 뒤 가리면 잘린 키 앞부분이 샌다.
- * kind 는 로그로 가므로(#89) 이 요청의 키를 담았거나 키의 8자 이상 조각이면 지운다 — 한 가지 대소문자로만 된 키는 AdapterError 의 모양 검사를 통과한다.
+ * kind 는 로그로 가므로(#89) 이 공급자의 LOGGED_KINDS 에 없으면 지운다. 그래서 어떤 공급자 글·메시지·키 조각도 kind 로는 로그에 닿지 않는다.
  */
 function outbound(e: AdapterError, key: string): AdapterError {
   if (key) e.message = e.message.replaceAll(key, maskKey(key));
   e.message = e.message.slice(0, 300);
-  if (key && e.kind !== undefined && (e.kind.includes(key) || (e.kind.length >= 8 && key.includes(e.kind)))) e.kind = undefined;
+  if (e.kind !== undefined && (e.provider === 'mock' || !LOGGED_KINDS[e.provider].has(e.kind))) e.kind = undefined;
   return e;
 }
 
@@ -80,7 +107,7 @@ async function send(id: RealProviderId, o: AdapterOpts, http: Http, signal?: Abo
   throw httpError(id, res.status, message, kind);
 }
 
-/** 스트리밍 호출 한 번. 끝나면(성공·실패·중단) 로그 1줄 — 모델·시간·사용량·코드·HTTP 상태·오류 종류만, 키·본문·공급자 메시지는 절대 넣지 않는다. */
+/** 스트리밍 호출 한 번. 끝나면(성공·실패·중단) 로그 1줄 — 모델·시간·사용량·코드·HTTP 상태·오류 종류(LOGGED_KINDS 의 문서 값만)뿐, 키·본문·공급자 메시지는 절대 넣지 않는다. */
 export async function* stream(id: RealProviderId, o: AdapterOpts, req: CompleteRequest, http: Http, read: Reader): AsyncGenerator<StreamEvent> {
   const t0 = performance.now();
   let done: Done | undefined, fail: AdapterError | undefined, code = 'cancelled';

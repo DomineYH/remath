@@ -36,8 +36,9 @@ const KIND = [/^[a-z0-9_.-]{1,64}$/, /^[A-Z0-9_.-]{1,64}$/];
 /**
  * 3사 `event: error` 와 HTTP 오류를 평탄화한 형태. 어댑터는 재시도하지 않고 던진다. 재시도 여부는 파이프라인이 정한다.
  * kind = 공급자 오류 종류(OpenAI error.code ?? type, Anthropic error.type, Gemini error.status). 로그에 넣어도 되는 값만 담는다:
- * 64자 초과·영숫자·`_`·`.`·`-` 밖의 문자·대소문자 섞임이 있으면 저장하지 않는다(#89). 한 가지 대소문자로만 된 키는 모양으로 못 거르므로
- * 실 어댑터는 오류를 내보내기 전에 이 요청의 키를 담은 종류를 지운다(server/src/providers/call.ts outbound).
+ * 64자 초과·영숫자·`_`·`.`·`-` 밖의 문자·대소문자 섞임이 있으면 저장하지 않는다(#89). 이 모양 규칙은 목·파이프라인 오류까지
+ * 덮는 일반 규칙일 뿐 식별자임을 증명하지 못한다: 실 어댑터는 오류를 내보내기 전에 공급자 문서의 종류(LOGGED_KINDS)만 남기고 나머지는 지운다
+ * (server/src/providers/call.ts outbound).
  */
 export class AdapterError extends Error {
   provider: ProviderId; code: string; status?: number; retryable: boolean; kind?: string;

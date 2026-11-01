@@ -5,7 +5,7 @@ import { anthropicProvider } from './anthropic.ts';
 import { geminiProvider } from './gemini.ts';
 import { openaiProvider } from './openai.ts';
 import { providersFor } from './index.ts';
-import { QUOTA_KINDS, type AdapterOpts } from './call.ts';
+import { LOGGED_KINDS, QUOTA_KINDS, type AdapterOpts } from './call.ts';
 import { fakeFetch, jsonResponse, leaksKey, memLog, sseResponse, sseText } from './testkit.ts';
 
 const KEY = 'sk-test-SECRET-KEY-123';
@@ -135,8 +135,9 @@ const CASES: Record<string, Case> = {
       { type: 'delta', text: '반은 ' }, { type: 'delta', text: '이분의 일' },
       { type: 'done', model: 'gpt-6.1-sol-2026-09-01', stopReason: 'end', usage: { input: 42, output: 7 } },
     ],
-    errorBody: message => ({ error: { message, type: 'invalid_request_error', param: null, code: 'invalid_api_key' } }),
-    kinds: { http: 'invalid_api_key', mid: 'server_error', midMessage: 'The server had an error' },
+    // 실제 401 은 code 'invalid_api_key' 도 싣지만 공식 문서에 없는 값이라 기록하지 않는다(#89 LOGGED_KINDS). 픽스처는 문서의 type 만 둔다.
+    errorBody: message => ({ error: { message, type: 'invalid_request_error', param: null, code: null } }),
+    kinds: { http: 'invalid_request_error', mid: 'server_error', midMessage: 'The server had an error' },
     kindBody: kind => ({ error: { message: 'm', type: kind, param: null, code: null } }),
     midKind: kind => sseText(`event: error\ndata: ${JSON.stringify({ type: 'error', sequence_number: 1, code: kind, message: 'm', param: null })}`),
     request: {
@@ -187,6 +188,8 @@ const CASES: Record<string, Case> = {
     models: { url: 'https://generativelanguage.googleapis.com/v1beta/models', json: { models: [{ name: 'models/gemini-3.8-flash', displayName: 'Gemini 3.8 Flash' }, { name: 'models/gemini-4-argon' }], nextPageToken: 'p2' }, ids: ['gemini-3.8-flash', 'gemini-4-argon'] },
   },
 };
+
+const p0 = (c: Case) => c.make(KEY, { log: memLog().log }).id as keyof typeof LOGGED_KINDS;
 
 describe.each(Object.entries(CASES))('%s adapter', (_, c) => {
   const setup = (respond: () => Response | Promise<Response>, role?: Role) => {
@@ -252,12 +255,12 @@ describe.each(Object.entries(CASES))('%s adapter', (_, c) => {
     expect(await rejection(setup(() => sseResponse(c.midError)).p.complete(REQ))).toMatchObject({ kind: c.kinds.mid });
   });
 
-  it('an error kind over 64 chars or outside [A-Za-z0-9_.-] is dropped — not on the error, not in the log (#89)', async () => {
-    const ok64 = 'k'.repeat(64);
-    const kept = setup(() => jsonResponse(c.kindBody(ok64), 429));
-    expect(await rejection(kept.p.complete(REQ))).toMatchObject({ kind: ok64 });
-    expect(kept.lines[0]!.obj).toMatchObject({ kind: ok64 });
-    for (const bad of ['k'.repeat(65), 'quota exceeded for sk-test-SECRET', 'rate_limit_error\n', '한도_초과', '']) {
+  // 64자 경계(생성자의 모양 규칙)는 'AdapterError kind shape' 에서 본다. 어댑터 경로에서는 문서의 종류만 남는다(LOGGED_KINDS).
+  it('only a documented kind survives the adapter; a synthetic 64-char value, long, message-like, non-ASCII or empty kinds are dropped — not on the error, not in the log (#89)', async () => {
+    const kept = setup(() => jsonResponse(c.kindBody(c.kinds.http), 429));
+    expect(await rejection(kept.p.complete(REQ))).toMatchObject({ kind: c.kinds.http });
+    expect(kept.lines[0]!.obj).toMatchObject({ kind: c.kinds.http });
+    for (const bad of ['k'.repeat(64), 'k'.repeat(65), 'quota exceeded for sk-test-SECRET', 'rate_limit_error\n', '한도_초과', '']) {
       const s = setup(() => jsonResponse(c.kindBody(bad), 429));
       const e = await rejection(s.p.complete(REQ)) as AdapterError;
       expect(e).toMatchObject({ code: 'provider_unavailable', status: 429 });
@@ -309,6 +312,47 @@ describe.each(Object.entries(CASES))('%s adapter', (_, c) => {
     const f = fakeFetch(() => jsonResponse(c.kindBody(c.kinds.http), 429)), m = memLog();
     expect(await rejection(c.make(key, { log: m.log, fetch: f.fetch }).complete(REQ))).toMatchObject({ kind: c.kinds.http });
     expect(m.lines[0]!.obj).toMatchObject({ kind: c.kinds.http });
+  });
+
+  // #89 재리뷰 F1: 모양 규칙은 식별자임을 증명하지 못한다 — 키 조각을 감싼 값·식별자 모양의 공급자 문구는 문서 목록에 없어 버린다.
+  it('a kind wrapping a key fragment is dropped — HTTP, stream, listModels; leaksKey is false on the log (#89)', async () => {
+    const key = LOWER_KEY, frag = key.slice(8, 24);
+    for (const kind of [`err_${frag}`, `${frag}_suffix`, `quota_${frag}_x`]) {
+      for (const respond of [() => jsonResponse(c.kindBody(kind), 429), () => sseResponse(c.midKind(kind))]) {
+        const m = memLog();
+        const e = await rejection(c.make(key, { log: m.log, fetch: fakeFetch(respond).fetch }).complete(REQ)) as AdapterError;
+        expect(e).toBeInstanceOf(AdapterError);
+        expect(e.kind).toBeUndefined();
+        expect(m.lines).toHaveLength(1);
+        expect((m.lines[0]!.obj as { kind?: string }).kind).toBeUndefined();
+        expect(leaksKey(JSON.stringify(m.lines), key)).toBe(false);
+      }
+      const p = c.make(key, { log: memLog().log, fetch: fakeFetch(() => jsonResponse(c.kindBody(kind), 429)).fetch });
+      await expect(p.listModels()).rejects.toSatisfy((e: unknown) => e instanceof AdapterError && e.kind === undefined);
+    }
+  });
+
+  it('a lower-case message-shaped kind (your_balance_is_empty) and an unlisted well-formed kind (some_new_code) are dropped — HTTP and stream (#89)', async () => {
+    for (const kind of ['your_balance_is_empty', 'some_new_code']) {
+      for (const respond of [() => jsonResponse(c.kindBody(kind), 429), () => sseResponse(c.midKind(kind))]) {
+        const s = setup(respond);
+        const e = await rejection(s.p.complete(REQ)) as AdapterError;
+        expect(e).toBeInstanceOf(AdapterError);
+        expect(e.kind).toBeUndefined();
+        expect((s.lines[0]!.obj as { kind?: string }).kind).toBeUndefined();
+        expect(JSON.stringify(s.lines)).not.toContain(kind);
+      }
+    }
+  });
+
+  it('every documented kind in LOGGED_KINDS survives to the error and the log', async () => {
+    const listed = [...LOGGED_KINDS[p0(c)]];
+    expect(listed.length).toBeGreaterThan(0);
+    for (const kind of listed) {
+      const s = setup(() => jsonResponse(c.kindBody(kind), 400));
+      expect(await rejection(s.p.complete(REQ))).toMatchObject({ kind });
+      expect(s.lines[0]!.obj).toMatchObject({ kind });
+    }
   });
 
   it('a mid-stream error event throws after the deltas already sent', async () => {
@@ -489,6 +533,28 @@ describe('provider error kinds: billing/quota exhaustion is rejected, rate limit
     expect(await http(geminiProvider, body(403, 'PERMISSION_DENIED'), 403)).toMatchObject({ code: 'provider_rejected', retryable: false, status: 403, kind: 'PERMISSION_DENIED' });
     expect(await mid(geminiProvider, sseText(`data: {"error":{"code":429,"message":"quota","status":"RESOURCE_EXHAUSTED"}}`)))
       .toMatchObject({ code: 'provider_unavailable', retryable: true, status: 429, kind: 'RESOURCE_EXHAUSTED' });
+  });
+
+  it('QUOTA_KINDS ⊆ LOGGED_KINDS.openai: every billing/quota kind is logged', () => {
+    for (const k of QUOTA_KINDS) expect(LOGGED_KINDS.openai.has(k)).toBe(true);
+  });
+
+  it('classification still reads the raw kind: an unlisted kind is dropped from the error but classified as before', async () => {
+    // F2 계약 그대로: code 가 있으면 code 로 분류 — 모르는 code 의 429 는 재시도 가능, 종류는 기록하지 않는다
+    const e = await http(openaiProvider, { error: { message: 'quota', type: 'insufficient_quota', param: null, code: 'some_new_code' } }, 429) as AdapterError;
+    expect(e).toMatchObject({ code: 'provider_unavailable', retryable: true, status: 429 });
+    expect(e.kind).toBeUndefined();
+    // 스트림 중 REJECTED 판정은 목록에 없는 원래 값으로 한다
+    const m = await mid(openaiProvider, sseText(`event: error\ndata: {"type":"error","sequence_number":1,"code":"invalid_new_thing","message":"x","param":null}`)) as AdapterError;
+    expect(m).toMatchObject({ code: 'provider_rejected', retryable: false });
+    expect(m.kind).toBeUndefined();
+    // 문서의 invalid_api_key 는 공식 페이지에 없다: 401 은 그대로 거절, 종류만 빠진다
+    const k = await http(openaiProvider, { error: { message: 'Incorrect API key provided', type: 'invalid_request_error', param: null, code: 'invalid_api_key' } }, 401) as AdapterError;
+    expect(k).toMatchObject({ code: 'provider_rejected', retryable: false, status: 401 });
+    expect(k.kind).toBeUndefined();
+    // 목록에 있는 결제 소진 code 는 거절 + 종류 기록
+    expect(await http(openaiProvider, { error: { message: 'q', type: 'insufficient_quota', param: null, code: 'credit_balance_exhausted' } }, 429))
+      .toMatchObject({ code: 'provider_rejected', retryable: false, status: 429, kind: 'credit_balance_exhausted' });
   });
 
   it.each(['insufficient_quota', ...QUOTA_CODES])('openai mid-stream %s (response.failed and error event) → rejected, not retryable', async code => {
