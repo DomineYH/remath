@@ -52,7 +52,7 @@ export async function collect(stream: AsyncIterable<StreamEvent>): Promise<{ tex
 
 // ---- MOCK_LLM 컨텍스트: 서버 규칙 엔진의 판정 결과와 시나리오 대사만 담는다. 프롬프트 파싱 없음. ----
 
-/** ADR-0002 이번 턴 지시. 서버가 정하고 런타임 블록으로 렌더링한다. aha 는 교정 대사 + 아하 대사를 한 응답으로 낸다. */
+/** ADR-0002 이번 턴 지시. 서버가 정하고 런타임 블록으로 렌더링한다. aha 턴 지시는 아하 대사 한 줄이고, 비어 있으면 마지막 교정 대사(c)로 대신한다(#68). */
 export type TurnDirective = { kind: 'hesitation' | 'correction' | 'aha' | 'confused'; text: string };
 
 export interface ClassificationRow { name: string; desc?: string; ex?: string }
