@@ -102,7 +102,7 @@ describe('A-3 turn pipeline through sendTurn', () => {
     await teacherWith(env, 'gabriel');
     const sid = (await env.teacher.startSession({ scenario_id: env.ids.gabriel })).session.id;
     const log = await replay(env.teacher, sid, L1);
-    expect(log.map(student)).toEqual(['안녕하세요… 저는 가브리엘이에요.', ko.elicit[0], m[0].h, m[0].c, m[1].h, m[1].c, m[2].h, `${m[2].c}\n${ko.aha}`]);
+    expect(log.map(student)).toEqual(['안녕하세요… 저는 가브리엘이에요.', ko.elicit[0], m[0].h, m[0].c, m[1].h, m[1].c, m[2].h, ko.aha]);
     expect(log.map(trigger)).toEqual([undefined, undefined, undefined, undefined, undefined, undefined, undefined, 3]);
     expect(pick(log[7], 'mentor')?.text).toBe(ko.t3);
     expect(log.map(evs => evs.map(e => e.type))[7]).toEqual(['classification', 'student', 'student', 'trigger', 'mentor', 'mentor', 'done']);
