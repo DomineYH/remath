@@ -125,7 +125,7 @@
 
 - 프로브 모양: `system` = `Reply with the single word OK.`, `messages` = `[{role:'user', content:'OK'}]`, `model` = 저장 요청의 `model`(파이프라인이 실제로 쓸 모델이라 "키는 유효하지만 이 모델은 못 쓴다"도 잡힌다), 출력 상한 `PROBE_MAX_OUTPUT_TOKENS = 16`(OpenAI `max_output_tokens`, Anthropic `max_tokens`, Gemini `generationConfig.maxOutputTokens` — 어댑터는 기존 effort 표기처럼 snake_case `generation_config.max_output_tokens`로 보내고 effort와 한 객체에 합친다), `effort` 없음(공급자 기본값), 기한 `LIST_MODELS_TIMEOUT_MS`(10초). 비용은 저장 1회당 입력 수십 토큰 + 출력 ≤16 토큰.
 - 판정: `done`(stop `length` 포함) = 통과. `provider_rejected`(결제·크레딧·한도 소진 429, 402, 403, 모델 없음 404 등) = **저장 거부** — 모델 목록 실패와 같은 `provider_rejected` 응답(`details` = `{status, 마스킹된 message}`)과 `ai key rejected by provider` 로그. `provider_unavailable`(rate limit 429, 5xx, 기한 초과, 네트워크) = 확인 불가로 보고 저장, `ai key probe inconclusive` 로그(`role, provider, status, kind`) 1줄. 어댑터 `stream()`이 `llm call`/`llm call failed` 줄을 따로 남긴다. 프롬프트·응답 텍스트·공급자 문구·키는 어디에도 기록하지 않는다.
-- 최소값: Anthropic `max_tokens`는 최소 0이라 16은 유효하다([messages][an-messages]). OpenAI `max_output_tokens`의 최소값은 이 저장소 문서에 적혀 있지 않고 이번 작업에서 [responses/create][oa-create]를 다시 확인하지 않았다 → 16을 쓴다(미확인, 실 저장 1회로 400이 아닌지 확인 필요). Gemini `maxOutputTokens`의 최소값 언급은 찾지 못했다.
+- 최소값: Anthropic `max_tokens`는 최소 0이라 16은 유효하다([messages][an-messages]). OpenAI `max_output_tokens`는 최소 16이다([responses/create][oa-create]의 `minimum: 16`, 2026-11-01 확인) → 16은 하한 그대로 유효하다. 상한에 걸리면 오류가 아니라 `status: incomplete`, `incomplete_details.reason: max_output_tokens`로 끝나고 어댑터는 stop `length`로 본다. Gemini `maxOutputTokens`의 최소값 언급은 찾지 못했다.
 - 한계: Anthropic 사용 티어 월 지출 상한 429(`rate_limit_error`)와 Gemini 일일 쿼터 429(`RESOURCE_EXHAUSTED`)는 rate limit과 구별되지 않아(위 절) 프로브에서도 `provider_unavailable` → 저장된다. 프로브는 저장 순간만 본다(주기적 재확인 없음).
 
 ## 출처

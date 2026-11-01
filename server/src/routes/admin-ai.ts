@@ -20,7 +20,7 @@ type Settings = z.infer<typeof S.AiSettings>;
 const AI_COLS = 'role, key_source, provider, key_masked, key_added_at, model, effort';
 const no = (code: S.ErrorCode, message: string, details?: unknown): never => { throw new ApiFail(code, message, details); };
 
-/** 키 확인 프로브(#94)의 출력 상한. OpenAI max_output_tokens 의 최소값은 저장소 문서에 없어 브리프대로 16(미확인), Anthropic max_tokens 는 최소 0. */
+/** 키 확인 프로브(#94)의 출력 상한. OpenAI max_output_tokens 는 최소 16(responses/create 레퍼런스), Anthropic max_tokens 는 최소 0. */
 export const PROBE_MAX_OUTPUT_TOKENS = 16;
 /** 프로브 프롬프트. 응답·로그·감사 어디에도 싣지 않는다. */
 const PROBE_SYSTEM = 'Reply with the single word OK.';
