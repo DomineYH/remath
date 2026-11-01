@@ -92,7 +92,7 @@
 
 ## 오류 종류와 재시도 판정 (#89, 2026-11-01 확인)
 
-비-2xx 본문에서 어댑터가 읽는 오류 종류(`AdapterError.kind`): OpenAI `error.code ?? error.type`, Anthropic `error.type`, Gemini(`generateContent`) `error.status`. 분류는 상태 코드로 하되, **429 본문의 종류가 결제·한도 소진 집합에 들면 `provider_rejected`(재시도 불가)**로 뒤집는다. 집합은 `server/src/providers/call.ts`의 `QUOTA_KINDS` 한 곳에 있다. 지금 문서로 확정되는 것은 OpenAI뿐이다.
+비-2xx 본문에서 어댑터가 읽는 오류 종류(`AdapterError.kind`): OpenAI는 `error.code`가 로그 허용 목록(`LOGGED_KINDS.openai`)에 있으면 code, 아니면 목록에 있는 `error.type`(둘 다 목록 밖이면 기록하지 않음, #93), Anthropic `error.type`, Gemini(`generateContent`) `error.status`. 분류는 상태 코드로 하되, **429 본문의 종류가 결제·한도 소진 집합에 들면 `provider_rejected`(재시도 불가)**로 뒤집는다 — OpenAI는 `error.code`와 `error.type` 중 하나라도 집합에 들면 소진이다(#93, 새 code가 붙은 `insufficient_quota`도 거절). 집합은 `server/src/providers/call.ts`의 `QUOTA_KINDS` 한 곳에 있다. 지금 문서로 확정되는 것은 OpenAI뿐이다.
 
 | 공급자 | 상태·종류 | 뜻 | 어댑터 판정 | 출처 |
 |---|---|---|---|---|
