@@ -45,7 +45,6 @@ async function sendAndWaitBusy(text: string) {
 
 beforeEach(() => {
   globalThis.matchMedia = vi.fn(() => ({ matches: false, addEventListener() {}, removeEventListener() {} })) as unknown as typeof matchMedia;
-  Element.prototype.scrollTo = () => {};
   api.getSession.mockResolvedValue(detail(0, 10));
   api.getPractice.mockResolvedValue({ groups: [], scenarios: [scenario] });
 });

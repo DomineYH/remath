@@ -152,7 +152,7 @@ export function ChatScreen({ isAdminTest }: { isAdminTest: boolean }) {
           <ChatHeader avatar={view.student_prefix} name={view.name} description={view.description} showCls={hasCls ? showCls : null} onShowCls={setShowCls}
             onEnd={end} endDisabled={ended || busy} endPrimary={atLimit} onBack={() => navigate(isAdminTest ? '/admin/scenarios' : '/practice')} />
           <ProblemBox problem={view.problem} />
-          <TurnLog size={detail.turns.length + (live ? 3 : 0) + (ended ? 1 : 0)}>
+          <TurnLog>
             <SystemLine>{t('sessStart')}</SystemLine>
             {detail.turns.map(x => msg(x.seq, x.speaker, x.text, x))}
             {live && <>

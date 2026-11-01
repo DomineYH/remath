@@ -52,10 +52,18 @@ export function ProblemBox({ problem }: { problem: string }) {
   return <div className="problem"><p className="eyebrow">{t('mathProblem')}</p><p>{problem}</p></div>;
 }
 
-/** 새 내용이 붙을 때마다 맨 아래로 스크롤한다. */
-export function TurnLog({ children, size }: { children: ReactNode; size: number }) {
+/** 처음부터, 그리고 로그 내용이 바뀔 때마다(발화 추가·스트리밍 문장·분류 블록 표시 등) 맨 아래로 스크롤한다(#102). */
+export function TurnLog({ children }: { children: ReactNode }) {
   const t = useT(), ref = useRef<HTMLDivElement>(null);
-  useEffect(() => { ref.current?.scrollTo({ top: ref.current.scrollHeight }); }, [size]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const bottom = () => { el.scrollTop = el.scrollHeight; };
+    bottom();
+    const obs = new MutationObserver(bottom);
+    obs.observe(el, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['hidden'] });
+    return () => obs.disconnect();
+  }, []);
   return <div className="log" ref={ref} role="log" aria-label={t('logAria')}>{children}</div>;
 }
 
