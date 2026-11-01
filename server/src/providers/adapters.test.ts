@@ -626,6 +626,33 @@ describe('anthropic max_tokens', () => {
   });
 });
 
+describe('maxOutputTokens maps to each provider output cap (#94)', () => {
+  const sent = async (make: Case['make'], ok: string, req: CompleteRequest, role?: Role) => {
+    const f = fakeFetch(() => sseResponse(ok));
+    await drain(make(KEY, { log: memLog().log, fetch: f.fetch, role }).complete(req));
+    return f.calls[0]!.body as Record<string, unknown>;
+  };
+  const capped: CompleteRequest = { ...REQ, maxOutputTokens: 16 };
+
+  it('present: OpenAI max_output_tokens, Anthropic max_tokens (over the role default), Gemini generationConfig.maxOutputTokens', async () => {
+    expect((await sent(openaiProvider, OPENAI_OK, capped)).max_output_tokens).toBe(16);
+    for (const role of ['student', 'analysis'] as const) expect((await sent(anthropicProvider, ANTHROPIC_OK, capped, role)).max_tokens).toBe(16);
+    expect((await sent(geminiProvider, GEMINI_OK, capped)).generation_config).toEqual({ max_output_tokens: 16 });
+  });
+
+  it('present with effort: Gemini merges both into one generationConfig; OpenAI keeps reasoning beside the cap', async () => {
+    const both: CompleteRequest = { ...capped, effort: 'high' };
+    expect(await sent(geminiProvider, GEMINI_OK, both)).toMatchObject({ generation_config: { max_output_tokens: 16, thinking_config: { thinking_level: 'high' } } });
+    expect(await sent(openaiProvider, OPENAI_OK, both)).toMatchObject({ max_output_tokens: 16, reasoning: { effort: 'high' } });
+  });
+
+  it('absent: OpenAI and Gemini bodies have no cap key; Anthropic keeps the role default', async () => {
+    expect(await sent(openaiProvider, OPENAI_OK, REQ)).not.toHaveProperty('max_output_tokens');
+    expect(await sent(geminiProvider, GEMINI_OK, REQ)).not.toHaveProperty('generation_config');
+    expect([(await sent(anthropicProvider, ANTHROPIC_OK, REQ, 'student')).max_tokens, (await sent(anthropicProvider, ANTHROPIC_OK, REQ, 'analysis')).max_tokens]).toEqual([1024, 2048]);
+  });
+});
+
 describe('providersFor', () => {
   it('builds the adapter for each real provider id', () => {
     const log = memLog().log;

@@ -111,6 +111,23 @@
 - Gemini Interactions API에는 `quota_exceeded`·`payment_required`·`failed_precondition` 코드가 따로 있지만 지금 어댑터 경로(`generateContent`)가 아니다.
 - 종류는 `llm call failed`·`turn failed`·`ai key rejected by provider` 로그에 싣되, **공급자가 문서로 밝힌 값만** 싣는다: `server/src/providers/call.ts`의 `LOGGED_KINDS`(OpenAI = [error codes][oa-errors] 가이드의 type·code와 openai-python [`ResponseError.code`][oa-sdk-resp-error], Anthropic = [errors][an-errors] 페이지의 `error.type` 전부, Gemini = Google API 오류 모델 [AIP-193][gg-aip193]이 가리키는 [`google.rpc.Code`][gg-rpc-code] 상태 이름(`OK` 제외)). 목록에 없는 값은 어댑터를 나갈 때 버리므로, 공급자 문구·메시지·키 조각은 kind로 로그에 닿지 않는다. 분류(`QUOTA_KINDS`·거절 판정)는 목록과 무관하게 원래 값을 본다. OpenAI 401 본문의 `code: invalid_api_key`는 실제 401 응답에서 관찰된 값이라 목록에 넣었다([openai-python issue #1968](https://github.com/openai/openai-python/issues/1968)); error codes 가이드에는 없다. `AdapterError` 생성자의 모양 규칙(한 가지 대소문자의 64자 이하 식별자)은 목·파이프라인 오류까지 덮는 일반 규칙으로 남는다. 메시지 본문·키는 로그에 넣지 않는다(Q9).
 
+## 잔액·한도 조회 API와 키 저장 시 프로브 (#94, 2026-11-01 확인)
+
+일반 API 키(관리자가 AI 설정에 넣는 키)로 남은 크레딧·지출 상한을 읽는 엔드포인트는 3사 모두 없다. 그래서 크레딧 0·지출 상한 도달 키도 모델 목록 GET(비과금)은 통과한다(#89, 2026-11-01 production G4 OpenAI analysis 키).
+
+| 공급자 | 잔액·한도 조회 | 일반 API 키로 가능? | 출처 |
+|---|---|---|---|
+| OpenAI | Usage·Costs API는 과거 사용량·지출만 돌려주고 잔액·상한 엔드포인트가 없다. 예시는 모두 `OPENAI_ADMIN_KEY` | 불가 | [usage][oa-usage] |
+| Anthropic | Usage·Cost API는 "Admin API credentials required … workspace API keys don't work". 402 `billing_error`·429 월 지출 상한은 오류 페이지에만 있다 | 불가 | [usage-cost-api][an-usage], [errors][an-errors] |
+| Gemini | 결제 문서는 잔액·쿼터 확인을 AI Studio 화면으로만 안내한다("the Gemini API will only serve requests if you have a positive Prepay credit balance") | 불가 | [billing][gg-billing] |
+
+**결정**: 관리자가 새 키를 저장할 때(`PUT /api/admin/ai/:role`, `MOCK_LLM=0`, `key_source=own` + 새 키) 모델 목록 GET이 통과하면 **고른 모델로 최소 유료 호출 1회**를 더 보낸다(`server/src/routes/admin-ai.ts`). Admin 키를 따로 받는 것은 범위 밖이다.
+
+- 프로브 모양: `system` = `Reply with the single word OK.`, `messages` = `[{role:'user', content:'OK'}]`, `model` = 저장 요청의 `model`(파이프라인이 실제로 쓸 모델이라 "키는 유효하지만 이 모델은 못 쓴다"도 잡힌다), 출력 상한 `PROBE_MAX_OUTPUT_TOKENS = 16`(OpenAI `max_output_tokens`, Anthropic `max_tokens`, Gemini `generationConfig.maxOutputTokens` — 어댑터는 기존 effort 표기처럼 snake_case `generation_config.max_output_tokens`로 보내고 effort와 한 객체에 합친다), `effort` 없음(공급자 기본값), 기한 `LIST_MODELS_TIMEOUT_MS`(10초). 비용은 저장 1회당 입력 수십 토큰 + 출력 ≤16 토큰.
+- 판정: `done`(stop `length` 포함) = 통과. `provider_rejected`(결제·크레딧·한도 소진 429, 402, 403, 모델 없음 404 등) = **저장 거부** — 모델 목록 실패와 같은 `provider_rejected` 응답(`details` = `{status, 마스킹된 message}`)과 `ai key rejected by provider` 로그. `provider_unavailable`(rate limit 429, 5xx, 기한 초과, 네트워크) = 확인 불가로 보고 저장, `ai key probe inconclusive` 로그(`role, provider, status, kind`) 1줄. 어댑터 `stream()`이 `llm call`/`llm call failed` 줄을 따로 남긴다. 프롬프트·응답 텍스트·공급자 문구·키는 어디에도 기록하지 않는다.
+- 최소값: Anthropic `max_tokens`는 최소 0이라 16은 유효하다([messages][an-messages]). OpenAI `max_output_tokens`는 최소 16이다([responses/create][oa-create]의 `minimum: 16`, 2026-11-01 확인) → 16은 하한 그대로 유효하다. 상한에 걸리면 오류가 아니라 `status: incomplete`, `incomplete_details.reason: max_output_tokens`로 끝나고 어댑터는 stop `length`로 본다. Gemini `maxOutputTokens`의 최소값 언급은 찾지 못했다.
+- 한계: Anthropic 사용 티어 월 지출 상한 429(`rate_limit_error`)와 Gemini 일일 쿼터 429(`RESOURCE_EXHAUSTED`)는 rate limit과 구별되지 않아(위 절) 프로브에서도 `provider_unavailable` → 저장된다. 프로브는 저장 순간만 본다(주기적 재확인 없음).
+
 ## 출처
 
 [oa-create]: https://developers.openai.com/api/reference/resources/responses/methods/create
@@ -160,3 +177,6 @@
 [gg-apikey]: https://ai.google.dev/gemini-api/docs/api-key
 [gg-gcpkeys]: https://docs.cloud.google.com/docs/authentication/api-keys
 [gg-sdk]: https://github.com/googleapis/python-genai/blob/main/google/genai/types.py
+[oa-usage]: https://developers.openai.com/api/reference/resources/organization/subresources/usage
+[an-usage]: https://platform.claude.com/docs/en/manage-claude/usage-cost-api
+[gg-billing]: https://ai.google.dev/gemini-api/docs/billing

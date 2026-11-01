@@ -10,7 +10,7 @@ const STOP: Record<string, Done['stopReason']> = { end_turn: 'end', stop_sequenc
 
 export function anthropicProvider(key: string, o: AdapterOpts): Provider {
   const headers = { 'x-api-key': key, 'anthropic-version': VERSION, 'content-type': 'application/json' };
-  // CompleteRequest 에 출력 상한이 없어 역할로 정한다: 분석은 JSON 판정·리포트라 더 길다.
+  // 출력 상한 기본값은 역할로 정한다: 분석은 JSON 판정·리포트라 더 길다. req.maxOutputTokens 가 있으면 그 값(#94).
   const maxTokens = o.role === 'analysis' ? 2048 : 1024;
   return {
     id: 'anthropic',
@@ -19,7 +19,7 @@ export function anthropicProvider(key: string, o: AdapterOpts): Provider {
       let model = req.model, input = 0, output = 0, stop: Done['stopReason'] = 'other';
       return stream('anthropic', o, req, {
         url: `${API}/messages`, headers, key,
-        body: { model: req.model, max_tokens: maxTokens, system: req.system, messages: req.messages, stream: true, ...req.effort && { output_config: { effort: req.effort } } },
+        body: { model: req.model, max_tokens: req.maxOutputTokens ?? maxTokens, system: req.system, messages: req.messages, stream: true, ...req.effort && { output_config: { effort: req.effort } } },
       }, ev => {
         const d = JSON.parse(ev.data);
         switch (d.type) {
