@@ -25,13 +25,14 @@ export const QUOTA_KINDS: ReadonlySet<string> = new Set([
  * 버린다(outbound) — 모양 규칙으로는 문자열이 오류 식별자임을 증명할 수 없다. 분류(isQuota·REJECTED)는 이 목록과 무관하게 원래 값을 본다.
  * 출처(2026-11-01 확인, docs/research/llm-providers-2026-10.md):
  * - openai: error codes 가이드(type·code), openai-python ResponseError.code(response.failed 의 error.code).
- *   실제 401 의 code 'invalid_api_key' 와 authentication_error·permission_error·not_found_error·model_not_found 는 공식 페이지에 없어 넣지 않았다.
+ *   'invalid_api_key' 는 실제 401 응답에서 관찰된 값(openai-python issue https://github.com/openai/openai-python/issues/1968), error codes 가이드에는 없다.
+ *   authentication_error·permission_error·not_found_error·model_not_found 는 공식 페이지에 없어 넣지 않았다.
  * - anthropic: Claude API errors 의 error.type 전부.
  * - gemini: Google API 오류 모델(AIP-193)이 가리키는 google.rpc.Code 상태 이름(OK 제외).
  */
 export const LOGGED_KINDS: Readonly<Record<RealProviderId, ReadonlySet<string>>> = {
   openai: new Set([
-    ...QUOTA_KINDS, 'invalid_request_error', 'rate_limit_error', 'slow_down', 'service_unavailable_error', 'server_is_overloaded',
+    ...QUOTA_KINDS, 'invalid_api_key', 'invalid_request_error', 'rate_limit_error', 'slow_down', 'service_unavailable_error', 'server_is_overloaded',
     'previous_response_not_found', 'websocket_connection_limit_reached',
     'server_error', 'rate_limit_exceeded', 'invalid_prompt', 'data_residency_mismatch', 'bio_policy', 'misalignment_policy_violation', 'vector_store_timeout',
     'invalid_image', 'invalid_image_format', 'invalid_base64_image', 'invalid_image_url', 'image_too_large', 'image_too_small', 'image_parse_error',

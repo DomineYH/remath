@@ -135,9 +135,8 @@ const CASES: Record<string, Case> = {
       { type: 'delta', text: '반은 ' }, { type: 'delta', text: '이분의 일' },
       { type: 'done', model: 'gpt-6.1-sol-2026-09-01', stopReason: 'end', usage: { input: 42, output: 7 } },
     ],
-    // 실제 401 은 code 'invalid_api_key' 도 싣지만 공식 문서에 없는 값이라 기록하지 않는다(#89 LOGGED_KINDS). 픽스처는 문서의 type 만 둔다.
-    errorBody: message => ({ error: { message, type: 'invalid_request_error', param: null, code: null } }),
-    kinds: { http: 'invalid_request_error', mid: 'server_error', midMessage: 'The server had an error' },
+    errorBody: message => ({ error: { message, type: 'invalid_request_error', param: null, code: 'invalid_api_key' } }),
+    kinds: { http: 'invalid_api_key', mid: 'server_error', midMessage: 'The server had an error' },
     kindBody: kind => ({ error: { message: 'm', type: kind, param: null, code: null } }),
     midKind: kind => sseText(`event: error\ndata: ${JSON.stringify({ type: 'error', sequence_number: 1, code: kind, message: 'm', param: null })}`),
     request: {
@@ -548,8 +547,8 @@ describe('provider error kinds: billing/quota exhaustion is rejected, rate limit
     const m = await mid(openaiProvider, sseText(`event: error\ndata: {"type":"error","sequence_number":1,"code":"invalid_new_thing","message":"x","param":null}`)) as AdapterError;
     expect(m).toMatchObject({ code: 'provider_rejected', retryable: false });
     expect(m.kind).toBeUndefined();
-    // 문서의 invalid_api_key 는 공식 페이지에 없다: 401 은 그대로 거절, 종류만 빠진다
-    const k = await http(openaiProvider, { error: { message: 'Incorrect API key provided', type: 'invalid_request_error', param: null, code: 'invalid_api_key' } }, 401) as AdapterError;
+    // 목록에 없는 401 code: 그대로 거절, 종류만 빠진다
+    const k = await http(openaiProvider, { error: { message: 'Incorrect API key provided', type: 'invalid_request_error', param: null, code: 'some_new_auth_code' } }, 401) as AdapterError;
     expect(k).toMatchObject({ code: 'provider_rejected', retryable: false, status: 401 });
     expect(k.kind).toBeUndefined();
     // 목록에 있는 결제 소진 code 는 거절 + 종류 기록
