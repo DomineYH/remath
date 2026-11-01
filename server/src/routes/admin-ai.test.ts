@@ -7,6 +7,8 @@ import { describe, expect, it } from 'vitest';
 import type { Deps } from '../app.ts';
 import { loadConfig } from '../config.ts';
 import { ApiFail } from '../errors.ts';
+import { anthropicProvider } from '../providers/anthropic.ts';
+import { fakeFetch, jsonResponse } from '../providers/testkit.ts';
 import type { ProvidersFor } from '../providers/types.ts';
 import { adminAiHandlers } from './admin-ai.ts';
 
@@ -19,8 +21,7 @@ const row = (role: string) => ({ role, key_source: role === 'student' ? 'own' : 
 /** ai_settings 읽기만 있는 가짜 DB. 거절 경로는 쓰기 전에 끝나므로 upsert 가 불리면 실패다. */
 const db = { from: () => ({ select: async () => ({ data: ['student', 'mentor', 'analysis'].map(row), error: null }), upsert: () => { throw new Error('must not save a rejected key'); } }) };
 
-async function save(fail: () => unknown) {
-  const providersFor: ProvidersFor = provider => ({ id: provider, complete: () => { throw new Error('unused'); }, listModels: async () => { throw fail(); } });
+async function save(fail: () => unknown, providersFor: ProvidersFor = provider => ({ id: provider, complete: () => { throw new Error('unused'); }, listModels: async () => { throw fail(); } })) {
   const lines: { obj: object; msg?: string }[] = [];
   const log = { warn: (obj: object, msg?: string) => lines.push({ obj, msg }), info: () => {}, error: () => {} };
   const h = adminAiHandlers({ db, config, now: () => new Date('2026-11-01T00:00:00Z'), providersFor } as unknown as Deps);
@@ -51,6 +52,23 @@ describe('PUT /api/admin/ai/:role rejection log carries the provider error kind 
       expect(lines).toHaveLength(1);
       expect((lines[0]!.obj as { kind?: string }).kind).toBeUndefined();
       expect(JSON.stringify(lines)).not.toContain(ANT);
+    }
+  });
+
+  // #89 F1: 문자 검사를 통과하는 키 모양 종류(대소문자 섞임) — 생성자에서, 그리고 실제 어댑터 경로(주입 fetch)에서도 로그에 남지 않는다.
+  it('a credential-shaped provider error kind leaves kind out of the log', async () => {
+    const cred = 'AIzaSy' + 'X'.repeat(33);
+    const viaAdapter: ProvidersFor = (_, key, o) => anthropicProvider(key, { ...o, fetch: fakeFetch(() => jsonResponse({ type: 'error', error: { type: cred, message: 'x' } }, 403)).fetch });
+    for (const [fail, pf] of [
+      [() => new AdapterError('gemini', 'provider_rejected', '403 x', { status: 403, kind: cred }), undefined],
+      [() => { throw new Error('unused'); }, viaAdapter],
+      [() => { throw new Error('unused'); }, ((_, key, o) => anthropicProvider(key, { ...o, fetch: fakeFetch(() => jsonResponse({ type: 'error', error: { type: ANT, message: 'x' } }, 403)).fetch })) as ProvidersFor],
+    ] as const) {
+      const { err, lines } = await save(fail, pf);
+      expect(err.code).toBe('provider_rejected');
+      expect(lines).toEqual([{ obj: { role: 'student', provider: 'anthropic', status: 403, kind: undefined }, msg: 'ai key rejected by provider' }]);
+      const dump = JSON.stringify(lines);
+      for (const text of [cred, ANT]) expect(dump).not.toContain(text);
     }
   });
 });

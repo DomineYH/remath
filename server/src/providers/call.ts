@@ -53,10 +53,14 @@ function asAdapterError(id: RealProviderId, err: unknown, signal?: AbortSignal):
   return new AdapterError(id, 'provider_unavailable', `network: ${(err as Error)?.message ?? String(err)}`, { retryable: true });
 }
 
-/** 어댑터를 나가는 오류의 마지막 손질(#55): 공급자 글이 되풀이한 키를 가린 뒤 300자로 자른다. 자른 뒤 가리면 잘린 키 앞부분이 샌다. */
+/**
+ * 어댑터를 나가는 오류의 마지막 손질(#55): 공급자 글이 되풀이한 키를 가린 뒤 300자로 자른다. 자른 뒤 가리면 잘린 키 앞부분이 샌다.
+ * kind 는 로그로 가므로(#89) 이 요청의 키를 담았거나 키의 8자 이상 조각이면 지운다 — 한 가지 대소문자로만 된 키는 AdapterError 의 모양 검사를 통과한다.
+ */
 function outbound(e: AdapterError, key: string): AdapterError {
   if (key) e.message = e.message.replaceAll(key, maskKey(key));
   e.message = e.message.slice(0, 300);
+  if (key && e.kind !== undefined && (e.kind.includes(key) || (e.kind.length >= 8 && key.includes(e.kind)))) e.kind = undefined;
   return e;
 }
 

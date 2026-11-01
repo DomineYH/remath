@@ -26,19 +26,24 @@ export type StreamEvent =
   | { type: 'delta'; text: string }
   | { type: 'done'; model: string; stopReason: 'end' | 'length' | 'other'; usage?: { input: number; output: number } };
 
-/** 공급자 오류 종류로 받는 모양: 짧은 식별자만. 공급자가 그 자리에 메시지를 넣어도 로그로 새지 않게 길이·문자를 제한한다(#89). */
-const KIND = /^[A-Za-z0-9_.-]{1,64}$/;
+/**
+ * 공급자 오류 종류로 받는 모양: 한 가지 대소문자로만 된 짧은 식별자(전부 소문자 또는 전부 대문자, 64자 이하, 영숫자·`_`·`.`·`-`).
+ * 공급자가 그 자리에 메시지를 넣어도 로그로 새지 않게 길이·문자를 제한하고(#89), 문서의 종류는 모두 한 가지 대소문자라
+ * (OpenAI·Anthropic 소문자 snake_case, Gemini 대문자 UPPER_SNAKE) 대소문자가 섞인 값 — 무작위 API 키 모양 — 은 버린다(#89 리뷰 F1).
+ */
+const KIND = [/^[a-z0-9_.-]{1,64}$/, /^[A-Z0-9_.-]{1,64}$/];
 
 /**
  * 3사 `event: error` 와 HTTP 오류를 평탄화한 형태. 어댑터는 재시도하지 않고 던진다. 재시도 여부는 파이프라인이 정한다.
  * kind = 공급자 오류 종류(OpenAI error.code ?? type, Anthropic error.type, Gemini error.status). 로그에 넣어도 되는 값만 담는다:
- * 64자 초과·영숫자·`_`·`.`·`-` 밖의 문자가 있으면 저장하지 않는다(#89).
+ * 64자 초과·영숫자·`_`·`.`·`-` 밖의 문자·대소문자 섞임이 있으면 저장하지 않는다(#89). 한 가지 대소문자로만 된 키는 모양으로 못 거르므로
+ * 실 어댑터는 오류를 내보내기 전에 이 요청의 키를 담은 종류를 지운다(server/src/providers/call.ts outbound).
  */
 export class AdapterError extends Error {
   provider: ProviderId; code: string; status?: number; retryable: boolean; kind?: string;
   constructor(provider: ProviderId, code: string, message: string, opts: { status?: number; retryable?: boolean; kind?: string } = {}) {
     super(message); this.name = 'AdapterError'; this.provider = provider; this.code = code; this.status = opts.status; this.retryable = opts.retryable ?? false;
-    if (typeof opts.kind === 'string' && KIND.test(opts.kind)) this.kind = opts.kind;
+    if (typeof opts.kind === 'string' && KIND.some(re => re.test(opts.kind as string))) this.kind = opts.kind;
   }
 }
 

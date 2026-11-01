@@ -96,7 +96,7 @@
 
 | 공급자 | 상태·종류 | 뜻 | 어댑터 판정 | 출처 |
 |---|---|---|---|---|
-| OpenAI | 429 `type=rate_limit_error`, `code=slow_down` 또는 code 없음 | rate limit(요청량 급증 포함). `Retry-After`가 있으면 따른다 | `provider_unavailable`, 재시도 가능 | [error codes][oa-errors] |
+| OpenAI | 429 `type=rate_limit_error`, `code=slow_down` 또는 code 없음 | rate limit(요청량 급증 포함). 공급자 안내: `Retry-After`가 있으면 따르라고 함(어댑터는 읽지 않음) | `provider_unavailable`, 재시도 가능 | [error codes][oa-errors] |
 | OpenAI | 429 `type=insufficient_quota`, `code` ∈ `credit_balance_exhausted`, `organization_spend_limit_exceeded`, `project_spend_limit_exceeded`, `organization_usage_limit_exceeded` | 선불 크레딧 소진·조직/프로젝트 월 지출 상한·OpenAI 부여 사용 한도. "Retrying billing, spend, or quota errors won't restore API access." | `provider_rejected`, 재시도 불가 | [error codes][oa-errors] |
 | OpenAI | 503 `service_unavailable_error` / `server_is_overloaded` | 일시 과부하 | `provider_unavailable`, 재시도 가능 | [error codes][oa-errors] |
 | Anthropic | 402 `billing_error` | 결제 문제 | `provider_rejected`(비-429 4xx) | [errors][an-errors] |
@@ -109,7 +109,7 @@
 - 본문 모양: OpenAI `{"error":{"message","type","code","param"}}`, Anthropic `{"type":"error","error":{"type","message"},"request_id"}`, Gemini `{"error":{"code":<number>,"message","status"}}`.
 - 스트림 중 오류(OpenAI `response.failed`의 `error.code`, `event: error`의 `code`)에도 같은 집합을 적용한다.
 - Gemini Interactions API에는 `quota_exceeded`·`payment_required`·`failed_precondition` 코드가 따로 있지만 지금 어댑터 경로(`generateContent`)가 아니다.
-- 종류는 짧은 식별자라 `llm call failed`·`turn failed`·`ai key rejected by provider` 로그에 싣는다. 공급자가 그 자리에 메시지를 넣는 경우에 대비해 64자를 넘거나 영숫자·`_`·`.`·`-` 밖의 문자가 있으면 버린다. 메시지 본문·키는 로그에 넣지 않는다(Q9).
+- 종류는 짧은 식별자라 `llm call failed`·`turn failed`·`ai key rejected by provider` 로그에 싣는다. 공급자가 그 자리에 메시지를 넣는 경우에 대비해 한 가지 대소문자로만 된 식별자(전부 소문자 또는 전부 대문자, 64자 이하, 영숫자·`_`·`.`·`-`)만 남기고 나머지는 버린다 — 위 표의 종류는 모두 그렇고(OpenAI·Anthropic 소문자, Gemini 대문자), 대소문자가 섞인 무작위 키 모양 값은 걸러진다. 한 가지 대소문자로만 된 키는 모양으로 못 거르므로, 어댑터는 오류를 내보내기 전에 이 요청의 키를 담았거나 키의 8자 이상 조각인 종류를 지운다. 메시지 본문·키는 로그에 넣지 않는다(Q9).
 
 ## 출처
 

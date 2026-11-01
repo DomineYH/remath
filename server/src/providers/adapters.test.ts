@@ -9,6 +9,10 @@ import { QUOTA_KINDS, type AdapterOpts } from './call.ts';
 import { fakeFetch, jsonResponse, leaksKey, memLog, sseResponse, sseText } from './testkit.ts';
 
 const KEY = 'sk-test-SECRET-KEY-123';
+/** 문자 검사를 통과하는 키 모양 값(#89 F1): Gemini 39자 AIza…·OpenAI sk-… 꼴, 대소문자가 섞인다. 합성 값이다. */
+const CREDENTIAL_KINDS = ['AIzaSy' + 'X'.repeat(33), 'sk-' + 'Ab1'.repeat(10)];
+/** 한 가지 대소문자로만 된 키(#89 F1 키 검사용). 합성 값이다. */
+const LOWER_KEY = 'sk-proj-' + 'abcdefghjkmnpqrstuvwxyz23456789';
 const REQ: CompleteRequest = { system: 'SYSTEM-PROMPT-TEXT', messages: [{ role: 'user', content: 'USER-UTTERANCE' }, { role: 'assistant', content: 'BOT-REPLY' }, { role: 'user', content: '두 번째 발화' }], model: 'm-1' };
 const drain = async (it: AsyncIterable<StreamEvent>) => { const out: StreamEvent[] = []; for await (const e of it) out.push(e); return out; };
 
@@ -118,6 +122,8 @@ interface Case {
   kinds: { http: string; mid: string; midMessage: string };
   /** 오류 종류만 바꾼 비-2xx 본문(#89 종류 위생 검사). */
   kindBody: (kind: string) => unknown;
+  /** 오류 종류만 바꾼 스트림 중 오류 이벤트(#89 종류 위생 검사). */
+  midKind: (kind: string) => string;
   request: { url: string; headers: Record<string, string>; body: unknown; effort: unknown };
   models: { url: string; json: unknown; ids: string[] };
 }
@@ -132,6 +138,7 @@ const CASES: Record<string, Case> = {
     errorBody: message => ({ error: { message, type: 'invalid_request_error', param: null, code: 'invalid_api_key' } }),
     kinds: { http: 'invalid_api_key', mid: 'server_error', midMessage: 'The server had an error' },
     kindBody: kind => ({ error: { message: 'm', type: kind, param: null, code: null } }),
+    midKind: kind => sseText(`event: error\ndata: ${JSON.stringify({ type: 'error', sequence_number: 1, code: kind, message: 'm', param: null })}`),
     request: {
       url: 'https://api.openai.com/v1/responses',
       headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' },
@@ -149,6 +156,7 @@ const CASES: Record<string, Case> = {
     errorBody: message => ({ type: 'error', error: { type: 'authentication_error', message }, request_id: 'req_1' }),
     kinds: { http: 'authentication_error', mid: 'overloaded_error', midMessage: 'Overloaded' },
     kindBody: kind => ({ type: 'error', error: { type: kind, message: 'm' }, request_id: 'req_1' }),
+    midKind: kind => sseText(`event: error\ndata: ${JSON.stringify({ type: 'error', error: { type: kind, message: 'm' } })}`),
     request: {
       url: 'https://api.anthropic.com/v1/messages',
       headers: { 'x-api-key': KEY, 'anthropic-version': '2026-10-21', 'content-type': 'application/json' },
@@ -166,6 +174,7 @@ const CASES: Record<string, Case> = {
     errorBody: message => ({ error: { code: 401, message, status: 'UNAUTHENTICATED' } }),
     kinds: { http: 'UNAUTHENTICATED', mid: 'UNAVAILABLE', midMessage: 'The model is overloaded' },
     kindBody: kind => ({ error: { code: 429, message: 'm', status: kind } }),
+    midKind: kind => sseText(`data: ${JSON.stringify({ error: { code: 429, message: 'm', status: kind } })}`),
     request: {
       url: 'https://generativelanguage.googleapis.com/v1beta/models/m-1:streamGenerateContent?alt=sse',
       headers: { 'x-goog-api-key': KEY, 'Content-Type': 'application/json' },
@@ -257,6 +266,49 @@ describe.each(Object.entries(CASES))('%s adapter', (_, c) => {
       expect((s.lines[0]!.obj as { kind?: string }).kind).toBeUndefined();
       if (bad) expect(JSON.stringify(s.lines)).not.toContain(bad);
     }
+  });
+
+  // #89 F1: 영숫자만으로 된 키는 문자 검사를 통과한다. 공급자 문서의 종류는 모두 한 가지 대소문자라, 대소문자가 섞인 값은 버린다.
+  it('a credential-shaped (mixed-case) kind is dropped — HTTP body, mid-stream error, listModels; not on the error, not in the log (#89)', async () => {
+    for (const cred of CREDENTIAL_KINDS) {
+      for (const respond of [() => jsonResponse(c.kindBody(cred), 429), () => sseResponse(c.midKind(cred))]) {
+        const s = setup(respond, 'student');
+        const e = await rejection(s.p.complete(REQ)) as AdapterError;
+        expect(e).toBeInstanceOf(AdapterError);
+        expect(e.kind).toBeUndefined();
+        expect(s.lines).toHaveLength(1);
+        expect(s.lines[0]!.msg).toBe('llm call failed');
+        expect((s.lines[0]!.obj as { kind?: string }).kind).toBeUndefined();
+        expect(JSON.stringify(s.lines)).not.toContain(cred);
+      }
+      const e = await setup(() => jsonResponse(c.kindBody(cred), 429)).p.listModels().then(() => { throw new Error('expected a throw'); }, (x: unknown) => x as AdapterError);
+      expect(e).toBeInstanceOf(AdapterError);
+      expect(e.kind).toBeUndefined();
+    }
+  });
+
+  // #89 F1: 한 가지 대소문자로만 된 키는 모양으로 못 거른다 → 어댑터를 나갈 때 이 요청의 키를 담은(또는 키에 든 8자 이상) 종류를 버린다.
+  it('a single-case kind that is, contains or is part of the request key is dropped on the way out — HTTP, stream, listModels; not in the log (#89)', async () => {
+    const key = LOWER_KEY;
+    for (const kind of [key, `${key}_x`, key.slice(3, 20)]) {
+      for (const respond of [() => jsonResponse(c.kindBody(kind), 429), () => sseResponse(c.midKind(kind))]) {
+        const f = fakeFetch(respond), m = memLog();
+        const e = await rejection(c.make(key, { log: m.log, fetch: f.fetch }).complete(REQ)) as AdapterError;
+        expect(e).toBeInstanceOf(AdapterError);
+        expect(e.kind).toBeUndefined();
+        expect(m.lines).toHaveLength(1);
+        expect((m.lines[0]!.obj as { kind?: string }).kind).toBeUndefined();
+        const dump = JSON.stringify(m.lines);
+        expect(dump).not.toContain(kind);
+        expect(leaksKey(dump, key)).toBe(false);
+      }
+      const p = c.make(key, { log: memLog().log, fetch: fakeFetch(() => jsonResponse(c.kindBody(kind), 429)).fetch });
+      await expect(p.listModels()).rejects.toSatisfy((e: unknown) => e instanceof AdapterError && e.kind === undefined);
+    }
+    // 키와 무관한 문서상의 종류는 같은 키로도 그대로 남는다
+    const f = fakeFetch(() => jsonResponse(c.kindBody(c.kinds.http), 429)), m = memLog();
+    expect(await rejection(c.make(key, { log: m.log, fetch: f.fetch }).complete(REQ))).toMatchObject({ kind: c.kinds.http });
+    expect(m.lines[0]!.obj).toMatchObject({ kind: c.kinds.http });
   });
 
   it('a mid-stream error event throws after the deltas already sent', async () => {
@@ -445,6 +497,17 @@ data: {"type":"response.failed","sequence_number":1,"response":{"id":"resp_1","s
     const error = sseText(`event: error
 data: {"type":"error","sequence_number":1,"code":"${code}","message":"quota","param":null}`);
     for (const text of [failed, error]) expect(await mid(openaiProvider, text)).toMatchObject({ code: 'provider_rejected', retryable: false, kind: code });
+  });
+});
+
+// #89 F1: 생성자가 지키는 종류 모양 — 한 가지 대소문자의 식별자, 64자 이하. 공급자 문서의 종류는 모두 그렇다(OpenAI·Anthropic 소문자 snake_case, Gemini 대문자).
+describe('AdapterError kind shape (#89)', () => {
+  const kindOf = (kind: unknown) => new AdapterError('openai', 'provider_rejected', 'm', { kind: kind as string }).kind;
+  it('keeps documented single-case kinds up to 64 chars', () => {
+    for (const k of ['insufficient_quota', 'credit_balance_exhausted', 'rate_limit_error', 'slow_down', 'invalid_api_key', 'billing_error', 'overloaded_error', 'RESOURCE_EXHAUSTED', 'UNAUTHENTICATED', 'PERMISSION_DENIED', 'v1.error-2', 'k'.repeat(64), 'K'.repeat(64)]) expect(kindOf(k)).toBe(k);
+  });
+  it('drops mixed-case (credential-shaped), over-64, non-identifier and non-string kinds', () => {
+    for (const k of [...CREDENTIAL_KINDS, 'Invalid_Api_Key', 'K'.repeat(65), 'k'.repeat(65), 'rate limit', '한도_초과', '', 429, undefined]) expect(kindOf(k)).toBeUndefined();
   });
 });
 
