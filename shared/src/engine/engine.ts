@@ -42,7 +42,8 @@ export function judgeTurn(text: string, lang: Lang, cls: Classification | null, 
   if (idx < 0) return { kind: 'turn', directive: null, trigger: null, state };
   const n = ++state.mis[idx], mi = lines.misconceptions[idx];
   if (n === 1) return { kind: 'turn', directive: { kind: 'hesitation', text: mi.h }, trigger: null, state };
-  if (state.mis.every(x => x >= 2)) { state.goalReached = true; return { kind: 'turn', directive: { kind: 'aha', text: `${mi.c}\n${lines.aha}` }, trigger: TRIGGER.goal, state }; }
+  // 아하 턴 지시는 aha 한 줄(#68): c 를 겹쳐 넣으면 학생이 두 문장을 나눠 잇는다. aha 가 비면 마지막 c 가 대신한다.
+  if (state.mis.every(x => x >= 2)) { state.goalReached = true; return { kind: 'turn', directive: { kind: 'aha', text: lines.aha.trim() ? lines.aha : mi.c }, trigger: TRIGGER.goal, state }; }
   return { kind: 'turn', directive: { kind: 'correction', text: mi.c }, trigger: null, state };
 }
 

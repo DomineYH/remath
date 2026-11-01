@@ -99,7 +99,7 @@ describe('mockup replays through runTurn', () => {
   it('L1 · Gabriel reaches the goal (ko)', async () => {
     const ko = gabriel.translations.ko, m = ko.misconceptions;
     const r = await replay('ko', ['안녕, 네 이름이 뭐야?', '어떻게 풀었는지 말해 줄래?', '한 친구가 받는 걸 모두 합치면 얼마야?', '그러면 한 사람이 받는 게 전부 얼마인지 하나로 말해 볼래?', '4분의 1 조각을 반으로 자르면 어떻게 될까?', '그 조각을 더 작게 자르면 8분의 1이 몇 개야?', '8분의 1 조각이 다 해서 몇 개야?', '모두 몇 조각인지 세어 볼래?', 'END SESSION'], criteria);
-    expect(r.log.slice(0, 8).map(student)).toEqual(['안녕하세요… 저는 가브리엘이에요.', ko.elicit[0], m[0].h, m[0].c, m[1].h, m[1].c, m[2].h, `${m[2].c}\n${ko.aha}`]);
+    expect(r.log.slice(0, 8).map(student)).toEqual(['안녕하세요… 저는 가브리엘이에요.', ko.elicit[0], m[0].h, m[0].c, m[1].h, m[1].c, m[2].h, ko.aha]);
     expect(r.log.slice(0, 8).map(trigger)).toEqual([undefined, undefined, undefined, undefined, undefined, undefined, undefined, 3]);
     expect(mentor(r.log[7])).toBe(ko.t3);
     expect(r.log.slice(0, 8).map(leverage)).toEqual(['Other', 'Eliciting', 'Eliciting', 'Eliciting', 'Extending', 'Extending', 'Eliciting', 'Eliciting']);
