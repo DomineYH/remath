@@ -69,8 +69,9 @@ export async function collect(stream: AsyncIterable<StreamEvent>): Promise<{ tex
 
 // ---- MOCK_LLM 컨텍스트: 서버 규칙 엔진의 판정 결과와 시나리오 대사만 담는다. 프롬프트 파싱 없음. ----
 
-/** ADR-0002 이번 턴 지시. 서버가 정하고 런타임 블록으로 렌더링한다. aha 턴 지시는 아하 대사 한 줄이고, 비어 있으면 마지막 교정 대사(c)로 대신한다(#68). */
-export type TurnDirective = { kind: 'hesitation' | 'correction' | 'aha' | 'confused'; text: string };
+/** ADR-0002 이번 턴 지시. 서버가 정하고 런타임 블록으로 렌더링한다. aha 턴 지시는 아하 대사 한 줄이고, 비어 있으면 마지막 교정 대사(c)로 대신한다(#68).
+ * greet 는 인사만 있는 턴(#100): text 는 비우고, 런타임 블록이 "인사·자기소개만, 답·풀이·결론 금지" 고정 문구를 렌더링한다. */
+export type TurnDirective = { kind: 'hesitation' | 'correction' | 'aha' | 'confused' | 'greet'; text: string };
 
 export interface ClassificationRow { name: string; desc?: string; ex?: string }
 export interface Criteria { leverage: ClassificationRow[]; object: ClassificationRow[] }

@@ -2,9 +2,9 @@
 // 판정(카운터·트리거·도움 요청)은 하지 않는다 — 그건 engine.ts(서버). 여기는 "지시를 받아 대사를 고르는" 역할만.
 import { AdapterError, type CompleteRequest, type Lang, type MockContext, type Provider, type ReportInput, type StreamEvent } from '../adapter.ts';
 import { renderClassification } from '../classification.ts';
-import { tally } from '../engine.ts';
+import { isGreetingOnly, tally } from '../engine.ts';
 import { LEVERAGE, TRIGGER } from '../../leverage.ts';
-import { isGreeting, mockClassify, stdLeverage } from './classify.ts';
+import { mockClassify, stdLeverage } from './classify.ts';
 
 /** 목업 TXT 의 챗봇 대사(화면 문구는 제외). */
 export const TXT = {
@@ -31,9 +31,11 @@ const rotation = (req: CompleteRequest, set: readonly string[]) => req.messages.
 
 function studentText(req: CompleteRequest, c: Extract<MockContext, { role: 'student' }>): string {
   const T = TXT[c.lang];
-  if (c.directive) return c.directive.text;
+  // greet 지시(#100)는 지시 문장이 대사가 아니므로 아래 인사 분기로 흘린다.
+  if (c.directive && c.directive.kind !== 'greet') return c.directive.text;
   if (c.goalReached) return T.reached[rotation(req, T.reached) % 2];
-  if (isGreeting(c.teacherText, c.lang)) {
+  // 인사 휴리스틱은 분류가 아니라 MOCK 학생이 "무슨 말을 할지" 고르는 데 쓴다(정규식은 engine.ts GREETING_RE, #100).
+  if (isGreetingOnly(c.teacherText, c.lang)) {
     const lines = c.lines.chars.split('\n').map(x => x.replace(/^- /, '').trim()).filter(Boolean);
     const like = (lines.find(x => /좋아|like|love/i.test(x)) ?? lines[0] ?? '').replace(/\.$/, '').replace(/좋아함$/, '좋아해요');
     return /이름|학년|안녕|반가|name|grade|\bhi\b|hello|nice to meet/i.test(c.teacherText) ? c.lines.greet.split(/(?<=[.!?…])\s+/).slice(0, 2).join(' ') : (c.lang === 'en' ? `Um… ${like}!` : `음… ${like}!`);
