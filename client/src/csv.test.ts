@@ -8,6 +8,6 @@ describe('csvName', () => {
   afterEach(() => { vi.useRealTimers(); });
   it('stamps the local date (YYYYMMDD) and replaces characters a file name cannot hold', () => {
     vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-28T15:05:00Z'));   // KST 2026-10-29 00:05
-    expect(csvName('user', 'Bora Kim/1')).toBe('remath_user_Bora_Kim_1_20261029.csv');
+    expect(csvName('user', 'Bora Kim/1')).toBe('premta_user_Bora_Kim_1_20261029.csv');
   });
 });

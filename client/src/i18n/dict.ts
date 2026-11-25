@@ -53,7 +53,7 @@ export const dict = {
   r3: { ko: '공백 불가', en: 'No spaces' },
   loginBtn: { ko: '로그인', en: 'Sign in' },
   signupBtn: { ko: '계정 만들고 시작하기', en: 'Create account and start' },
-  noPII: { ko: '🔒 ReMath는 닉네임과 비밀번호 외에 어떤 개인정보도 받지 않습니다. 비밀번호는 해시로만 보관합니다.', en: '🔒 ReMath collects no personal information beyond a nickname and password. Passwords are kept only as a hash.' },
+  noPII: { ko: '🔒 PReMTA는 닉네임과 비밀번호 외에 어떤 개인정보도 받지 않습니다. 비밀번호는 해시로만 보관합니다.', en: '🔒 PReMTA collects no personal information beyond a nickname and password. Passwords are kept only as a hash.' },
   toAdmin: { ko: '관리자 로그인 →', en: 'Admin sign-in →' },
   errNick: { ko: '닉네임은 2~16자의 한글·영문·숫자·_ . - 만 쓸 수 있습니다.', en: 'Nicknames are 2–16 characters: letters, Hangul, digits, _ . - only.' },
   errNickPII: { ko: '이메일이나 전화번호처럼 보이는 닉네임은 쓸 수 없습니다. 개인정보가 드러나지 않는 닉네임을 정해 주세요.', en: 'Nicknames that look like an email or phone number aren’t allowed. Pick one that doesn’t reveal personal information.' },
@@ -61,7 +61,7 @@ export const dict = {
   errPw2: { ko: '두 비밀번호가 다릅니다.', en: 'The passwords do not match.' },
   welcome: { ko: n => `${n}님, 환영합니다.`, en: n => `Welcome, ${n}.` },
   // 관리자 로그인
-  aLoginEyebrow: { ko: 'ReMath · Admin', en: 'ReMath · Admin' },
+  aLoginEyebrow: { ko: 'PReMTA · Admin', en: 'PReMTA · Admin' },
   aLoginTitle: { ko: '관리자 로그인', en: 'Admin sign-in' },
   aLoginLead: { ko: '관리자 전용 화면입니다. 배포 환경에서는 주소 끝에 /admin을 붙여 바로 들어올 수 있습니다.', en: 'Admin-only screen. Once deployed, adding /admin to the end of the address opens it directly.' },
   aId: { ko: '관리자 아이디', en: 'Admin ID' },

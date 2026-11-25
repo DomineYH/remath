@@ -226,7 +226,7 @@ test('B-2/B-3: create account → chat → goal → end → report; reload keeps
   await expect(adminViewKo).toBeHidden();
   await page.getByRole('group', { name: '화면 언어' }).getByRole('button', { name: 'EN' }).click();
   const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Download CSV (1)' }).click()]);
-  expect(download.suggestedFilename()).toMatch(/^remath_conversations_Haneul_gabriel_\d{8}\.csv$/);
+  expect(download.suggestedFilename()).toMatch(/^premta_conversations_Haneul_gabriel_\d{8}\.csv$/);
   const file = readFileSync((await download.path())!);
   expect([...file.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
   const csvLines = file.subarray(3).toString('utf8').split('\r\n');

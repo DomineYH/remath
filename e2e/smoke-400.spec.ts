@@ -46,7 +46,7 @@ async function fits(page: Page, where: string) {
   expect(m.lastRight, `${where}: last top-bar item inside the viewport`).toBeLessThanOrEqual(m.cw);
   expect(Math.max(...m.mids) - Math.min(...m.mids), `${where}: top bar on one line`).toBeLessThan(4);
   expect(m.bar.height, `${where}: top bar height = one line`).toBeLessThanOrEqual(m.bar.oneLine + 0.5);
-  expect(m.brandCut, `${where}: the brand word "ReMath" is cut`).toBe(false);
+  expect(m.brandCut, `${where}: the brand word "PReMTA" is cut`).toBe(false);
   expect(m.demo, `${where}: mockup-only demo element (I-41)`).toBe(false);
   expect(m.unlabelled, `${where}: form controls without a label`).toEqual([]);
 }

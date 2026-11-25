@@ -1,4 +1,4 @@
-# ReMath
+# PReMTA
 
 Misconception questioning simulator for preservice teachers. Product spec: `prd/`, terms: `GLOSSARY.md`, decisions: `docs/adr/`.
 
