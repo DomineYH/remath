@@ -70,6 +70,18 @@ describe('judgeTurn greet directive (#100)', () => {
     expect(j.kind === 'turn' && j.directive).toBeNull();
     expect(isGreetingOnly('Hi! How did you solve the pizza problem?', 'en')).toBe(false);
   });
+  it('greeting + another question with no keyword or problem word: no directive', () => {
+    for (const [text, lang] of [['안녕! 누가 더 많이 먹었어?', 'ko'], ['Hi! Who ate more?', 'en']] as const) {
+      const tr = hajun.translations[lang], st0: SessionState = { mis: tr.misconceptions.map(() => 0), counts: {}, goalReached: false, takeOverCount: 0 };
+      expect(isGreetingOnly(text, lang)).toBe(false);
+      expect(judgeTurn(text, lang, null, tr, st0)).toEqual({ kind: 'turn', directive: null, trigger: null, state: st0 });
+    }
+  });
+  it('every clause is greeting or small talk: greeting-only', () => {
+    expect(isGreetingOnly('안녕, 이름이 뭐야?', 'ko')).toBe(true);
+    expect(isGreetingOnly("Hi, what's your name?", 'en')).toBe(true);
+    expect(isGreetingOnly(' ! , ', 'ko')).toBe(false);
+  });
   it('after the goal is reached a greeting gets no directive', () => {
     const done = { ...fresh(), mis: [2, 2, 2], goalReached: true };
     const j = judgeTurn('안녕!', 'ko', null, gabriel.translations.ko, done);
