@@ -15,10 +15,10 @@ export const END_SESSION_RE = /^end session$/i;
 export const HELP_RE: Record<Lang, RegExp> = { ko: /도와|힌트|어떻게 물어|어떤 질문|뭐라고 물|질문 추천/, en: /\bhelp\b|\bhint\b|what should i ask|which question|suggest a question/i };
 /** 도움 요청 턴의 학생 고정 문구: LLM 을 부르지 않는다(실 LLM·MOCK 공통). */
 export const HELP_LINE: Record<Lang, string> = { ko: '음… 저 아직 생각 중이에요.', en: "Um… I'm still thinking." };
-/** 인사만 있는 턴(#100): 절(. ! ? , … ~ 줄바꿈으로 나눔)마다 인사·이름·학년·취미 어휘가 있고 문제 어휘가 없을 때. 목업 detectStd/detectEn 의 greet 패턴(서버 상수, MOCK 도 이것을 쓴다). */
+/** 인사만 있는 턴(#100): 절(. ! ? , … ~ 줄바꿈으로 나눔)마다 인사·이름·학년·취미·교사 자기소개 어휘가 있고 문제 어휘가 없을 때. 목업 detectStd/detectEn 의 greet 패턴(서버 상수, MOCK 도 이것을 쓴다). */
 export const GREETING_RE: Record<Lang, { yes: RegExp; no: RegExp }> = {
-  ko: { yes: /안녕|반가|이름이 뭐|몇 학년|좋아하|취미|키워|강아지|고양이|거북이|푸들/, no: /문제|풀|조각|분수/ },
-  en: { yes: /\b(hi|hello|hey|nice to meet|your name|what grade|favorite|pets?|dog|cat|turtle|poodle|soccer|tennis|baseball)\b/, no: /problem|solve|piece|fraction|cup|pizza|ribbon|candy/ },
+  ko: { yes: /안녕|반가|이름이 뭐|몇 학년|좋아하|취미|키워|강아지|고양이|거북이|푸들|선생님이에요|선생님이야|선생님입니다|제 이름|내 이름/, no: /문제|풀|조각|분수/ },
+  en: { yes: /\b(hi|hello|hey|nice to meet|your name|what grade|favorite|pets?|dog|cat|turtle|poodle|soccer|tennis|baseball|i'm your teacher|i am your teacher|my name is|call me)\b/, no: /problem|solve|piece|fraction|cup|pizza|ribbon|candy/ },
 };
 export function isGreetingOnly(text: string, lang: Lang): boolean {
   const t = lang === 'en' ? text.trim().toLowerCase() : text.trim(), re = GREETING_RE[lang];

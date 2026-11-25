@@ -82,6 +82,13 @@ describe('judgeTurn greet directive (#100)', () => {
     expect(isGreetingOnly("Hi, what's your name?", 'en')).toBe(true);
     expect(isGreetingOnly(' ! , ', 'ko')).toBe(false);
   });
+  it('a teacher self-introduction stays greeting-only; broad words do not', () => {
+    expect(isGreetingOnly('안녕하세요, 선생님이에요.', 'ko')).toBe(true);
+    expect(judgeTurn('안녕하세요, 선생님이에요.', 'ko', null, hajun.translations.ko, fresh())).toEqual({ kind: 'turn', directive: greet, trigger: null, state: fresh() });
+    expect(isGreetingOnly('Hello Noah, I am your teacher.', 'en')).toBe(true);
+    expect(isGreetingOnly('안녕! 나는 선생님이야, 누가 더 많이 먹었어?', 'ko')).toBe(false);
+    expect(isGreetingOnly("Hi, I'm curious who ate more", 'en')).toBe(false);
+  });
   it('after the goal is reached a greeting gets no directive', () => {
     const done = { ...fresh(), mis: [2, 2, 2], goalReached: true };
     const j = judgeTurn('안녕!', 'ko', null, gabriel.translations.ko, done);
