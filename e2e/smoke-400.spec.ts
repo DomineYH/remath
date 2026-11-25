@@ -16,6 +16,7 @@ const GREET = '안녕하세요… 저는 가브리엘이에요.';
  *  a label on every form control (I-55) and no mockup-only demo element (I-41). */
 async function fits(page: Page, where: string) {
   await expect(page.locator('.top')).toBeVisible();
+  await brandIntact(page, false);
   await expect(page.locator('.top .in > *').last()).toBeVisible();
   // The bar can re-render between the checks above and the measurement (seen right after the teacher login), leaving
   // `.top .in` empty for a moment: measure again until the bar is there; the assertions below run once, on that measurement.
@@ -49,6 +50,18 @@ async function fits(page: Page, where: string) {
   expect(m.brandCut, `${where}: the brand word "PReMTA" is cut`).toBe(false);
   expect(m.demo, `${where}: mockup-only demo element (I-41)`).toBe(false);
   expect(m.unlabelled, `${where}: form controls without a label`).toEqual([]);
+}
+
+/** #108: the brand is one direct-child link of the bar holding the logo, one bold name and the subtitle, so the
+ *  "brand is cut" checks never run on an empty selector; the subtitle shows only on wide screens. */
+async function brandIntact(page: Page, wide: boolean) {
+  const brand = page.locator('.top .in > a.brand');
+  await expect(brand).toHaveCount(1);
+  await expect(brand.locator('> svg.logo')).toHaveCount(1);
+  await expect(brand.locator('> b')).toHaveCount(1);
+  await expect(brand.locator('> .sub')).toHaveCount(1);
+  if (wide) await expect(brand.locator('> .sub')).toBeVisible();
+  else await expect(brand.locator('> .sub')).toBeHidden();
 }
 
 /** A menu button: Enter opens it (aria-expanded), Esc closes it and returns focus, an outside click closes it too. */
@@ -244,6 +257,7 @@ test.describe('1280px', () => {
 
 async function fits1280(page: Page) {
   await expect(page.locator('.brand .sub')).toBeVisible();
+  await brandIntact(page, true);
   await expect(page.locator('.top .acct-name')).toBeVisible();
   // as in fits(): the bar can re-render before the measurement (an empty `.acct` is display:none, a 0×0 box at the
   // corner), so measure again until every bar item has a box; the assertions below run once, on that measurement

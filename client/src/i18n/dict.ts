@@ -30,6 +30,7 @@ export const dict = {
   ...errors,
   ...wizard,
   brandSub: { ko: '오개념 발문 코칭 시뮬레이터', en: 'Misconception questioning simulator' },
+  brandHome: { ko: 'PReMTA 홈', en: 'PReMTA home' },
   uiAria: { ko: '화면 언어', en: 'Interface language' },
   themeDark: { ko: '다크 모드', en: 'Dark mode' },
   themeLight: { ko: '라이트 모드', en: 'Light mode' },

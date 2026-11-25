@@ -9,6 +9,8 @@ import { adminApi, teacherApi } from './apis.ts';
 type Me = z.infer<typeof S.Me>;
 const MeCtx = createContext<Me | null>(null);
 export const useMe = () => useContext(MeCtx)!;
+const HomePathCtx = createContext<string>('/');
+export const useHomePath = (): string => useContext(HomePathCtx);
 
 export const HOME = { teacher: '/practice', admin: '/admin/scenarios' } as const;
 export const LOGIN = { teacher: '/', admin: '/admin' } as const;
@@ -28,12 +30,12 @@ export function RequireRealm({ realm, children }: { realm: ClientRealm; children
   const me = useWho(realm);
   if (me === undefined) return null;
   if (me === null) return <Navigate to={LOGIN[realm]} replace />;
-  return <MeCtx.Provider value={me}>{children}</MeCtx.Provider>;
+  return <MeCtx.Provider value={me}><HomePathCtx.Provider value={HOME[realm]}>{children}</HomePathCtx.Provider></MeCtx.Provider>;
 }
 
 export function LoginGate({ realm, children }: { realm: ClientRealm; children: ReactNode }) {
   const me = useWho(realm);
   if (me === undefined) return null;
   if (me) return <Navigate to={HOME[realm]} replace />;
-  return <>{children}</>;
+  return <HomePathCtx.Provider value={LOGIN[realm]}>{children}</HomePathCtx.Provider>;
 }

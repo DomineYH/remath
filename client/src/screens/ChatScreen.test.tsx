@@ -7,7 +7,7 @@ import { ChatScreen } from './ChatScreen.tsx';
 
 const api = vi.hoisted(() => ({ getSession: vi.fn(), getCurrentSession: vi.fn(), startSession: vi.fn(), getPractice: vi.fn(), sendTurn: vi.fn(), endSession: vi.fn() }));
 vi.mock('../apis.ts', () => ({ teacherApi: api, adminApi: api }));
-vi.mock('../session.tsx', () => ({ useMe: () => ({ nickname: 'tester' }) }));
+vi.mock('../session.tsx', () => ({ useMe: () => ({ nickname: 'tester' }), useHomePath: () => '/practice' }));
 
 const AT = '2026-11-01T00:00:00.000Z';
 const scenario = { id: 'sc1', lang: 'en', name: 'Mina', description: 'd', problem: 'p', student_prefix: '🙂', mentor_prefix: '🧑‍🏫', classification: { leverage: [], object: [] } };
