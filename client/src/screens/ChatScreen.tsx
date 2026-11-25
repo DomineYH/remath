@@ -65,7 +65,12 @@ export function ChatScreen({ isAdminTest }: { isAdminTest: boolean }) {
     return () => { alive = false; };
   }, [api, isAdminTest, scenarioId, sid0, setParams]);
 
-  useEffect(() => { if (!busy && refocus.current) { refocus.current = false; inputRef.current?.focus(); } }, [busy]);
+  // 턴이 끝나면(busy 해제) 입력란에 포커스를 돌려준다. 종료·턴 한도로 계속 잠겨 있으면(disabled) 옮기지 않는다(#101).
+  useEffect(() => {
+    if (busy || !refocus.current) return;
+    refocus.current = false;
+    if (inputRef.current && !inputRef.current.disabled) inputRef.current.focus();
+  }, [busy]);
 
   const sid = detail?.session.id ?? '';
   const refetch = useCallback(async () => setDetail(await api.getSession(sid)), [api, sid]);
@@ -81,7 +86,7 @@ export function ChatScreen({ isAdminTest }: { isAdminTest: boolean }) {
   async function send(text: string) {
     if (!detail || busy) return;
     const lastSeq = detail.turns.at(-1)?.seq ?? 0;
-    setErr(null); setDraft(''); setBusy(true); setLive({ text });
+    setErr(null); setDraft(''); setBusy(true); setLive({ text }); refocus.current = true;
     let done: Extract<z.infer<typeof S.AdminSseEvent>, { type: 'done' }> | undefined, failed = false;
     try {
       for await (const ev of api.sendTurn(sid, { text })) {
@@ -147,7 +152,7 @@ export function ChatScreen({ isAdminTest }: { isAdminTest: boolean }) {
           <ChatHeader avatar={view.student_prefix} name={view.name} description={view.description} showCls={hasCls ? showCls : null} onShowCls={setShowCls}
             onEnd={end} endDisabled={ended || busy} endPrimary={atLimit} onBack={() => navigate(isAdminTest ? '/admin/scenarios' : '/practice')} />
           <ProblemBox problem={view.problem} />
-          <TurnLog size={detail.turns.length + (live ? 3 : 0) + (ended ? 1 : 0)}>
+          <TurnLog>
             <SystemLine>{t('sessStart')}</SystemLine>
             {detail.turns.map(x => msg(x.seq, x.speaker, x.text, x))}
             {live && <>

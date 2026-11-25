@@ -252,7 +252,7 @@ export const dict = {
   chipsAria: { ko: '빠른 질문', en: 'Quick questions' },
   logAria: { ko: '대화', en: 'Conversation' },
   mathProblem: { ko: '수학 문제', en: 'Math problem' },
-  me: { ko: '예비교사', en: 'Teacher' },
+  me: { ko: '나', en: 'You' },
   mentor: { ko: '멘토', en: 'Mentor' },
   sessStart: { ko: '세션 시작', en: 'Session started' },
   endCls: { ko: '세션 종료 · 레버리지 분석만 제공 (도달점·오개념 목록은 비공개)', en: 'Session ended · leverage analysis only (goal and misconception list stay hidden)' },

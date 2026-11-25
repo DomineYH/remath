@@ -134,6 +134,13 @@ test('B-2/B-3: create account → chat → goal → end → report; reload keeps
   await expect(input).toHaveValue('안녕, 네 이름이 뭐야?');
   await send.click();
   await expect(students).toHaveCount(2);
+  // #107: the teacher's own bubbles are named You (ko 나), not Teacher
+  const own = log.locator('.msg.me .nm');
+  await expect(own).toHaveText(['You']);
+  await page.getByRole('group', { name: 'Interface language' }).getByRole('button', { name: '한' }).click();
+  await expect(own).toHaveText(['나']);
+  await page.getByRole('group', { name: '화면 언어' }).getByRole('button', { name: 'EN' }).click();
+  await expect(own).toHaveText(['You']);
   const blocks = log.getByText('[CLASSIFICATION]');
   await expect(blocks.first()).toBeHidden();
   await page.getByLabel('Show [CLASSIFICATION] blocks').check();
@@ -206,8 +213,18 @@ test('B-2/B-3: create account → chat → goal → end → report; reload keeps
   const adminView = page.getByRole('dialog', { name: 'Haneul · 가브리엘' });
   await expect(adminView.locator('.tx .ln')).toHaveCount(18);
   await expect(adminView.locator('.tx .ln.teacher').first()).toContainText('[Other');
+  await expect(adminView.locator('.tx .ln.teacher .sp').first()).toHaveText(/^\d+\. Teacher \[/);   // #107: the admin transcript keeps Teacher
   expect(await adminView.getByRole('region', { name: 'Session analysis · question types' }).innerText()).toBe(shown);
   await page.keyboard.press('Escape');
+  await expect(adminView).toBeHidden();
+  // #107: in ko the admin transcript keeps 예비교사 (only the chat's own bubbles became 나)
+  await page.getByRole('group', { name: 'Interface language' }).getByRole('button', { name: '한' }).click();
+  await page.getByRole('button', { name: /^보기/ }).click();
+  const adminViewKo = page.getByRole('dialog');
+  await expect(adminViewKo.locator('.tx .ln.teacher .sp').first()).toHaveText(/^\d+\. 예비교사 \[/);
+  await page.keyboard.press('Escape');
+  await expect(adminViewKo).toBeHidden();
+  await page.getByRole('group', { name: '화면 언어' }).getByRole('button', { name: 'EN' }).click();
   const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Download CSV (1)' }).click()]);
   expect(download.suggestedFilename()).toMatch(/^premta_conversations_Haneul_gabriel_\d{8}\.csv$/);
   const file = readFileSync((await download.path())!);
