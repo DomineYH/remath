@@ -216,6 +216,15 @@ test('B-2/B-3: create account → chat → goal → end → report; reload keeps
   await expect(adminView.locator('.tx .ln.teacher .sp').first()).toHaveText(/^\d+\. Teacher \[/);   // #107: the admin transcript keeps Teacher
   expect(await adminView.getByRole('region', { name: 'Session analysis · question types' }).innerText()).toBe(shown);
   await page.keyboard.press('Escape');
+  await expect(adminView).toBeHidden();
+  // #107: in ko the admin transcript keeps 예비교사 (only the chat's own bubbles became 나)
+  await page.getByRole('group', { name: 'Interface language' }).getByRole('button', { name: '한' }).click();
+  await page.getByRole('button', { name: /^보기/ }).click();
+  const adminViewKo = page.getByRole('dialog');
+  await expect(adminViewKo.locator('.tx .ln.teacher .sp').first()).toHaveText(/^\d+\. 예비교사 \[/);
+  await page.keyboard.press('Escape');
+  await expect(adminViewKo).toBeHidden();
+  await page.getByRole('group', { name: '화면 언어' }).getByRole('button', { name: 'EN' }).click();
   const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Download CSV (1)' }).click()]);
   expect(download.suggestedFilename()).toMatch(/^remath_conversations_Haneul_gabriel_\d{8}\.csv$/);
   const file = readFileSync((await download.path())!);
