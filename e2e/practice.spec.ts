@@ -209,7 +209,7 @@ test('B-2/B-3: create account → chat → goal → end → report; reload keeps
   expect(await adminView.getByRole('region', { name: 'Session analysis · question types' }).innerText()).toBe(shown);
   await page.keyboard.press('Escape');
   const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Download CSV (1)' }).click()]);
-  expect(download.suggestedFilename()).toMatch(/^remath_conversations_Haneul_gabriel_\d{8}\.csv$/);
+  expect(download.suggestedFilename()).toMatch(/^premta_conversations_Haneul_gabriel_\d{8}\.csv$/);
   const file = readFileSync((await download.path())!);
   expect([...file.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
   const csvLines = file.subarray(3).toString('utf8').split('\r\n');

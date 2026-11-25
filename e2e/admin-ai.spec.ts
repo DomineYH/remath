@@ -63,7 +63,7 @@ test('scenario card "Chats CSV" downloads that scenario once it has a session', 
   await expect(page.getByRole('log').locator('.msg.student')).toHaveCount(1);
   await page.goto('/admin/scenarios');
   const [download] = await Promise.all([page.waitForEvent('download'), gabriel.getByRole('button', { name: 'Chats CSV (1)' }).click()]);
-  expect(download.suggestedFilename()).toMatch(/^remath_scenario_gabriel_\d{8}\.csv$/);
+  expect(download.suggestedFilename()).toMatch(/^premta_scenario_gabriel_\d{8}\.csv$/);
 });
 
 // #33: on a fresh state no key was ever registered, so the sharing bots name the bot that has no key yet (not "gone").
