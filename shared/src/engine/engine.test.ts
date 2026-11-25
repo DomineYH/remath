@@ -119,7 +119,8 @@ describe('greeting-only scanner (#100)', () => {
   type Seed = keyof typeof seeds;
   const mock = { provider: mockProvider, model: 'mock', effort: null };
   const bots: Bots = { student: mock, analysis: mock, mentor: mock };
-  const compiled = { student: '', analysis: '', mentor: '' };
+  // analysis 가 비어 있으면 runTurn 이 분석을 건너뛴다(pipeline.ts). 기준이 있는 시드에서 MOCK 분류가 실제로 돌게 채운다.
+  const compiled = { student: '', analysis: '<analysis system>', mentor: '' };
   const tr = (seed: Seed, lang: Lang) => seeds[seed].translations[lang] as Translation;
   const st0 = (t: Translation): SessionState => ({ mis: t.misconceptions.map(() => 0), counts: {}, goalReached: false, takeOverCount: 0 });
   /** MOCK 학생의 인사 대사: greet 지시를 받았을 때 고르는 대사. */
@@ -142,6 +143,7 @@ describe('greeting-only scanner (#100)', () => {
     if (expected) expect(directive, text).toEqual({ kind: 'greet', text: '' }); else expect(directive?.kind, text).not.toBe('greet');
     const m = await mockTurn(seed, lang, text);
     if (expected) expect(m.reply, text).toBe(greetReply(seed, lang, text)); else expect(m.reply, text).not.toBe(greetReply(seed, lang, text));
+    if (seeds[seed].classification.leverage.length) expect(m.leverage, `${text}: analysis ran`).toEqual(expect.any(String)); else expect(m.leverage, text).toBeNull();
     if (expected && m.leverage !== null) expect(m.leverage, text).toBe('Other');
     return directive;
   }
@@ -161,6 +163,7 @@ describe('greeting-only scanner (#100)', () => {
     [true, '안녕, 하준아!', 'Hi, Hajun!'],
     [true, '안녕! 오늘 기분은 어때?', 'Hi! How are you?'],
     [true, '안녕하세요, 노아야! 선생님이에요.', 'Hello Noah, I am your teacher.', 'noah'],
+    [true, '노아야, 잘 지냈어?', 'Noah, how are you?', 'noah'],
     [true, '안녕, 이름이 뭐야?', "Hi, what's your name?"],
     [true, '몇 학년이야?', 'What grade are you in?'],
     [true, '취미가 뭐야?', "What's your hobby?"],
@@ -183,6 +186,7 @@ describe('greeting-only scanner (#100)', () => {
     expect(isGreetingOnly('Hi, !', 'en', '')).toBe(true);
   });
   // 리뷰(4fca881): 구절 안의 공백이 둘 이상이거나 탭·줄바꿈이면 구절이 깨졌다. 공백 묶음은 한 칸으로 본다.
+  // 노아는 분류 기준이 있어 MOCK 분류(Other)까지 확인한다.
   const spaced: [boolean, string, string][] = [
     [true, '안녕! 오늘 기분은  어때?', 'Hi! How are  you?'],
     [true, '안녕!\t오늘 기분은\n어때?', 'Hi!\tHow are\nyou?'],
