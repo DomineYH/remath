@@ -139,6 +139,15 @@ test('keyboard and name: one named link per locale, Tab order with the focus rin
   await page.getByRole('group', { name: '화면 언어' }).getByRole('button', { name: 'EN' }).click();
   await expect(brand(page)).toHaveCount(1);
 
+  // label in name (WCAG 2.5.3): the visible brand text is PReMTA in both locales, and each accessible name contains it
+  for (const [lang, name] of [['EN', 'PReMTA home'], ['한', 'PReMTA 홈']] as const) {
+    await page.getByRole('banner').getByRole('group').getByRole('button', { name: lang }).click();
+    await expect(brand(page, name).locator('> b')).toHaveText('PReMTA', { useInnerText: true });
+    expect(name).toContain('PReMTA');
+  }
+  await page.getByRole('banner').getByRole('group').getByRole('button', { name: 'EN' }).click();
+  await expect(brand(page)).toHaveCount(1);
+
   // signed out: brand → 한
   await tabOrder(page, '/', page.getByRole('group', { name: 'Interface language' }).getByRole('button', { name: '한' }));
 
