@@ -35,9 +35,11 @@ export const SOCIAL_PHRASES: Record<Lang, string[]> = {
 const SEP = '[\\s.!?,…~]+';
 const END: Record<Lang, string> = { ko: '(?=[\\s.!?,…~]|$)', en: "(?![\\p{L}\\p{N}'])" };
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** 입력과 학생 이름을 같은 방식으로 맞춘다: 공백 묶음은 한 칸(구절 안의 겹공백·탭·줄바꿈), en 은 소문자·’→'. */
+const normalize = (s: string, lang: Lang) => { const t = s.replace(/\s+/g, ' ').trim(); return lang === 'en' ? t.toLowerCase().replace(/’/g, "'") : t; };
 export function isGreetingOnly(text: string, lang: Lang, name: string): boolean {
-  const t = lang === 'en' ? text.trim().toLowerCase().replace(/’/g, "'") : text.trim(), n = name.trim();
-  const vocative = n ? [escapeRe(lang === 'en' ? n.toLowerCase() : n) + (lang === 'ko' ? '(?:아|야|이)?' : '')] : [];
+  const t = normalize(text, lang), n = normalize(name, lang);
+  const vocative = n ? [escapeRe(n) + (lang === 'ko' ? '(?:아|야|이)?' : '')] : [];
   const re = new RegExp(`(${SEP})|(?:${[...SOCIAL_PHRASES[lang], ...vocative].join('|')})${END[lang]}`, 'uy');
   let social = false;
   while (re.lastIndex < t.length) {

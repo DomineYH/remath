@@ -182,6 +182,25 @@ describe('greeting-only scanner (#100)', () => {
     expect(isGreetingOnly('안녕, 아!', 'ko', '')).toBe(false);
     expect(isGreetingOnly('Hi, !', 'en', '')).toBe(true);
   });
+  // 리뷰(4fca881): 구절 안의 공백이 둘 이상이거나 탭·줄바꿈이면 구절이 깨졌다. 공백 묶음은 한 칸으로 본다.
+  const spaced: [boolean, string, string][] = [
+    [true, '안녕! 오늘 기분은  어때?', 'Hi! How are  you?'],
+    [true, '안녕!\t오늘 기분은\n어때?', 'Hi!\tHow are\nyou?'],
+    [false, '안녕!  누가 더  많이 먹었어?', 'Hi!  Who ate  more?'],
+  ];
+  for (const seed of ['hajun', 'noah'] as const) for (const [expected, ko, en] of spaced) for (const [lang, text] of [['ko', ko], ['en', en]] as const)
+    it(`${seed} · ${lang}: ${JSON.stringify(text)} → ${expected} (whitespace runs)`, async () => {
+      const d = await check(seed, lang, text, expected);
+      if (!expected) expect(d).toBeNull();
+    });
+  it('the name is normalized like the input (case, curly apostrophe, whitespace)', () => {
+    expect(isGreetingOnly('Hi, D’Angelo!', 'en', 'D’Angelo')).toBe(true);
+    expect(isGreetingOnly("hi, d'angelo!", 'en', 'D’Angelo')).toBe(true);
+    expect(isGreetingOnly('Hi, Mary  Jane!', 'en', 'Mary Jane')).toBe(true);
+    expect(isGreetingOnly('안녕, 하  준아!', 'ko', '하 준')).toBe(true);
+    const t = { ...hajun.translations.en, name: 'D’Angelo' };
+    expect(judgeTurn('Hi, D’Angelo!', 'en', null, t, { mis: t.misconceptions.map(() => 0), counts: {}, goalReached: false, takeOverCount: 0 })).toMatchObject({ directive: { kind: 'greet', text: '' } });
+  });
   it('"my name is" has no wildcard after it', () => {
     expect(isGreetingOnly('Hi, my name is Kim.', 'en', 'Hajun')).toBe(false);
   });
