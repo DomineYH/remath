@@ -2,7 +2,7 @@
 // 판정(카운터·트리거·도움 요청)은 하지 않는다 — 그건 engine.ts(서버). 여기는 "지시를 받아 대사를 고르는" 역할만.
 import { AdapterError, type CompleteRequest, type Lang, type MockContext, type Provider, type ReportInput, type StreamEvent } from '../adapter.ts';
 import { renderClassification } from '../classification.ts';
-import { isGreetingOnly, tally } from '../engine.ts';
+import { tally } from '../engine.ts';
 import { LEVERAGE, TRIGGER } from '../../leverage.ts';
 import { mockClassify, stdLeverage } from './classify.ts';
 
@@ -31,17 +31,16 @@ const rotation = (req: CompleteRequest, set: readonly string[]) => req.messages.
 
 function studentText(req: CompleteRequest, c: Extract<MockContext, { role: 'student' }>): string {
   const T = TXT[c.lang];
-  // greet 지시(#100)는 지시 문장이 대사가 아니므로 아래 인사 분기로 흘린다.
-  if (c.directive && c.directive.kind !== 'greet') return c.directive.text;
-  if (c.goalReached) return T.reached[rotation(req, T.reached) % 2];
-  // 인사 휴리스틱은 분류가 아니라 MOCK 학생이 "무슨 말을 할지" 고르는 데 쓴다(정규식은 engine.ts GREETING_RE, #100).
-  if (isGreetingOnly(c.teacherText, c.lang)) {
+  // greet 지시(#100)는 지시 문장이 대사가 아니라 인사 대사를 고르라는 뜻이다. 인사 턴 판정은 엔진(judgeTurn) 한 곳에서 하고 MOCK 학생은 그 지시를 따른다.
+  if (c.directive?.kind === 'greet') {
     const lines = c.lines.chars.split('\n').map(x => x.replace(/^- /, '').trim()).filter(Boolean);
     const like = (lines.find(x => /좋아|like|love/i.test(x)) ?? lines[0] ?? '').replace(/\.$/, '').replace(/좋아함$/, '좋아해요');
     return /이름|학년|안녕|반가|name|grade|\bhi\b|hello|nice to meet/i.test(c.teacherText) ? c.lines.greet.split(/(?<=[.!?…])\s+/).slice(0, 2).join(' ') : (c.lang === 'en' ? `Um… ${like}!` : `음… ${like}!`);
   }
+  if (c.directive) return c.directive.text;
+  if (c.goalReached) return T.reached[rotation(req, T.reached) % 2];
   // 목업: Eliciting/Extending 이면 elicit 회전, 그 외(elicit 이 비었을 때 포함) idk. 분류 기준이 없는 시나리오는 목업처럼 내장 규칙으로 근사한다.
-  const lev = c.leverage ?? stdLeverage(c.teacherText, c.lang);
+  const lev = c.leverage ?? stdLeverage(c.teacherText, c.lang, c.lines.name);
   if ((lev === LEVERAGE.eliciting || lev === LEVERAGE.extending) && c.lines.elicit.length) return c.lines.elicit[rotation(req, c.lines.elicit) % c.lines.elicit.length];
   return T.idk;
 }
@@ -62,7 +61,7 @@ export function mockText(req: CompleteRequest): string {
   const c = req.context; if (!c) throw new AdapterError('mock', 'no_context', 'MOCK_LLM requires req.context');
   switch (c.role) {
     case 'student': return studentText(req, c);
-    case 'analysis': return c.purpose === 'turn' ? renderClassification(mockClassify(c.teacherText, c.lang, c.criteria)) : reportText(c.lang, c.report);
+    case 'analysis': return c.purpose === 'turn' ? renderClassification(mockClassify(c.teacherText, c.lang, c.criteria, c.name)) : reportText(c.lang, c.report);
     case 'mentor': return mentorText(c);
   }
 }

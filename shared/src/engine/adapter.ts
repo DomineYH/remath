@@ -80,7 +80,7 @@ export interface Criteria { leverage: ClassificationRow[]; object: Classificatio
 export interface ReportInput { names: string[]; counts: Record<string, number>; verdict: 'dist' | 'none' | 'clean' | 'heavy' | 'mixed'; reached: boolean }
 
 export type MockContext =
-  | { role: 'student'; lang: Lang; teacherText: string; leverage: string | null; directive: TurnDirective | null; goalReached: boolean; lines: { greet: string; chars: string; elicit: string[] } }
-  | { role: 'analysis'; lang: Lang; purpose: 'turn'; teacherText: string; criteria: Criteria }
+  | { role: 'student'; lang: Lang; teacherText: string; leverage: string | null; directive: TurnDirective | null; goalReached: boolean; lines: { greet: string; chars: string; elicit: string[]; name: string } }
+  | { role: 'analysis'; lang: Lang; purpose: 'turn'; teacherText: string; criteria: Criteria; name: string }
   | { role: 'analysis'; lang: Lang; purpose: 'report'; report: ReportInput }
   | { role: 'mentor'; lang: Lang; trigger: Trigger; lines: { t1: string; t2: string; t3: string } };

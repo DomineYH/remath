@@ -6,7 +6,7 @@ import type { Classification } from './classification.ts';
 import { LEVERAGE, TRIGGER } from '../leverage.ts';
 
 export interface Misconception { kw: string; h: string; c: string }
-export interface StudentLines { misconceptions: Misconception[]; confused: string[]; aha: string }
+export interface StudentLines { name: string; misconceptions: Misconception[]; confused: string[]; aha: string }
 /** sessions.progress.mis · counts · goal_reached + turns 집계(trigger=1 횟수). 회전 인덱스는 저장하지 않는다. */
 export interface SessionState { mis: number[]; counts: Record<string, number>; goalReached: boolean; takeOverCount: number }
 
@@ -15,15 +15,37 @@ export const END_SESSION_RE = /^end session$/i;
 export const HELP_RE: Record<Lang, RegExp> = { ko: /도와|힌트|어떻게 물어|어떤 질문|뭐라고 물|질문 추천/, en: /\bhelp\b|\bhint\b|what should i ask|which question|suggest a question/i };
 /** 도움 요청 턴의 학생 고정 문구: LLM 을 부르지 않는다(실 LLM·MOCK 공통). */
 export const HELP_LINE: Record<Lang, string> = { ko: '음… 저 아직 생각 중이에요.', en: "Um… I'm still thinking." };
-/** 인사만 있는 턴(#100): 절(. ! ? , … ~ 줄바꿈으로 나눔)마다 인사·이름·학년·취미·교사 자기소개 어휘가 있고 문제 어휘가 없을 때. 목업 detectStd/detectEn 의 greet 패턴(서버 상수, MOCK 도 이것을 쓴다). */
-export const GREETING_RE: Record<Lang, { yes: RegExp; no: RegExp }> = {
-  ko: { yes: /안녕|반가|이름이 뭐|몇 학년|좋아하|취미|키워|강아지|고양이|거북이|푸들|선생님이에요|선생님이야|선생님입니다|제 이름|내 이름/, no: /문제|풀|조각|분수/ },
-  en: { yes: /\b(hi|hello|hey|nice to meet|your name|what grade|favorite|pets?|dog|cat|turtle|poodle|soccer|tennis|baseball|i'm your teacher|i am your teacher|my name is|call me)\b/, no: /problem|solve|piece|fraction|cup|pizza|ribbon|candy/ },
+/**
+ * 인사만 있는 턴(#100): 사교 구절과 구분자만으로 글 끝까지 소비될 때(사교 구절이 하나 이상). 모르는 낱말·숫자·기호가 나오면 false.
+ * 구절은 끝이 정해진 완결 구절만 둔다: 꼬리 와일드카드("my name is …")나 낱조각("좋아하", "favorite")은 실제 질문을 삼킨다.
+ * 호칭은 학생 이름(언어판 name) 그대로, ko 는 아/야/이 를 붙일 수 있다. 이름이 비면 호칭 패턴은 없다. 서버 상수, MOCK 도 이것을 쓴다.
+ */
+export const SOCIAL_PHRASES: Record<Lang, string[]> = {
+  ko: ['안녕하세요', '안녕', '반가워요', '반가워', '반갑습니다',
+    '(?:오늘 )?기분(?:은|이)? 어때(?:요)?', '잘 지냈(?:어|어요|니)',
+    '선생님이에요', '선생님이야', '선생님입니다',
+    '(?:네 |너 )?이름이 뭐(?:야|니|예요|에요)', '몇 학년(?:이야|이니|이에요)', '취미가 뭐(?:야|니|예요|에요)',
+    '좋아하는 (?:게|거) 뭐(?:야|니|예요|에요)', '(?:강아지|고양이|거북이|반려동물) 키워(?:요)?'],
+  en: ['hi', 'hello', 'hey', 'nice to meet you(?: too)?',
+    'how are you(?: doing)?(?: today)?', "how's it going",
+    "i'm your teacher", 'i am your teacher',
+    "what(?:'s| is) your name", 'what grade are you in', "what(?:'s| is) your hobby", 'what are your hobbies',
+    "what(?:'s| is) your favorite (?:color|food|animal|sport)", 'do you have (?:a pet|pets|a dog|a cat|a turtle)', 'do you like (?:soccer|tennis|baseball)'],
 };
-export function isGreetingOnly(text: string, lang: Lang): boolean {
-  const t = lang === 'en' ? text.trim().toLowerCase() : text.trim(), re = GREETING_RE[lang];
-  const clauses = t.split(/[.!?,…~\n]+/).map(c => c.trim()).filter(Boolean);
-  return clauses.length > 0 && clauses.every(c => re.yes.test(c) && !re.no.test(c));
+const SEP = '[\\s.!?,…~]+';
+const END: Record<Lang, string> = { ko: '(?=[\\s.!?,…~]|$)', en: "(?![\\p{L}\\p{N}'])" };
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export function isGreetingOnly(text: string, lang: Lang, name: string): boolean {
+  const t = lang === 'en' ? text.trim().toLowerCase().replace(/’/g, "'") : text.trim(), n = name.trim();
+  const vocative = n ? [escapeRe(lang === 'en' ? n.toLowerCase() : n) + (lang === 'ko' ? '(?:아|야|이)?' : '')] : [];
+  const re = new RegExp(`(${SEP})|(?:${[...SOCIAL_PHRASES[lang], ...vocative].join('|')})${END[lang]}`, 'uy');
+  let social = false;
+  while (re.lastIndex < t.length) {
+    const m = re.exec(t);
+    if (!m) return false;
+    if (!m[1]) social = true;
+  }
+  return social;
 }
 
 /** 목업 kwTest: 정규식으로 해석되지 않으면 부분 문자열. */
@@ -50,7 +72,7 @@ export function judgeTurn(text: string, lang: Lang, cls: Classification | null, 
   }
   const idx = lines.misconceptions.findIndex((mi, i) => state.mis[i] < 2 && mi.kw && kwTest(mi.kw, t));
   // 교정 키워드가 없고 인사만 있으면 greet 지시(#100): 정적 템플릿 규칙만으로는 모델이 인사 턴에 결론을 꺼낸다.
-  if (idx < 0) return { kind: 'turn', directive: isGreetingOnly(t, lang) ? { kind: 'greet', text: '' } : null, trigger: null, state };
+  if (idx < 0) return { kind: 'turn', directive: isGreetingOnly(t, lang, lines.name) ? { kind: 'greet', text: '' } : null, trigger: null, state };
   const n = ++state.mis[idx], mi = lines.misconceptions[idx];
   if (n === 1) return { kind: 'turn', directive: { kind: 'hesitation', text: mi.h }, trigger: null, state };
   // 아하 턴 지시는 aha 한 줄(#68): c 를 겹쳐 넣으면 학생이 두 문장을 나눠 잇는다. aha 가 비면 마지막 c 가 대신한다.
