@@ -50,7 +50,7 @@ export async function* runTurn(p: { bots: Bots; compiled: Compiled; criteria: Cr
   // 1) 분석: 기준이 없으면 호출 없음. 파싱 실패 시 1회 재요청, 그래도 실패면 Other(PRD 8절). 재요청은 어댑터가 아니라 여기.
   let cls: Classification | null = null;
   if (criteria && compiled.analysis) {
-    const req = { system: compiled.analysis, messages: analysisTurnMessage(lang, lastStudent, text), ...call(bots.analysis), context: { role: 'analysis' as const, lang, purpose: 'turn' as const, teacherText: text, criteria } };
+    const req = { system: compiled.analysis, messages: analysisTurnMessage(lang, lastStudent, text), ...call(bots.analysis), context: { role: 'analysis' as const, lang, purpose: 'turn' as const, teacherText: text, criteria, name: tr.name } };
     for (let i = 0; i < 2 && !cls; i++) cls = parseClassification((await collect(bots.analysis.provider.complete(req))).text, criteria);
     cls ??= { leverage: 'Other', object: criteria.object.length ? 'Other' : null };
   }
@@ -68,7 +68,7 @@ export async function* runTurn(p: { bots: Bots; compiled: Compiled; criteria: Cr
   if (j.kind === 'help') yield { type: 'student', text: HELP_LINE[lang], final: true };
   else {
     const req = { system: compiled.student + runtimeBlock(j.state, j.directive, lang), messages: studentMessages(history, text), ...call(bots.student),
-      context: { role: 'student' as const, lang, teacherText: text, leverage: cls?.leverage ?? null, directive: j.directive, goalReached: p.state.goalReached, lines: { greet: tr.greet, chars: tr.chars, elicit: tr.elicit } } };
+      context: { role: 'student' as const, lang, teacherText: text, leverage: cls?.leverage ?? null, directive: j.directive, goalReached: p.state.goalReached, lines: { greet: tr.greet, chars: tr.chars, elicit: tr.elicit, name: tr.name } } };
     yield* speak('student', bots.student, bots.student.provider.complete(req));
   }
   // 3) 멘토: 트리거 3종 모두 호출(티켓 16).
